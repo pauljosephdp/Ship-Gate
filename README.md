@@ -139,8 +139,11 @@ assets are `immutable`; an unknown path answers 404 with the site's 404 page;
   `PUBLIC_` and never hard-coded; every event is tagged with `__DEPLOY_ENV__`.
 - **Every tag goes through Cloudflare Zaraz, GTM included.** No tag loads
   directly: GTM (loader URLs and inline `GTM-XXXX` container ids), Google
-  Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity, HubSpot tracking
-  and HubSpot form embed scripts (`js-*.hsforms.net`) are blocked.
+  Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot
+  tracking (`hs-scripts`, `hs-analytics`) are blocked. HubSpot form embeds
+  (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until
+  HubSpot's forms API is available. They render their own form, so list only
+  Turnstile forms in `formPages`.
 - **Every `<form>` has Turnstile.** A non-public form opts out with
   `<!-- turnstile-exempt: reason -->`.
 - **No committed `.env` or `.dev.vars` files.** `.example` files are fine.

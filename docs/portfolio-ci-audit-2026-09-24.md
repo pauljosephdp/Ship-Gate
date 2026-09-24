@@ -22,8 +22,8 @@ scripts and every script those call. Anything still unverified is marked
 | Playway (`site/`) | 7 gates in `build.yml` (`gates`, `lighthouse`) | astro check, generic half of the structure scan, Lighthouse | none; its `lighthouserc.cjs` becomes the standard |
 | Qualified Deals | `ci.yml` (`verify`, `accessibility`) | astro check, missing/duplicate/length metadata, axe WCAG 2.2 AA, 320px and 200% reflow | `posthog-js`; axe moves from production to the PR build |
 | Frame to Funnel | Lighthouse only (daily cron in practice) | Lighthouse, build, tests | auto-merge to `main`; episode sync pushes to `main`; Cloudflare tokens; public Lighthouse storage; `posthog-js`; inline GTM |
-| Cocoon | none (gates run inside Workers Builds `ci:build`) | astro check, the generic halves of `verify:build` | `ci:build` ends in a remote D1 migration; no Node pin; `posthog-js`; inline GTM; HubSpot embed |
-| LowLightKing | none (20 local scripts) | astro check, CSP, redirects, overflow, placeholder copy, generic `verify-deploy` checks, Lighthouse | `posthog-js`; HubSpot embed; hard-coded Chromium path |
+| Cocoon | none (gates run inside Workers Builds `ci:build`) | astro check, the generic halves of `verify:build` | `ci:build` ends in a remote D1 migration; no Node pin; `posthog-js`; inline GTM |
+| LowLightKing | none (20 local scripts) | astro check, CSP, redirects, overflow, placeholder copy, generic `verify-deploy` checks, Lighthouse | `posthog-js`; hard-coded Chromium path |
 | FullFrameGear, Gallivant, Portus | README only | — | none; adopt in the first PR |
 
 Every site builds with Astro 7.3.3 and `output: 'static'`, so Ship Gate's
@@ -147,8 +147,9 @@ this fails on runner noise; see the README.
   a dashboard change for Paul.
 - **Node:** pin it at 22.18.0 or later. The check scripts import `.ts` files
   directly, which needs Node's type stripping.
-- **Exemptions:** adopt `posthog-js`, inline GTM `GTM-M7WZHXT7` and the HubSpot
-  form embed under dated exemptions.
+- **Exemptions:** adopt `posthog-js` and inline GTM `GTM-M7WZHXT7` under dated
+  exemptions. The HubSpot form embed is allowed; leave its page out of
+  `formPages`, which is for Turnstile forms.
 
 ### LowLightKing
 
@@ -158,8 +159,9 @@ this fails on runner noise; see the README.
   `CHROME_PATH`.
 - **`verify-deploy.mjs`:** keep only the site-specific half (Markdown twins,
   HubSpot frame attributes).
-- **Exemptions:** adopt `posthog-js` and the HubSpot embed under dated
-  exemptions.
+- **Exemptions:** adopt `posthog-js` under a dated exemption. The HubSpot form
+  embed is allowed; leave `/contact/` out of `formPages`, which is for Turnstile
+  forms.
 - **CSP:** the policy is Report-Only. Ship Gate still fails on any violation, so
   switching to enforcing stays safe.
 

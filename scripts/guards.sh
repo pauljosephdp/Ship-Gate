@@ -8,6 +8,9 @@ err() { echo "::error::$1"; fail=1; }
 scan() { local pat=$1; shift; local paths=(); for p in "$@"; do [ -e "$p" ] && paths+=("$p"); done
   [ ${#paths[@]} -eq 0 ] && return 1; grep -rInE "$pat" "${paths[@]}"; }
 DIRS="src public"
+# Runs from the site directory (the action's working-directory). Repo-wide files
+# (workflows, Dependabot/Renovate config) are read from the repository root.
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 # 1. PostHog: server-side only, EU Cloud, key never public.
 #    Direct PostHog use (SDK, host, key) is allowed only in server paths; everything else calls a wrapper there.
@@ -38,7 +41,7 @@ while IFS= read -r f; do
 done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
 
 # 2. No third-party tags loaded directly. All tags, GTM included, go through Zaraz. No sGTM in this stack.
-BLOCKED='googletagmanager\.com/(gtm|gtag)|google-analytics\.com|connect\.facebook\.net|static\.hotjar\.com|snap\.licdn\.com|analytics\.tiktok\.com'
+BLOCKED='googletagmanager\.com/(gtm|gtag)|google-analytics\.com|connect\.facebook\.net|static\.hotjar\.com|snap\.licdn\.com|analytics\.tiktok\.com|clarity\.ms/tag|www\.clarity\.ms|js\.hs-scripts\.com|js\.hs-analytics\.net'
 scan "$BLOCKED" $DIRS && err "Third-party tag loaded directly. Route it through Zaraz (GTM runs as a Zaraz tool)."
 
 # 3. Every form has Turnstile (opt out non-public forms with: turnstile-exempt: reason).
@@ -55,8 +58,52 @@ for w in wrangler.toml wrangler.json wrangler.jsonc; do
   [ -f "$w" ] && grep -q 'pages_build_output_dir' "$w" && err "$w is Pages config; the standard is Workers."
 done
 
-# 6. Node version pinned.
-[ -f .nvmrc ] || err ".nvmrc missing — pin the Node version."
+# 6. Node version pinned, at or above Astro 7's floor (22.12.0).
+NODE_FILE=""
+for f in .nvmrc .node-version; do [ -f "$f" ] && { NODE_FILE=$f; break; }; done
+if [ -z "$NODE_FILE" ]; then
+  err "No .nvmrc or .node-version — pin the Node version (Astro 7 needs 22.12.0 or later)."
+else
+  v="$(tr -d ' \r\n' < "$NODE_FILE")"; v="${v#v}"
+  if [[ "$v" =~ ^([0-9]+)(\.([0-9]+))?(\.([0-9]+))?$ ]]; then
+    maj=${BASH_REMATCH[1]}; min=${BASH_REMATCH[3]:-}
+    if [ "$maj" -lt 22 ] || { [ "$maj" -eq 22 ] && [ -n "$min" ] && [ "$min" -lt 12 ]; }; then
+      err "$NODE_FILE pins Node $v, below Astro 7's floor of 22.12.0."
+    elif [ "$maj" -eq 22 ] && [ -z "$min" ]; then
+      echo "::warning::$NODE_FILE pins Node 22 without a minor version. Pin 22.12.0 or later exactly, so CI and Workers Builds agree."
+    fi
+  else
+    echo "::warning::$NODE_FILE holds \"$v\", not a version number. Pin an exact version so CI and Workers Builds agree."
+  fi
+fi
+
+# 7. Workflows: nothing bypasses the gate, deploys, or publishes reports.
+for wf in "$ROOT"/.github/workflows/*.yml "$ROOT"/.github/workflows/*.yaml; do
+  [ -f "$wf" ] || continue
+  name="${wf#"$ROOT"/}"
+  # Pushing to main skips the PR and its required checks. No exemption: open a PR instead.
+  grep -qE 'git push[^#]*(HEAD:main|HEAD:refs/heads/main|origin main([^-A-Za-z0-9_/]|$))' "$wf" \
+    && err "$name pushes to main directly, bypassing the PR gate. Have it open a pull request instead."
+  # Cloudflare Workers Builds is the only deployer; no Cloudflare credentials belong in GitHub.
+  if grep -qE 'CLOUDFLARE_API_TOKEN|cloudflare/wrangler-action|wrangler(@[0-9.]+)?[[:space:]]+(deploy|publish|secret|pages|r2|kv|d1)' "$wf"; then
+    reason="$(grep -oE 'ship-gate-allow-cloudflare:[[:space:]]*.{10,}' "$wf" | head -1)"
+    if [ -n "$reason" ]; then
+      echo "::warning::$name uses Cloudflare credentials under a written exemption — ${reason#ship-gate-allow-cloudflare:}"
+    else
+      err "$name uses a Cloudflare API token or wrangler write command. Workers Builds is the only deployer. If this is unavoidable, add a comment: # ship-gate-allow-cloudflare: <reason>"
+    fi
+  fi
+done
+# Lighthouse reports stay private: temporary public storage publishes them at a public URL.
+while IFS= read -r f; do
+  err "${f#"$ROOT"/} uploads Lighthouse reports to public storage. Use the filesystem target."
+done < <(grep -rlE 'temporaryPublicStorage:[[:space:]]*true|temporary-public-storage' \
+  "$ROOT/.github" "$ROOT"/lighthouserc* "$ROOT"/.lighthouserc* lighthouserc* .lighthouserc* 2>/dev/null | sort -u)
+
+# 8. One dependency bot. Both open duplicate PRs for every update.
+if [ -f "$ROOT/.github/dependabot.yml" ] && ls "$ROOT"/renovate.json* "$ROOT"/.renovaterc* "$ROOT"/.github/renovate.json* >/dev/null 2>&1; then
+  echo "::warning::Both Dependabot and Renovate are configured — every update arrives twice. Keep one (Ship Gate's templates use Dependabot)."
+fi
 
 [ "$fail" -eq 0 ] && echo "All stack guards passed."
 exit "$fail"

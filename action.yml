@@ -27,7 +27,7 @@ runs:
         echo "::error::No .nvmrc or .node-version in ${{ inputs.working-directory }} — pin Node 22.12.0 or later."
         exit 1
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v7
       with:
         node-version-file: ${{ steps.site.outputs.node-version-file }}
         cache: npm

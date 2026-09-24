@@ -1,5 +1,6 @@
-# Ship Gate self-test. Keep this job named "self-test": it is the required check on main.
-name: self-test
+# Every change to Ship Gate must prove the guards and config rules still bite
+# before any site adopts the new version.
+name: Self-test
 
 on:
   pull_request:
@@ -7,10 +8,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-
-concurrency:
-  group: self-test-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -22,10 +19,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Guards and config rules fire on bad input, pass on good
+      - name: ShellCheck
+        run: shellcheck -S error scripts/*.sh
+      - name: Guards and config rules
         run: bash scripts/self-test.sh

@@ -5,3 +5,12 @@ updates:
     directories: ["/", "/post-deploy", "/.github/workflows"]
     schedule:
       interval: monthly
+  # Ship Gate's own test tooling (Playwright, axe, Lighthouse CI) and the fixture site.
+  # A bump here is a Ship Gate release: the fixture jobs prove it before merge.
+  - package-ecosystem: npm
+    directories: ["/tools", "/test/fixture-site"]
+    schedule:
+      interval: monthly
+    groups:
+      tooling:
+        patterns: ["*"]

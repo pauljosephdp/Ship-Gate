@@ -15,8 +15,10 @@ and each site's gap to adopting it, is in
 ## What lives where
 
 **Here, identical for every site:** stack guards, the contract check, the
-client-bundle PostHog scan, the Playwright + axe smoke test, Lighthouse
-standards, the test tooling and its versions, and the post-deploy check.
+client-bundle PostHog scan, the structure and placeholder scans, the Playwright
+suite (axe, reflow, CSP, redirects and headers), Lighthouse standards, the
+static server, the test tooling and its versions (`tools/package-lock.json`),
+and the post-deploy check.
 
 **In each site repo, small and site-specific:**
 
@@ -32,14 +34,28 @@ Templates for all five are in `templates/caller/`.
 
 ## The gate
 
-`verify` runs, in order: stack guards → contract check → `npm ci` →
-`astro check` → lint (if the site has a `lint` script) → site checks before the
-build → build → client-bundle PostHog scan → site checks after the build →
-site browser checks → Playwright + axe (desktop and mobile) → Lighthouse CI
-(mobile).
+`verify` runs, in order:
 
-Every site check runs even after one fails, so a PR shows all its failures at
-once. Reports upload as a build artifact for 14 days, never to public storage.
+1. Contract and config check, then stack guards
+2. `npm ci`, `astro check`, lint (if the site has `lint`), unit tests (if it has `test`)
+3. Site checks before the build, then the build
+4. On the built output: client-bundle PostHog scan, structure scan, placeholder
+   scan, site checks after the build
+5. Against the served build: site browser checks, then the Playwright suite
+   (smoke + axe on desktop 1440 and Pixel 7, reflow, CSP, edge files)
+6. Lighthouse CI (mobile)
+
+Every check runs even after another fails, so a PR shows all its failures at
+once; checks that need the build skip when the build fails. A summary table at
+the end names each check's result, and the job fails if any check failed.
+Reports upload as a build artifact for 14 days, never to public storage.
+
+The built site is served by `scripts/serve-static.mjs`, which behaves like
+Cloudflare Workers static assets: it applies `_redirects` and `_headers`, hides
+`.assetsignore` files, and redirects `/about` to `/about/` as Workers does. So
+CSP, security headers and redirects are tested on the PR, not discovered in
+production. Nothing in the gate runs `wrangler`: some site configs run a remote
+migration whenever wrangler starts.
 
 ### Lighthouse standard
 
@@ -51,10 +67,10 @@ would have failed a hard 0.90 floor on pages that are fine.
 
 | Audit | Standard | Enforcement |
 |---|---|---|
-| Accessibility score | ≥ 0.95 | fail |
+| Accessibility score | 1.0 | fail |
 | Best Practices score | ≥ 0.90 | fail |
 | Cumulative Layout Shift | ≤ 0.05 | fail |
-| `document-title`, `meta-description`, `http-status-code`, `link-text`, `crawlable-anchors`, `hreflang`, `canonical` | pass | fail |
+| `document-title`, `meta-description`, `http-status-code`, `link-text`, `crawlable-anchors`, `hreflang` | pass | fail |
 | Performance score | ≥ 0.90 | warn |
 | Largest Contentful Paint | ≤ 4000 ms | warn |
 | Total Blocking Time | ≤ 300 ms | warn |
@@ -62,20 +78,59 @@ would have failed a hard 0.90 floor on pages that are fine.
 The SEO category score is not asserted. Lighthouse fails `robots-txt` on the
 Content-Signal directive (a deliberate `ai-train=no`) and `is-crawlable` on
 deliberate noindex pages, so the category would fail correct sites. The SEO
-audits that matter are asserted one by one instead.
+audits that matter are asserted one by one instead. `canonical` is not asserted
+either: served from localhost, every canonical points at another origin. The
+structure scan checks canonicals against `siteUrl` instead.
+
+Accessibility is 1.0 because axe already fails any WCAG 2.2 AA violation, and
+every measured Playway page scores 100. A site below it loosens it with a reason
+and a date, like any other threshold.
 
 Third-party code is blocked during measurement (PostHog, HubSpot, Clarity,
 Google tags, Zaraz, Turnstile), so a vendor's release never moves a site's
-score. `"lighthouseUrls": "all"` tests every page the build emits, one run each,
+score. `"lighthouseUrls": "all"` tests every indexable page the build emits
+(not 404, noindex, meta-refresh stubs or verification files), one run each,
 so a new page is gated the day it ships. A list of paths runs three times each
 and takes the median.
 
-### Accessibility and layout
+### Browser checks
 
-axe runs WCAG 2.2 AA (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`)
-and fails on any violation. Every listed page must also reflow at 320px without
-horizontal scroll (WCAG 1.4.10). A wide table scrolling inside its own
-`overflow-x` container passes; it does not widen the document.
+On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page):
+
+- **Smoke:** 200, one `h1`, a title and one meta description, no JS errors, no
+  browser calls to PostHog.
+- **axe, WCAG 2.2 AA** (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`),
+  desktop and mobile, after scrolling the page and letting fade-in animations
+  finish, so a card mid-fade is not scanned.
+- **Reflow:** no horizontal scroll at 320, 360 and 390px and at 200% zoom
+  (1280px at 2x), WCAG 1.4.10 and 1.4.4. Content inside its own `overflow-x`
+  scroller or clipper passes; the failure names the elements past the edge.
+- **CSP:** a page that sends a Content-Security-Policy (enforced or Report-Only)
+  must load with zero violations.
+
+Other origins are blocked in the browser, so a vendor outage never fails a PR.
+CSP still reports a disallowed URL before any request is made.
+
+Once per run, the **edge** checks: every static `_redirects` rule answers with
+its status and `Location`; every on-site destination answers 200 (no chains);
+the home page sends `securityHeaders` (default `X-Content-Type-Options`,
+`Referrer-Policy`, and `X-Frame-Options` or CSP `frame-ancestors`); `/_astro/`
+assets are `immutable`; an unknown path answers 404 with the site's 404 page;
+`.assetsignore` files are not served.
+
+### Build-output scans
+
+- **Structure** (every indexable page): exactly one `h1`; no skipped heading
+  levels; `target="_blank"` carries `rel="noopener"`; a title (at most 75
+  characters, or the site's `structure` band) and meta description, each unique
+  across the site; a canonical, when present, on `siteUrl`. Every file: no
+  unrendered `{{token}}`. `_headers` and `_redirects` parse, with no
+  merge-conflict markers. Every on-site link in `llms.txt` exists. Zero pages
+  scanned is a failure.
+- **Placeholder copy** (every indexable page): no `[Client name]`-style
+  brackets, `TODO:`, `TBD`, `FIXME` or lorem ipsum in visible text. Citations
+  like `[1]` and labels like `[PDF]` pass; `copyAllowlist` takes exact strings.
+- **Client bundle:** no PostHog code or key in anything the browser downloads.
 
 ### Guards
 
@@ -83,9 +138,9 @@ horizontal scroll (WCAG 1.4.10). A wide table scrolling inside its own
   `src/pages/api`, `src/actions` or `src/middleware`; EU host; the key is never
   `PUBLIC_` and never hard-coded; every event is tagged with `__DEPLOY_ENV__`.
 - **Every tag goes through Cloudflare Zaraz, GTM included.** No tag loads
-  directly: GTM, Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft
-  Clarity and HubSpot tracking code are blocked. HubSpot form embeds are
-  forms, not tags, and are allowed.
+  directly: GTM (loader URLs and inline `GTM-XXXX` container ids), Google
+  Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity, HubSpot tracking
+  and HubSpot form embed scripts (`js-*.hsforms.net`) are blocked.
 - **Every `<form>` has Turnstile.** A non-public form opts out with
   `<!-- turnstile-exempt: reason -->`.
 - **No committed `.env` or `.dev.vars` files.** `.example` files are fine.
@@ -97,16 +152,39 @@ horizontal scroll (WCAG 1.4.10). A wide table scrolling inside its own
   checks. There is no exemption; a bot opens a PR like anyone else.
 - **No Cloudflare credentials in GitHub.** Workers Builds is the only deployer,
   so no workflow may use `CLOUDFLARE_API_TOKEN`, `wrangler-action`, or a
-  `wrangler` write command. If one is genuinely unavoidable, the workflow
-  carries a comment `# ship-gate-allow-cloudflare: <reason>`, and every run
-  prints that reason as a warning.
+  `wrangler` write command. If one is unavoidable for now, it takes a dated
+  guard exemption (below).
 - **Lighthouse reports stay private.** Temporary public storage fails.
 - **One dependency bot.** Dependabot and Renovate together warn: every update
   would arrive twice.
 
-The contract check also refuses any `build` script or site check that writes to
-production (`wrangler deploy`, `wrangler secret`, `--remote`, remote
-migrations). CI builds every PR; a merge gate must be read-only.
+The contract check also refuses any `build`, `check`, `lint` script or site
+check that writes to production: `wrangler deploy`/`secret`/`versions deploy`,
+R2 or KV writes, `--remote`, remote migrations, `git push`, IndexNow
+submissions. It follows `npm run` chains and reads the Node files a script
+starts, so `"verify": "npm run deploy"` is caught too. CI builds every PR; a
+merge gate must be read-only.
+
+### Guard exemptions
+
+A site that breaks a guard today can adopt the gate now and fix it on a
+deadline:
+
+```json
+"guardExemptions": [
+  { "guard": "posthog-client", "reason": "Moving analytics server-side in the next PR",
+    "restoreBy": "2026-11-30" }
+]
+```
+
+The guard then warns on every run instead of failing, until `restoreBy`, when
+the build fails again. Guards: `posthog-client` (SDK, snippet, direct use
+outside server paths, client bundle, browser calls), `posthog-public-var`,
+`posthog-us-host`, `posthog-env-tag`, `direct-tags`, `turnstile`,
+`pages-config`, `node-pin`, `cloudflare-in-workflows`, `public-lighthouse`.
+
+Never exemptible: a hard-coded PostHog key, a committed env file, and a
+workflow pushing to `main`.
 
 ## Site configuration
 
@@ -120,11 +198,17 @@ migrations). CI builds every PR; a merge gate must be read-only.
 | `smokePaths` | `/`, `/robots.txt`, `/sitemap-index.xml` | Checked on production after deploy |
 | `server` | `static` | `static` serves the built files (handles `dist/client` from the Cloudflare adapter); `preview` runs `npm run preview` |
 | `distDir` | `dist` | The build output folder |
-| `lighthouseUrls` | same as `pages` | A list of paths, or `"all"` for every page the build emits |
+| `lighthouseUrls` | same as `pages` | A list of paths, or `"all"` for every indexable page the build emits |
+| `e2ePages` | same as `pages` | Pages for smoke, axe, reflow and CSP; a list or `"all"` |
 | `lighthouseBlockedUrls` | `[]` | Extra URL patterns to block during Lighthouse, e.g. `"*/relay/*"` |
-| `checks.preBuild` | `[]` | npm script names to run before the build, e.g. `"test"` |
+| `structure` | `{ "titleMax": 75 }` | Title and description bands: `titleMin`, `titleMax` (≤ 75), `descMin`, `descMax` |
+| `copyAllowlist` | `[]` | Exact strings the placeholder scan allows, e.g. `"[Your Name]"` |
+| `securityHeaders` | see Browser checks | Headers the home page must send; add to the list, never remove |
+| `reflowWidths` | `[320, 360, 390]` | Narrow widths for the reflow check; must include 320 |
+| `checks.preBuild` | `[]` | npm script names to run before the build (`test` already runs if present) |
 | `checks.postBuild` | `[]` | npm script names to run against the built output |
-| `checks.browser` | `[]` | npm script names needing Chromium; they use the site's own Playwright |
+| `checks.browser` | `[]` | npm script names run against the served build; they get `SHIP_GATE_BASE_URL` and `BASE_URL`, and use the site's own Playwright |
+| `guardExemptions` | `[]` | See Guard exemptions |
 | `python` | none | `{ "version": "3.11", "packages": ["fonttools"] }` for Python checks |
 | `turnstileEnv` | `PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Env names that receive Cloudflare's always-pass test keys |
 | `thresholdOverrides` | `[]` | See below |
@@ -167,6 +251,18 @@ The v1 form `{ "category": "performance", ... }` is still accepted.
    require the `self-test` check, block force pushes and deletions.
 3. **Publish v1.1.0.** Releases → Draft a new release → tag `v1.1.0` on `main`.
    Site templates pin this tag. v1.0.0 was never tagged or adopted.
+
+## What stays in the site repo
+
+Checks about one brand or one site's content stay in the site repo and run
+through `checks`: brand-token contrast, font glyph coverage, design-drift
+scans, copy canon, price wording, voice lint, image budgets, motion and
+navigation scripts. `docs/portfolio-ci-audit-2026-09-24.md` maps each one.
+
+Never in the gate, whatever the site: deploys, `wrangler` against production,
+remote D1 migrations, R2 or KV writes, Worker secrets, IndexNow submissions,
+content syncs that commit, and paid API calls. Checks against production
+belong in `post-deploy.yml` or a scheduled workflow.
 
 ## Adopting it in a site repo
 
@@ -225,8 +321,14 @@ Claude Code prompt for steps 1–8:
 
 Every change goes through a PR to this repo, and `self-test` must pass.
 `scripts/self-test.sh` builds fixture sites at run time and proves each guard,
-config rule and generated Lighthouse setting still fires on bad input and
-passes on good input. Add a case there for every new rule.
+config rule, scan, server behaviour and generated Lighthouse setting still fires
+on bad input and passes on good input. Add a case there for every new rule.
+
+The `fixture` jobs then run the whole action, end to end, against
+`test/fixture-site` (a tiny Astro site) and against copies broken one way each
+by `test/break-fixture.sh`: missing alt text, a too-wide element, a CSP
+violation, a dead redirect, two `h1`s, a directly loaded tag. The conforming
+run must pass; each broken run must fail on the check that owns the fault.
 
 Then publish a release. Version by effect on site repos:
 
@@ -248,8 +350,9 @@ breaking seven sites at once.
 - **[TO CONFIRM]** `WORKERS_CI_COMMIT_SHA` and `WORKERS_CI_BRANCH` are present
   in production builds, so the post-deploy SHA check and environment tagging
   both work.
-- **[TO CONFIRM]** Pages that render on the server rather than at build time
-  are not served by the `static` server. A site with such pages in `pages` sets
+- Pages that render on the server rather than at build time are not served by
+  the `static` server. Every portfolio site builds with `output: 'static'`
+  today. A site that adds server-rendered pages to `pages` sets
   `"server": "preview"`, which has not yet been proven with the Cloudflare
   adapter in CI.
 - Portus Immigration and FullFrameGear have no brand review skill yet. Their PRs

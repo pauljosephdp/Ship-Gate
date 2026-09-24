@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   self-test:
     name: self-test
@@ -23,6 +27,49 @@ jobs:
         with:
           node-version: 22
       - name: ShellCheck
-        run: shellcheck -S error scripts/*.sh
+        run: shellcheck -S error scripts/*.sh test/*.sh
       - name: Guards and config rules
         run: bash scripts/self-test.sh
+
+  # The whole action, end to end, against a tiny conforming site, then against
+  # copies broken one way each. The conforming run must pass; every broken run
+  # must fail on the check that owns the fault.
+  fixture:
+    name: fixture (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { variant: conforming, fails: "" }
+          - { variant: missing-alt, fails: "Smoke, axe, reflow, CSP, edge" }
+          - { variant: wide-element, fails: "Smoke, axe, reflow, CSP, edge" }
+          - { variant: csp-violation, fails: "Smoke, axe, reflow, CSP, edge" }
+          - { variant: bad-redirect, fails: "Smoke, axe, reflow, CSP, edge" }
+          - { variant: two-h1, fails: "Structure scan" }
+          - { variant: direct-tag, fails: "Stack guards" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Break the fixture
+        run: bash test/break-fixture.sh ${{ matrix.variant }}
+      - name: Ship Gate
+        id: gate
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: test/fixture-site
+      - name: Expected result
+        env:
+          OUTCOME: ${{ steps.gate.outcome }}
+          FAILS: ${{ matrix.fails }}
+        run: |
+          cat "$SHIP_GATE_DIR/summary.md"
+          if [ -z "$FAILS" ]; then
+            [ "$OUTCOME" = success ] || { echo "::error::The conforming fixture must pass the gate."; exit 1; }
+          else
+            [ "$OUTCOME" = failure ] || { echo "::error::Variant ${{ matrix.variant }} must fail the gate, but it passed."; exit 1; }
+            grep -qF "| $FAILS | ❌ failed |" "$SHIP_GATE_DIR/summary.md" \
+              || { echo "::error::Variant ${{ matrix.variant }} must fail \"$FAILS\"."; exit 1; }
+          fi
+          echo "Gate behaved as expected for ${{ matrix.variant }}."

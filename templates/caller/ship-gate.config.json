@@ -6,6 +6,9 @@
   "server": "static",
   "distDir": "dist",
   "lighthouseUrls": "all",
+  "e2ePages": "all",
+  "structure": { "titleMax": 75 },
+  "copyAllowlist": [],
   "checks": {
     "preBuild": [],
     "postBuild": [],
@@ -15,5 +18,6 @@
     "siteKey": "PUBLIC_TURNSTILE_SITE_KEY",
     "secretKey": "TURNSTILE_SECRET_KEY"
   },
-  "thresholdOverrides": []
+  "thresholdOverrides": [],
+  "guardExemptions": []
 }

@@ -1,0 +1,11 @@
+{
+  "name": "ship-gate-tools",
+  "private": true,
+  "type": "module",
+  "description": "Ship Gate's own test tooling, installed with npm ci on every run. Bumped by Dependabot.",
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@lhci/cli": "0.15.1",
+    "@playwright/test": "1.63.0"
+  }
+}

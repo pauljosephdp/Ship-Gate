@@ -1,168 +1,177 @@
-# Portfolio CI audit — 24 September 2026
+# Portfolio CI audit, 24 September 2026
 
-A read of every repo under `pauljosephdp` on 24 September 2026: what each site
-checks today, and what adopting Ship Gate v1.1.0 asks of it. Ship Gate's
-standard was set from this audit. It keeps what the sites already enforce,
-fixes what they contradict, and moves each site's own checks into `checks`
-rather than dropping them.
+On 24 September 2026 I read every repo under `pauljosephdp` to answer two
+questions: what each site checks today, and what adopting Ship Gate v1.1.0
+asks of it. Ship Gate's standard was set from this audit.
 
-Findings are from the files on `main` on that date. Anything not read directly
-is marked **[TO CONFIRM]**.
+The rule for moving checks:
+- A check any Astro-on-Cloudflare site would want becomes Ship Gate code.
+- A check about one brand or one site's content stays in that site's repo and
+  runs through `checks`.
+- Nothing that writes to production runs in the gate.
+
+The five portfolio sites with code (Playway, Qualified Deals, Frame to Funnel,
+Cocoon, LowLightKing) were read in full on `main`: workflows, `package.json`
+scripts and every script those call. Anything still unverified is marked
+**[TO CONFIRM]**.
 
 ## Summary
 
-| Site | CI today | Blocking gaps for Ship Gate |
-|---|---|---|
-| Playway | Strong: 7 gates across 2 jobs | Own `lighthouserc.cjs` to fold into overrides; checks need npm script names |
-| Qualified Deals | Good: types, tests, build, metadata, WCAG 2.2 AA, reflow | `posthog-js`; Renovate and Dependabot overlap |
-| Frame to Funnel | Lighthouse only, daily | Auto-merge to `main`; Cloudflare token in GitHub; public Lighthouse reports |
-| Cocoon | None | `posthog-js`; no Node pin; `ci:build` runs remote migrations |
-| LowLightKing | None, but 20 local check scripts | `posthog-js` |
-| FullFrameGear, Gallivant, Portus | README only | Greenfield: scaffold per the migration playbook, Mode B |
+| Site | CI today | Moves into Ship Gate | Blocking at adoption |
+|---|---|---|---|
+| Playway (`site/`) | 7 gates in `build.yml` (`gates`, `lighthouse`) | astro check, generic half of the structure scan, Lighthouse | none; its `lighthouserc.cjs` becomes the standard |
+| Qualified Deals | `ci.yml` (`verify`, `accessibility`) | astro check, missing/duplicate/length metadata, axe WCAG 2.2 AA, 320px and 200% reflow | `posthog-js`; axe moves from production to the PR build |
+| Frame to Funnel | Lighthouse only (daily cron in practice) | Lighthouse, build, tests | auto-merge to `main`; episode sync pushes to `main`; Cloudflare tokens; public Lighthouse storage; `posthog-js`; inline GTM |
+| Cocoon | none (gates run inside Workers Builds `ci:build`) | astro check, the generic halves of `verify:build` | `ci:build` ends in a remote D1 migration; no Node pin; `posthog-js`; inline GTM; HubSpot embed |
+| LowLightKing | none (20 local scripts) | astro check, CSP, redirects, overflow, placeholder copy, generic `verify-deploy` checks, Lighthouse | `posthog-js`; HubSpot embed; hard-coded Chromium path |
+| FullFrameGear, Gallivant, Portus | README only | — | none; adopt in the first PR |
 
-## Playway (`site/`)
+Every site builds with Astro 7.3.3 and `output: 'static'`, so Ship Gate's
+static server can serve them. Deploys are Cloudflare Workers Builds on push to
+`main` for all five.
 
-**Today** (`.github/workflows/build.yml`): unit tests; build with a
-document-structure scan; `astro check` via `verify:types`; a motion gate in
-Chromium; contrast recomputed in Python; self-hosted font coverage; Playground
-Primary drift scan; Lighthouse over all 37 pages as a separate job. Node from
-`site/.node-version`. Reports upload to the filesystem, deliberately not public.
+## Where each existing check goes
 
-**Adopting:**
+### Into Ship Gate (generic)
 
-- `working-directory: site` in both workflows; Dependabot npm `directory: /site`.
-- `"lighthouseUrls": "all"` and `"lighthouseBlockedUrls": ["*/relay/*"]`.
-- Carry the stricter baseline over:
-  ```json
-  "thresholdOverrides": [
-    { "audit": "categories:accessibility", "minScore": 1 },
-    { "audit": "categories:best-practices", "minScore": 1 }
-  ]
-  ```
-  Then delete `site/lighthouserc.cjs`. CLS ≤ 0.05 and the individual SEO audits
-  match the standard already.
-- Give the direct commands npm script names, then list them:
-  ```json
-  "checks": {
-    "preBuild": ["test", "verify:fonts", "verify:contrast", "verify:drift"],
-    "browser": ["verify:motion"]
-  },
-  "python": { "version": "3.11", "packages": ["fonttools", "brotli"] }
-  ```
-  `verify:contrast` runs `python ../design-system/verify-contrast.py`, which
-  still resolves from `site/`.
-- **[TO CONFIRM]** whether `verify:types` is the same as `check`. If it is, drop
-  it; Ship Gate runs `check` already.
-- **[TO CONFIRM]** how HubSpot and Clarity load. Playway's Lighthouse config
-  blocks both. If either tracking script loads directly rather than through
-  Zaraz, the tag guard fails it. HubSpot form embeds are allowed.
+| Check | From |
+|---|---|
+| `astro check` | Playway `verify:types`, Qualified Deals `check`; local-only in Cocoon and LowLightKing; Frame to Funnel has no `check` script (add one) |
+| Unit tests (`npm test`) | Playway, Qualified Deals; local-only in Frame to Funnel |
+| One `h1`, heading order, `noopener`, title/description present, unique and within bands, canonical, `_headers`/`_redirects` validity and conflict markers, `{{token}}` leaks, `llms.txt` links | Playway `structure-scan.mjs`, Qualified Deals `check-meta.mjs`, Cocoon `verify:build` |
+| Placeholder copy | LowLightKing `check-copy.mjs` |
+| axe WCAG 2.2 AA with motion settled | Qualified Deals `a11y-check.mjs` (was against production) |
+| Reflow at 320/360/390px and 200% zoom | Qualified Deals `check-narrow.mjs`, LowLightKing `check-overflow.mjs` |
+| CSP measured in the browser | LowLightKing `check-csp.mjs` |
+| `_redirects` statuses, Locations, destinations | LowLightKing `check-redirects.mjs` |
+| Security headers, immutable assets, 404 page, `.assetsignore` | LowLightKing `verify-deploy.mjs` (generic half) |
+| Lighthouse, all pages, third parties blocked | Playway `lighthouserc.cjs` (thresholds), Frame to Funnel `lighthouserc.cjs` (noindex skip) |
 
-## Qualified Deals
+### Stays in the site repo, run through `checks`
 
-**Today** (`.github/workflows/ci.yml`): `astro check`; sitemap `lastmod`
-freshness (needs full git history); vitest; build with no secrets; metadata
-bands. A second job runs axe at WCAG 2.2 AA against production and a 320px /
-200% zoom reflow check on a local build. `indexnow.yml` runs daily and holds no
-secrets. Node 22.12.0 in `.nvmrc`.
+| Site | preBuild | postBuild | browser (served build) |
+|---|---|---|---|
+| Playway | `verify:fonts`, `verify:contrast`, `verify:drift` (name the direct commands) | site-only structure rules (`®`, one `btn--primary`, `/go/` in robots) split out of `structure-scan.mjs` | `verify:motion` |
+| Qualified Deals | `lastmod:check` (needs `fetch-depth: 0`) | `check-meta` (keyword and overlap warnings; set `structure` to 45–60 / 140–160) | — |
+| Cocoon | `check:schemas`, `check:canon` | `check:prices`, `verify:build` (consent mode, analytics singleton) | — |
+| LowLightKing | `check:tokens`, `voice-lint`, `check:images`, `check:content` | — | `check:motion`, `check:nav` |
+| Frame to Funnel | `format:check` | — | — |
 
-**Adopting:**
+Playway needs `"python": { "version": "3.11", "packages": ["fonttools==…", "brotli==…"] }`,
+and LowLightKing needs Python 3 for `check:tokens` and `voice-lint`.
 
-- `fetch-depth: 0` in `ci.yml` (the template shows where).
-- Add `"lastmod:check": "node scripts/gen-lastmod.mjs --check"` to
-  `package.json`, then:
-  ```json
-  "checks": {
-    "preBuild": ["test", "lastmod:check"],
-    "postBuild": ["check-meta"],
-    "browser": ["check-narrow"]
-  }
-  ```
-- `a11y-check` scans production, so a PR cannot fix what it reports. Ship
-  Gate's axe now runs WCAG 2.2 AA on the PR's own build. Keep `a11y-check` as a
-  scheduled job if you still want the production view, not as a merge check.
-- Remove `posthog-js` and move events to `posthog-node` server-side.
-- Keep one dependency bot. Ship Gate's templates use Dependabot, which also
-  bumps the pinned Ship Gate version; Renovate can do the same if preferred.
-- `indexnow.yml` stays as it is.
+### Moves to post-deploy or a schedule
 
-## Frame to Funnel
+- Qualified Deals `a11y-check` against production: into `post-deploy.yml`.
+- Cocoon `verify:deploy`, `seo:diff`, `data:freshness --ci`.
+- LowLightKing `check:indexing`, `psi`, `verify:deploy <production URL>`.
+- IndexNow in every site: scheduled, never in the gate.
 
-**Today:** `lighthouse.yml` gates Home and `/audit` (performance and best
-practices ≥ 0.90, accessibility and SEO ≥ 0.95, all failing) on a daily
-schedule, because pushes to `main` from `GITHUB_TOKEN` never trigger it. Node 24.
+### Never in any gate
 
-**Blocking, and needs a decision before adoption:**
+- Cocoon `ci:build`, `deploy` and `migrate:remote` (a remote D1 write).
+- Frame to Funnel's `wrangler.toml` `[build]` command, which runs a remote D1
+  migration whenever wrangler builds. This is why Ship Gate never starts
+  `wrangler dev`.
+- `set-worker-secrets.yml` and `sync-guide-to-r2.yml`.
+- LowLightKing `sync:r2`.
+- Paid API scripts: Cocoon `data:airroi`, `generate-hero-art`; LowLightKing
+  `generate-images`.
 
-- **`auto-merge-to-main.yml` merges every branch into `main` and deploys it,
-  with no gate.** The `episode-sync.yml` workflow also pushes straight to `main`,
-  per auto-merge's own comments (**[TO CONFIRM]** by reading it). Both fail
-  the push-to-`main` guard, and a `main` ruleset will reject their pushes. The
-  replacement: each workflow opens a PR, and auto-merge is GitHub's own
-  "auto-merge when checks pass" setting on that PR.
-- **`set-worker-secrets.yml` holds a Cloudflare API token** with Workers
-  Scripts: Edit. Set Worker secrets once with `wrangler secret put` from your
-  own machine, or in the dashboard, then delete the workflow and the GitHub
-  secret, and rotate the token.
-- **`sync-guide-to-r2.yml`** uses an R2 token, per `set-worker-secrets.yml`'s
-  comments (**[TO CONFIRM]** by reading it). Either move the upload into the
-  build, or keep it with `# ship-gate-allow-cloudflare: <reason>`.
-- `lighthouse.yml` publishes reports to public storage. Deleting it on adoption
-  resolves this; Ship Gate's Lighthouse replaces it.
+The contract check refuses any of these as a `build`, `check` or `lint`
+script, or in `checks`.
 
-**Adopting:** keep its stricter performance gate with
-`{ "audit": "categories:performance", "level": "error" }`. `indexnow.yml`
-stays. **[TO CONFIRM]** its `package.json` scripts and PostHog setup, which
-were not read in this audit.
+## Per site
 
-## Cocoon
+### Playway (`site/`)
 
-**Today:** no CI. Local scripts: `check`, `check:schemas`, `check:prices`,
-`check:canon`, `verify:build`. `ci:build` chains these with
-`migrate:remote`, which applies D1 migrations to production.
+- **Setup:** `working-directory: site` in both workflows, and Dependabot npm
+  `directory: /site`. Node comes from `site/.node-version` (22.22.2).
+- **Delete:** `build.yml` and `site/lighthouserc.cjs`. The standard is
+  Playway's own 24 September baseline:
+  - accessibility 1.0
+  - CLS ≤ 0.05
+  - performance, LCP and TBT warn
+  - the same six SEO audits
 
-**Adopting:**
+  Carry `best-practices` 1.0 over as a stricter override, and set
+  `"lighthouseBlockedUrls": ["*/relay/*"]` and `"lighthouseUrls": "all"`.
+- **Structure scan:** keep only the site-specific rules in `structure-scan.mjs`
+  and run them as a postBuild check. The generic rules now run in Ship Gate.
+- `verify:motion` uses port 4322 and its own server. Switch it to read
+  `SHIP_GATE_BASE_URL`.
 
-- ```json
-  "checks": { "postBuild": ["check:schemas", "check:prices", "check:canon", "verify:build"] }
-  ```
-  Never list `ci:build`, `deploy` or `migrate:remote`; the contract check
-  refuses them.
-- Pin Node 22.12.0 or later in `.nvmrc`; there is none today.
-- Remove `posthog-js`; it has `posthog-node` already.
-- **[TO CONFIRM]** whether `data:freshness` and `seo:diff` belong in the gate.
-  Both read external data, which makes them flaky as merge checks.
+### Qualified Deals
 
-## LowLightKing
+- **Contract changes:**
+  - Add `fetch-depth: 0` to checkout.
+  - Add a `lastmod:check` script.
+  - Set `"structure": { "titleMin": 45, "titleMax": 60, "descMin": 140, "descMax": 160 }`.
+- **Replace** `ci.yml`'s two jobs with `verify`. Ship Gate now runs
+  `check-narrow` and axe on the PR build.
+- **Post-deploy:** move `a11y-check` (production) to `post-deploy.yml`.
+- **Exemption:** adopt `posthog-js` under a dated `posthog-client` exemption,
+  then move events to `posthog-node`.
+- **Dependency bot:** keep Renovate or switch to Dependabot, not both.
 
-**Today:** no CI. Node in `.node-version`. Twenty local check scripts.
+### Frame to Funnel
 
-**Adopting:**
+**Process changes before adoption:**
+- Delete `auto-merge-to-main.yml` and open PRs instead; use GitHub's
+  "auto-merge when checks pass" if you want hands-off merging.
+- `episode-sync.yml` must open a PR instead of pushing to `main`.
 
-- Likely gate checks, each **[TO CONFIRM]** as needing no network or
-  production access:
-  ```json
-  "checks": {
-    "preBuild": ["check:tokens", "voice-lint", "check:content", "check:copy", "check:images"],
-    "postBuild": ["check:csp", "check:redirects", "check:nav"],
-    "browser": ["check:overflow", "check:motion"]
-  }
-  ```
-- Keep out of the gate: `check:skill` (needs a local skills checkout),
-  `verify:deploy` and `psi` (production), `check:parity` (compares against a
-  saved snapshot), `check:indexing` (**[TO CONFIRM]**).
-- Its `check:csp` is the only CSP check in the portfolio. Worth promoting into
-  Ship Gate once its rules are read.
-- Remove `posthog-js` and move events server-side.
+A push to `main` is never exemptible, and the `main` ruleset will reject such
+pushes.
 
-## FullFrameGear, Gallivant, Portus
+**Cloudflare tokens:** `set-worker-secrets.yml` (Workers Scripts: Edit) and
+`sync-guide-to-r2.yml` (R2 Edit) either leave Actions or run under a dated
+`cloudflare-in-workflows` exemption.
 
-README only. Scaffold each from the migration playbook in Mode B, with Ship
-Gate adopted in the first PR so every later change is gated.
+**Delete `lighthouse.yml`:** it uses public storage, and Ship Gate replaces it.
+Keep its stricter performance gate with
+`{ "audit": "categories:performance", "level": "error" }` if wanted. Note that
+this fails on runner noise; see the README.
+
+**Other changes:**
+- Add a `check` script (`astro check`).
+- Pin Node in `.nvmrc`; today it is only `engines` plus 24 in CI.
+- Adopt `posthog-js` and inline GTM `GTM-WX55ZRKV` under dated exemptions.
+- `markdown-endpoints.test.ts` needs `dist/`. Before the build it skips itself,
+  so run it again as a postBuild check if it matters.
+
+### Cocoon
+
+- **Workers Builds:** change the build command from `npm run ci:build` to
+  `npm run build`. Run `migrate:remote` by hand when a migration lands. This is
+  a dashboard change for Paul.
+- **Node:** pin it at 22.18.0 or later. The check scripts import `.ts` files
+  directly, which needs Node's type stripping.
+- **Exemptions:** adopt `posthog-js`, inline GTM `GTM-M7WZHXT7` and the HubSpot
+  form embed under dated exemptions.
+
+### LowLightKing
+
+- **Chromium path:** `check-csp.mjs` and `check-overflow.mjs` hardcode
+  `/opt/pw-browsers/chromium-1194`. Both are superseded by Ship Gate.
+  `check-motion` and `check-nav` must read `BASE_URL`. They already accept
+  `CHROME_PATH`.
+- **`verify-deploy.mjs`:** keep only the site-specific half (Markdown twins,
+  HubSpot frame attributes).
+- **Exemptions:** adopt `posthog-js` and the HubSpot embed under dated
+  exemptions.
+- **CSP:** the policy is Report-Only. Ship Gate still fails on any violation, so
+  switching to enforcing stays safe.
+
+### FullFrameGear, Gallivant, Portus
+
+These are README only. Adopt Ship Gate in the first code PR, so every later
+change is gated.
 
 ## Outside Ship Gate's scope
 
-`Skills` has its own `validate.yml` (skill validation and stale-manifest
-check). `Brand-OS` is a design system repo. `MinuJoseph` and `PaulJoseph` are
-README only. `Kochi`, `MalayalamFilmmakers`, `Puthenpurackal` and `Domains` are
-static HTML sites with no CI and no Astro build. They could adopt a static-only
-variant later.
+- `Skills` has its own `validate.yml`.
+- `Brand-OS` is a design-system repo.
+- `MinuJoseph` and `PaulJoseph` are README only.
+- `Kochi`, `MalayalamFilmmakers`, `Puthenpurackal` and `Domains` are static
+  HTML with no Astro build.

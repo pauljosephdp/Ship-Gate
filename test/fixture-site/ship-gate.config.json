@@ -1,0 +1,8 @@
+{
+  "siteUrl": "https://example.com",
+  "pages": ["/", "/about/", "/contact/"],
+  "formPages": ["/contact/"],
+  "smokePaths": ["/"],
+  "lighthouseUrls": "all",
+  "e2ePages": "all"
+}

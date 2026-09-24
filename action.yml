@@ -190,7 +190,7 @@ runs:
     - name: Upload reports
       if: always() && env.SHIP_GATE_DIR != ''
       continue-on-error: true
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ steps.reports.outputs.name }}
         path: ${{ env.SHIP_GATE_DIR }}/reports/

@@ -1,5 +1,54 @@
 # Changelog
 
+## v2.0.0 — 2026-09-24
+
+Ship Gate is now a generic gate for any Astro site. Vendor choices became
+opt-in policies, and a new discovery scan checks SEO, AEO, GEO and AIO
+readiness. This is a major release: a site must add `policies` to keep its
+vendor guards, and the discovery scan fails sites that aren't yet
+discoverable.
+
+**Stack policies (breaking)**
+- New `policies` config. `posthog-server-only`, `tags-via-zaraz`,
+  `turnstile-forms` and `workers-builds-only` are off by default; each turns on
+  its guards, scans and browser checks.
+- To keep the v1.1 behaviour, a site sets `"policies": ["posthog-server-only",
+  "tags-via-zaraz", "turnstile-forms", "workers-builds-only"]`.
+- Every site still gets the core guards: no committed env files, no workflow
+  pushing to `main`, a pinned Node at or above Astro 7's floor, and no public
+  Lighthouse reports.
+- The client-bundle PostHog scan, the browser PostHog check, the Turnstile
+  widget check, Turnstile test keys and the post-deploy PostHog check run only
+  under their policy.
+- An exemption for a guard whose policy is off is rejected as a no-op.
+- No brand names left in the code, templates or README. The PR template is
+  generic.
+
+**Discovery scan: SEO, AEO, GEO, AIO (new, may fail)**
+- `check-discovery.mjs` reads the built site and checks 23 rules:
+  - robots.txt, sitemap, sitemap coverage and `lastmod`
+  - canonical, `lang`, viewport and internal links
+  - JSON-LD validity and key properties, the site entity and its `sameAs`
+  - FAQ markup against visible text, and breadcrumbs
+  - AI search and user-fetch crawler access, Open Graph, article dates and
+    server-rendered text
+  - `llms.txt`, and snippet and image-preview controls
+- Blocking AI *training* tokens never fails. It is reported.
+- `discoveryOverrides` raises a rule freely and lowers one only with a reason
+  and a restore date. `discovery.sitemap` and `discovery.ignoreLinks` are new
+  settings.
+- A readiness table goes to the job summary and `reports/discovery.md`.
+- Canonical checking moved here from the structure scan. Every indexable page
+  now needs exactly one canonical.
+
+**Post-deploy**
+- New: the `robots.txt` production actually serves must not block Googlebot,
+  Bingbot or an AI search crawler from a smoke path.
+
+**Self-test**: 185 cases (was 115). The fixture site is discovery-ready, and
+the new fixture variants `blocks-ai-search` and `bad-jsonld` must fail the
+discovery scan.
+
 ## v1.1.0 — 2026-09-24
 
 The first published release. v1.0.0 was committed but never tagged or adopted:

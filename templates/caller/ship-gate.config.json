@@ -1,7 +1,8 @@
 {
   "siteUrl": "https://example.com",
   "pages": ["/", "/services/", "/contact/", "/journal/first-post/"],
-  "formPages": ["/contact/"],
+  "policies": [],
+  "formPages": [],
   "smokePaths": ["/", "/robots.txt", "/sitemap-index.xml"],
   "server": "static",
   "distDir": "dist",
@@ -9,15 +10,13 @@
   "e2ePages": "all",
   "structure": { "titleMax": 75 },
   "copyAllowlist": [],
+  "discovery": { "ignoreLinks": [] },
   "checks": {
     "preBuild": [],
     "postBuild": [],
     "browser": []
   },
-  "turnstileEnv": {
-    "siteKey": "PUBLIC_TURNSTILE_SITE_KEY",
-    "secretKey": "TURNSTILE_SECRET_KEY"
-  },
   "thresholdOverrides": [],
+  "discoveryOverrides": [],
   "guardExemptions": []
 }

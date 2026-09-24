@@ -1,5 +1,6 @@
 {
   "siteUrl": "https://example.com",
+  "policies": ["posthog-server-only", "tags-via-zaraz", "turnstile-forms", "workers-builds-only"],
   "pages": ["/", "/about/", "/contact/"],
   "formPages": ["/contact/"],
   "smokePaths": ["/"],

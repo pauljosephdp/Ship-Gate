@@ -17,7 +17,13 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: pauljosephdp/Ship-Gate@v1.0.0
+        # Full history, only if a site check needs git dates (e.g. sitemap lastmod).
+        # with:
+        #   fetch-depth: 0
+      - uses: pauljosephdp/Ship-Gate@v1.1.0
+        # Only if the site is not at the repo root (Playway: "site").
+        # with:
+        #   working-directory: site

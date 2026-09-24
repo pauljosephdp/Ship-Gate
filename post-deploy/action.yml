@@ -5,8 +5,11 @@ description: >
   is PostHog-free. On failure: roll back in Cloudflare, then fix forward.
 author: Gallivant Ventures
 inputs:
+  working-directory:
+    description: The site's directory inside the repo, e.g. "site". Defaults to the repo root.
+    default: "."
   config:
-    description: Path to the site's Ship Gate config file.
+    description: Path to the site's Ship Gate config, relative to working-directory.
     default: ship-gate.config.json
   wait-minutes:
     description: How long to wait for Workers Builds to serve the new commit.
@@ -16,6 +19,7 @@ runs:
   steps:
     - name: Load site config
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: node "$GITHUB_ACTION_PATH/../scripts/prepare.mjs" post-deploy "${{ inputs.config }}"
 
     - name: Wait for Cloudflare to serve this commit

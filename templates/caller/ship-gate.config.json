@@ -3,9 +3,21 @@
   "pages": ["/", "/services/", "/contact/", "/journal/first-post/"],
   "formPages": ["/contact/"],
   "smokePaths": ["/", "/robots.txt", "/sitemap-index.xml"],
+  "server": "static",
+  "distDir": "dist",
+  "lighthouseUrls": "all",
+  "e2ePages": "all",
+  "structure": { "titleMax": 75 },
+  "copyAllowlist": [],
+  "checks": {
+    "preBuild": [],
+    "postBuild": [],
+    "browser": []
+  },
   "turnstileEnv": {
     "siteKey": "PUBLIC_TURNSTILE_SITE_KEY",
     "secretKey": "TURNSTILE_SECRET_KEY"
   },
-  "thresholdOverrides": []
+  "thresholdOverrides": [],
+  "guardExemptions": []
 }

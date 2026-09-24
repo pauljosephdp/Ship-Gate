@@ -1,68 +1,128 @@
 name: Ship Gate — verify
 description: >
-  Gallivant portfolio merge gate. Stack guards, astro check, lint, build,
-  client-bundle PostHog scan, Playwright + axe, and Lighthouse CI.
-  Run it as the only step after checkout in a job named "verify".
+  Gallivant portfolio merge gate. Stack guards, contract check, astro check,
+  the site's own checks, build, client-bundle PostHog scan, Playwright + axe,
+  and Lighthouse CI. Run it as the only step after checkout in a job named "verify".
 author: Gallivant Ventures
 inputs:
+  working-directory:
+    description: The site's directory inside the repo, e.g. "site". Defaults to the repo root.
+    default: "."
   config:
-    description: Path to the site's Ship Gate config file.
+    description: Path to the site's Ship Gate config, relative to working-directory.
     default: ship-gate.config.json
 runs:
   using: composite
   steps:
+    - name: Locate the site and its pinned Node
+      id: site
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        for f in .nvmrc .node-version; do
+          if [ -f "$f" ]; then echo "node-version-file=${{ inputs.working-directory }}/$f" >> "$GITHUB_OUTPUT"; exit 0; fi
+        done
+        echo "::error::No .nvmrc or .node-version in ${{ inputs.working-directory }} — pin Node 22.12.0 or later."
+        exit 1
+
     - name: Stack guards
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: bash "$GITHUB_ACTION_PATH/scripts/guards.sh"
 
     - uses: actions/setup-node@v4
       with:
-        node-version-file: .nvmrc
+        node-version-file: ${{ steps.site.outputs.node-version-file }}
         cache: npm
+        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
 
     - name: Check repo contract and prepare test config
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: node "$GITHUB_ACTION_PATH/scripts/prepare.mjs" verify "${{ inputs.config }}"
+
+    - uses: actions/setup-python@v5
+      if: env.SHIP_GATE_PYTHON != ''
+      with:
+        python-version: ${{ env.SHIP_GATE_PYTHON }}
+
+    - name: Python packages for site checks
+      if: env.SHIP_GATE_PIP != ''
+      shell: bash
+      run: python -m pip install --quiet $SHIP_GATE_PIP
 
     - name: Install
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: npm ci
 
     - name: astro check
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: npm run check
 
     - name: Lint
+      if: env.SHIP_GATE_HAS_LINT != ''
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: npm run lint
+
+    # Every check runs even after one fails, so a PR shows all its failures at once.
+    - name: Site checks (before build)
+      if: env.SHIP_GATE_CHECKS_PREBUILD != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/run-checks.sh" $SHIP_GATE_CHECKS_PREBUILD
 
     - name: Build
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: npm run build
 
     - name: Client bundle is PostHog-free
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: bash "$GITHUB_ACTION_PATH/scripts/check-dist.sh"
 
-    - name: Install Playwright browser
+    - name: Site checks (after build)
+      if: env.SHIP_GATE_CHECKS_POSTBUILD != ''
       shell: bash
-      run: npx playwright install --with-deps chromium
+      working-directory: ${{ inputs.working-directory }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/run-checks.sh" $SHIP_GATE_CHECKS_POSTBUILD
+
+    - name: Install Ship Gate test tools
+      shell: bash
+      run: |
+        cd "$SHIP_GATE_DIR"
+        npm install --no-audit --no-fund --loglevel=error
+        npx --no-install playwright install --with-deps chromium
+
+    # Site browser checks use the site's own Playwright, whose browser build may differ.
+    - name: Site checks (browser)
+      if: env.SHIP_GATE_CHECKS_BROWSER != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        npx --no-install playwright install --with-deps chromium
+        bash "$GITHUB_ACTION_PATH/scripts/run-checks.sh" $SHIP_GATE_CHECKS_BROWSER
 
     - name: E2E + accessibility (axe)
       shell: bash
-      run: npx playwright test -c .ship-gate/playwright.config.ts
+      working-directory: ${{ inputs.working-directory }}
+      run: '"$SHIP_GATE_DIR/node_modules/.bin/playwright" test -c "$SHIP_GATE_DIR/playwright.config.ts"'
 
     - name: Lighthouse CI
       shell: bash
-      run: npx lhci autorun --config=.ship-gate/lighthouserc.json
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        node "$GITHUB_ACTION_PATH/scripts/prepare.mjs" lighthouse "${{ inputs.config }}"
+        "$SHIP_GATE_DIR/node_modules/.bin/lhci" autorun --config="$SHIP_GATE_DIR/lighthouserc.json"
 
     - name: Upload reports
-      if: always()
+      if: always() && env.SHIP_GATE_DIR != ''
       uses: actions/upload-artifact@v4
       with:
         name: ship-gate-reports-${{ github.run_number }}-${{ github.run_attempt }}
-        path: |
-          .lighthouseci/
-          playwright-report/
+        path: ${{ env.SHIP_GATE_DIR }}/reports/
         retention-days: 14
         if-no-files-found: ignore

@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: /
+    directory: /   # the site directory if it is not the repo root, e.g. /site
     schedule:
       interval: weekly
       day: monday
@@ -21,7 +21,7 @@ updates:
   # Also bumps the pinned Ship Gate version (pauljosephdp/Ship-Gate@vX.Y.Z).
   # Weekly, so a new Ship Gate release reaches each site within a week, through that site's own PR gate.
   - package-ecosystem: github-actions
-    directory: /
+    directory: /   # always the repo root: workflows live there
     schedule:
       interval: weekly
       day: monday

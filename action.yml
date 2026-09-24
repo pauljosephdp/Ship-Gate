@@ -1,0 +1,68 @@
+name: Ship Gate — verify
+description: >
+  Gallivant portfolio merge gate. Stack guards, astro check, lint, build,
+  client-bundle PostHog scan, Playwright + axe, and Lighthouse CI.
+  Run it as the only step after checkout in a job named "verify".
+author: Gallivant Ventures
+inputs:
+  config:
+    description: Path to the site's Ship Gate config file.
+    default: ship-gate.config.json
+runs:
+  using: composite
+  steps:
+    - name: Stack guards
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/guards.sh"
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+        cache: npm
+
+    - name: Check repo contract and prepare test config
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/scripts/prepare.mjs" verify "${{ inputs.config }}"
+
+    - name: Install
+      shell: bash
+      run: npm ci
+
+    - name: astro check
+      shell: bash
+      run: npm run check
+
+    - name: Lint
+      shell: bash
+      run: npm run lint
+
+    - name: Build
+      shell: bash
+      run: npm run build
+
+    - name: Client bundle is PostHog-free
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/check-dist.sh"
+
+    - name: Install Playwright browser
+      shell: bash
+      run: npx playwright install --with-deps chromium
+
+    - name: E2E + accessibility (axe)
+      shell: bash
+      run: npx playwright test -c .ship-gate/playwright.config.ts
+
+    - name: Lighthouse CI
+      shell: bash
+      run: npx lhci autorun --config=.ship-gate/lighthouserc.json
+
+    - name: Upload reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ship-gate-reports-${{ github.run_number }}-${{ github.run_attempt }}
+        path: |
+          .lighthouseci/
+          playwright-report/
+        retention-days: 14
+        if-no-files-found: ignore

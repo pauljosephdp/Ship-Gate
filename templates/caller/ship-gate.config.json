@@ -1,0 +1,11 @@
+{
+  "siteUrl": "https://example.com",
+  "pages": ["/", "/services/", "/contact/", "/journal/first-post/"],
+  "formPages": ["/contact/"],
+  "smokePaths": ["/", "/robots.txt", "/sitemap-index.xml"],
+  "turnstileEnv": {
+    "siteKey": "PUBLIC_TURNSTILE_SITE_KEY",
+    "secretKey": "TURNSTILE_SECRET_KEY"
+  },
+  "thresholdOverrides": []
+}

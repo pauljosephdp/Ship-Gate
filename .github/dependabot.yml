@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Workflows, plus the actions used inside the two composite actions.
+  - package-ecosystem: github-actions
+    directories: ["/", "/post-deploy", "/.github/workflows"]
+    schedule:
+      interval: monthly

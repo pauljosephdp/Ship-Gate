@@ -1,0 +1,53 @@
+name: Ship Gate — post-deploy
+description: >
+  After a merge to main: waits until production serves the merged commit
+  (build-sha meta tag), smoke-checks key URLs, and confirms production HTML
+  is PostHog-free. On failure: roll back in Cloudflare, then fix forward.
+author: Gallivant Ventures
+inputs:
+  config:
+    description: Path to the site's Ship Gate config file.
+    default: ship-gate.config.json
+  wait-minutes:
+    description: How long to wait for Workers Builds to serve the new commit.
+    default: "10"
+runs:
+  using: composite
+  steps:
+    - name: Load site config
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../scripts/prepare.mjs" post-deploy "${{ inputs.config }}"
+
+    - name: Wait for Cloudflare to serve this commit
+      shell: bash
+      env:
+        WAIT_MINUTES: ${{ inputs.wait-minutes }}
+      run: |
+        tries=$(( WAIT_MINUTES * 3 ))
+        for i in $(seq 1 "$tries"); do
+          if curl -fsS "$SHIP_GATE_SITE_URL/?cb=$(date +%s)" | grep -q "name=\"build-sha\" content=\"$GITHUB_SHA\""; then
+            echo "Production is serving $GITHUB_SHA"; exit 0
+          fi
+          sleep 20
+        done
+        echo "::error::Production not serving $GITHUB_SHA after $WAIT_MINUTES min. Check Workers Builds; roll back in Cloudflare if needed."
+        exit 1
+
+    - name: Smoke check key URLs
+      shell: bash
+      run: |
+        status=0
+        for p in $SHIP_GATE_SMOKE_PATHS; do
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$SHIP_GATE_SITE_URL$p")
+          echo "$p -> $code"
+          [ "$code" = "200" ] || { echo "::error::$p returned $code"; status=1; }
+        done
+        exit $status
+
+    - name: Production HTML is PostHog-free
+      shell: bash
+      run: |
+        if curl -fsS "$SHIP_GATE_SITE_URL/" | grep -qE 'posthog-js|posthog\.init|i\.posthog\.com|ph[cx]_[A-Za-z0-9]{20,}'; then
+          echo "::error::PostHog client code or key found in production HTML."; exit 1
+        fi
+        echo "Production HTML is PostHog-free."

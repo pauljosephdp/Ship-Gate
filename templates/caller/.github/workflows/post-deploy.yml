@@ -1,0 +1,18 @@
+# Ship Gate post-deploy check. Cloudflare Workers Builds deploys; this only verifies.
+# Never add `wrangler deploy` here, or every merge deploys twice.
+name: Post-deploy check
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pauljosephdp/Ship-Gate/post-deploy@v1.0.0

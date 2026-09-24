@@ -1,0 +1,5 @@
+# Ship Gate — generated per run, never commit
+.ship-gate/
+.lighthouseci/
+playwright-report/
+test-results/

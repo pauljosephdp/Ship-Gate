@@ -26,7 +26,7 @@ const ORIGIN = `http://localhost:${PORT}`;
 // longer carry these dependencies; their own `playwright` version stays theirs.
 const TOOLS = { '@playwright/test': '1.63.0', '@axe-core/playwright': '4.13.0', '@lhci/cli': '0.15.1' };
 
-// ── The standard ──────────────────────────────────────────────────────────────────────────
+// ── The standard ──
 // Deterministic lab signals fail the build. Throttled performance on a shared
 // CI runner moves several points between identical runs, so it warns; a site
 // that wants it to fail raises it to "error" in its own config.
@@ -76,7 +76,7 @@ function fail() {
   process.exit(1);
 }
 
-// ── Config ────────────────────────────────────────────────────────────────────────
+// ── Config ──
 if (!existsSync(configPath)) {
   console.log(`::error::${configPath} not found in ${SITE}. Copy templates/caller/ship-gate.config.json from the Ship Gate repo.`);
   process.exit(1);
@@ -168,7 +168,7 @@ for (const [i, o] of (cfg.thresholdOverrides ?? []).entries()) {
   for (const k of ['level', 'minScore', 'maxNumericValue']) if (o[k] !== undefined) assertions[id][k] = o[k];
 }
 
-// ── Repo contract ─────────────────────────────────────────────────────────────────────
+// ── Repo contract ──
 let pkg = {};
 try { pkg = JSON.parse(readFileSync('package.json', 'utf8')); } catch { err(`package.json missing or invalid in ${SITE}.`); }
 const scripts = pkg.scripts ?? {};
@@ -272,7 +272,7 @@ if (mode === 'lighthouse') {
   process.exit(0);
 }
 
-// ── Verify mode ───────────────────────────────────────────────────────────────────────
+// ── Verify mode ──
 const pages = cfg.pages;
 if (!isPathList(pages) || pages.length === 0)
   err('pages must be a non-empty list of paths starting with "/" — one per key template (home, service/product, contact, article).');

@@ -1,5 +1,37 @@
 # Changelog
 
+## v2.3.0 — 2026-09-25
+
+Fixes from a review of the gate. Two rules now catch what they always claimed
+to; the rest stop failing sites that are fine, or stop races.
+
+**Can fail**
+- The production-write contract now covers every script CI runs: `test`, the
+  install scripts `npm ci` runs (`preinstall`, `install`, `postinstall`,
+  `prepare`), and the `pre`/`post` scripts around each one. It follows `pnpm`,
+  `yarn`, `run-s`, `run-p` and `npm-run-all` (globs included), and reads shell
+  files a script starts. A `"postbuild": "node scripts/ping-indexnow.mjs"` now
+  fails; move it to `post-deploy.yml`.
+- The committed-secrets guard reads the whole repository, not only the site
+  directory, so a `.env` or `.dev.vars` beside a `site/` folder now fails.
+
+**Fixed**
+- `site-entity` and `structured-data` accept every schema.org Organization and
+  LocalBusiness subtype (Hotel, Resort, Dentist, Attorney, Plumber…).
+- The consent check matches trackers by hostname: a site's own
+  `/hubspot-partner-badge.svg` and HubSpot form embeds (`hsforms.net`) pass.
+- Post-deploy: a network error reaching the Chrome UX Report API warns instead
+  of failing the job.
+- The summary table lists the Node pin and Ship Gate test-tool install steps,
+  so a failure there no longer reads "Ship Gate passed".
+- Ship Gate's own releases: two merges to `main` close together no longer
+  cancel the first one's release.
+
+**Copy into each site** (optional, from `templates/caller/`)
+- `post-deploy.yml`: a `concurrency` block, so a newer merge cancels an older
+  check instead of letting it fail on a healthy deploy.
+- `gitignore-additions.txt`: `.lighthouseci/`.
+
 ## v2.2.0 — 2026-09-25
 
 Agent-readiness checks: the gaps an isitagentready.com scan reported, as

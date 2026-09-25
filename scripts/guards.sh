@@ -67,7 +67,7 @@ policy turnstile-forms && while IFS= read -r f; do
 done < <(grep -rlE '<form[ >]' src --include='*.astro' --include='*.tsx' --include='*.jsx' --include='*.svelte' --include='*.vue' 2>/dev/null)
 
 # 4. No committed env or Worker secret files.
-git ls-files | grep -E '(^|/)(\.env|\.dev\.vars)(\..+)?$' | grep -vE '\.example$' && err env-file "Env/secret file committed. Remove it and rotate its secrets."
+git -C "$ROOT" ls-files | grep -E '(^|/)(\.env|\.dev\.vars)(\..+)?$' | grep -vE '\.example$' && err env-file "Env/secret file committed. Remove it and rotate its secrets."
 
 # 5. [workers-builds-only] Deploy target is Workers, not Pages.
 policy workers-builds-only && for w in wrangler.toml wrangler.json wrangler.jsonc; do

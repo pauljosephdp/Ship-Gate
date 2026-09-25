@@ -15,7 +15,7 @@ import { htmlFiles, pageKind, attr, metaContent, assetsIgnore, parseRedirects, p
 import {
   RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, RETIRED_TOKENS, parseContentSignal,
   AGENT_LINK_RELS, parseLinkHeader, visibleText, normalise, ogContent, robotsDirectives,
-  parseRobots, robotsAllows, parseSitemap, W3C_DATE, jsonLd, typesOf, missingProps, isEntity, isArticle,
+  parseRobots, robotsAllows, parseSitemap, W3C_DATE, jsonLd, typesOf, missingProps, isEntity, isArticle, RTL_LANGS,
 } from './discovery.mjs';
 
 const OUT = process.env.SHIP_GATE_DIR || '.ship-gate';
@@ -24,6 +24,7 @@ const { root, siteUrl } = run;
 const cfg = run.discovery ?? {};
 const levels = cfg.levels ?? Object.fromEntries(Object.entries(RULES).map(([k, r]) => [k, r.level]));
 const ignoreLinks = cfg.ignoreLinks ?? [];
+const searchCrawlers = [...SEARCH_CRAWLERS, ...(cfg.searchCrawlers ?? [])];
 
 const findings = Object.fromEntries(Object.keys(RULES).map((k) => [k, []]));
 const add = (rule, where, msg) => findings[rule].push(`${where}: ${msg}`);
@@ -48,7 +49,8 @@ const served = (path) => {
   if (rel === '' || rel.endsWith('/')) return isFile(rel + 'index.html') ? rel + 'index.html' : null;
   return [rel, rel + '.html', rel + '/index.html'].find(isFile) ?? null;
 };
-const redirectRules = parseRedirects(read('_redirects') ?? '').rules.map((r) => compilePattern(r.from));
+const redirects = parseRedirects(read('_redirects') ?? '').rules;
+const redirectRules = redirects.map((r) => compilePattern(r.from));
 const onSite = (href) => href === siteUrl || href.startsWith(siteUrl + '/');
 const pathOf = (url) => dec(new URL(url).pathname);
 
@@ -63,7 +65,7 @@ if (robotsText !== null) {
   for (const s of robots.sitemaps) if (!onSite(s)) add('robots-sitemap', 'robots.txt', `Sitemap "${s}" is not an absolute URL on ${siteUrl}.`);
 }
 for (const p of pages) {
-  for (const bot of SEARCH_CRAWLERS)
+  for (const bot of searchCrawlers)
     if (!robotsAllows(robots, bot, p.path)) add('robots-blocks-page', p.path, `indexable, but robots.txt blocks ${bot}. Allow it, or mark the page noindex.`);
 }
 for (const bot of AI_SEARCH_CRAWLERS) {
@@ -134,12 +136,22 @@ for (const l of links) {
 
 // ── Pages ──
 const canonicalOf = new Map();
+const hreflangOf = new Map(); // page path → [{ hreflang, href }]
 for (const p of pages) {
   const html = p.html;
   const at = p.path;
 
   const lang = attr(html.match(/<html\b[^>]*>/i)?.[0] ?? '', 'lang');
   if (!lang || !/^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(lang)) add('html-lang', at, lang ? `lang="${lang}" is not a language tag.` : 'no lang attribute on <html>.');
+  // A right-to-left language needs dir="rtl" on <html> (or <body>), or the page lays out left to right.
+  const dirOf = (tag) => (attr(html.match(new RegExp(`<${tag}\\b[^>]*>`, 'i'))?.[0] ?? '', 'dir') ?? '').toLowerCase();
+  if (lang && RTL_LANGS.includes(lang.toLowerCase().split('-')[0]) && dirOf('html') !== 'rtl' && dirOf('body') !== 'rtl')
+    add('rtl-direction', at, `lang="${lang}" is written right to left, but <html> has no dir="rtl". Set it in the layout; CSS logical properties then mirror the layout.`);
+  // hreflang alternates, checked for return links once every page is read.
+  const alternates = [...html.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0])
+    .filter((t) => /\brel\s*=\s*["']?alternate\b/i.test(t) && attr(t, 'hreflang'))
+    .map((t) => ({ hreflang: attr(t, 'hreflang'), href: attr(t, 'href') ?? '' }));
+  if (alternates.length) hreflangOf.set(at, alternates);
   if (!/width\s*=\s*device-width/i.test(metaContent(html, 'viewport') ?? '')) add('viewport', at, 'no <meta name="viewport" content="width=device-width, initial-scale=1">.');
 
   // Canonical: exactly one, absolute on siteUrl, naming an indexable page exactly (no redirect hop).
@@ -236,6 +248,26 @@ if (sitemapPaths.length && !findings.sitemap.length) {
   for (const [p, l] of listed) if (l && l.slice(0, 10) > tomorrow) add('sitemap-lastmod', p, `lastmod ${l} is in the future.`);
 }
 
+// hreflang: every alternate is a page in the build, and names this page back (Google ignores
+// one-way pairs). Alternates on other origins can't be checked here and are skipped.
+for (const [at, alternates] of hreflangOf) {
+  for (const a of alternates) {
+    if (!onSite(a.href)) { if (!/^https?:\/\//.test(a.href)) add('hreflang-pairs', at, `hreflang="${a.hreflang}" href "${a.href}" must be an absolute URL.`); continue; }
+    const target = pathOf(a.href);
+    if (target === at) continue;
+    if (!pageByPath.has(target)) { add('hreflang-pairs', at, `hreflang="${a.hreflang}" names ${a.href}, which is not an indexable page in the build.`); continue; }
+    if (!(hreflangOf.get(target) ?? []).some((b) => onSite(b.href) && pathOf(b.href) === at))
+      add('hreflang-pairs', at, `hreflang="${a.hreflang}" names ${target}, but ${target} has no hreflang link back to ${at}.`);
+  }
+}
+
+// Redirects: a 302/307 tells search engines the move is temporary, so they keep the old URL
+// indexed and hold back its signals from the new one. Cloudflare's default status is 302.
+for (const r of redirects) {
+  if (r.status === 302 || r.status === 307)
+    add('redirect-permanence', `_redirects line ${r.line}`, `"${r.from} ${r.to}" answers ${r.status}${r.status === 302 ? ' (Cloudflare\'s default when no status is given)' : ''}, a temporary move. Use 301 or 308 unless you will undo it.`);
+}
+
 // llms.txt: a proposed standard (llmstxt.org). Some AI tools read it; Google Search does not.
 const llms = read('llms.txt');
 if (llms === null) add('llms-txt', 'llms.txt', 'not in the build. Optional, but cheap: a Markdown index of the pages you want AI tools to read.');
@@ -244,6 +276,21 @@ else {
   if (!/^# \S/.test(lines[0] ?? '')) add('llms-txt-format', 'llms.txt', 'must start with a "# Site name" heading.');
   if (!lines.some((l) => /^> \S/.test(l))) add('llms-txt-format', 'llms.txt', 'has no "> summary" blockquote line.');
   if (!/\]\([^)\s]+\)/.test(llms)) add('llms-txt-format', 'llms.txt', 'links to no pages.');
+  // Markdown and text mirrors duplicate the HTML pages. robots.txt Disallow does not keep a URL
+  // out of the index (and hides any noindex); an X-Robots-Tag or canonical Link header does.
+  const headers = parseHeaders(read('_headers') ?? '').rules.map((r) => ({ ...r, match: compilePattern(r.pattern) }));
+  const guarded = (path) => headers.some((r) => r.match(path) && r.set.some(([k, v]) =>
+    (k === 'x-robots-tag' && /noindex/i.test(v)) || (k === 'link' && /rel\s*=\s*"?canonical/i.test(v))));
+  const mirrors = new Set();
+  for (const m of llms.matchAll(/\]\(([^)\s]+)\)/g)) {
+    let url;
+    try { url = new URL(m[1], siteUrl + '/'); } catch { continue; }
+    if (url.origin !== siteUrl) continue;
+    const path = dec(url.pathname);
+    if (/\.(md|markdown|txt)$/i.test(path) && !['/llms.txt', '/robots.txt'].includes(path) && isFile(path.slice(1))) mirrors.add(path);
+  }
+  const open = [...mirrors].filter((p) => !guarded(p));
+  if (open.length) add('markdown-mirrors', '_headers', `${open.length} Markdown/text file(s) linked from llms.txt can be indexed as duplicates of your pages (${open.slice(0, 3).join(', ')}${open.length > 3 ? ', …' : ''}). Send "X-Robots-Tag: noindex" (or a canonical Link header) for them in _headers; a robots.txt Disallow would not keep them out of the index.`);
 }
 
 // ── Report ──

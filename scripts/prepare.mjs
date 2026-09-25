@@ -15,7 +15,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, appen
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { staticRoot, indexablePages } from './site-files.mjs';
-import { RULES as DISCOVERY_RULES, LEVELS as DISCOVERY_LEVELS } from './discovery.mjs';
+import { RULES as DISCOVERY_RULES, LEVELS as DISCOVERY_LEVELS, SEARCH_CRAWLERS, CRAWLER_TOKEN } from './discovery.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const [modeArg = 'verify', configPath = 'ship-gate.config.json'] = process.argv.slice(2);
@@ -58,6 +58,8 @@ const LEVEL_RANK = { warn: 1, error: 2 };
 const BLOCKED_URLS = ['*posthog*', '*hubspot*', '*hsforms*', '*hs-scripts*', '*hs-analytics*', '*clarity.ms*',
   '*googletagmanager*', '*google-analytics*', '*doubleclick.net*', '*connect.facebook.net*', '*hotjar*',
   '*snap.licdn.com*', '*analytics.tiktok.com*', '*/cdn-cgi/*', '*challenges.cloudflare.com*'];
+// The tracking vendors in that list: under consent-before-tracking, none may load before consent.
+const TRACKER_PATTERNS = BLOCKED_URLS.filter((p) => !['*/cdn-cgi/*', '*challenges.cloudflare.com*'].includes(p));
 
 // Stack policies: opinions about which vendors a site uses and how. Off by default, so
 // the core gate fits any Astro site; a site (or a portfolio) opts in by name.
@@ -66,6 +68,9 @@ export const POLICIES = {
   'tags-via-zaraz': 'Every third-party tag, GTM included, loads through Cloudflare Zaraz',
   'turnstile-forms': 'Every public form carries Cloudflare Turnstile',
   'workers-builds-only': 'Cloudflare Workers Builds is the only deployer (no Pages config, no Cloudflare tokens in workflows)',
+  'market-cn': 'The site serves mainland China: no Google, YouTube, Facebook, X or Gravatar resources, ASCII URLs',
+  'rtl-logical-css': 'The site serves right-to-left languages: built CSS uses logical properties, not left/right',
+  'consent-before-tracking': 'No tracking cookie or tracker loads before the visitor consents',
 };
 
 // Guards a site may exempt for a while, with a reason and a restore date. A guard
@@ -80,6 +85,8 @@ export const GUARDS = {
   turnstile: { policy: 'turnstile-forms', what: 'forms without Turnstile' },
   'pages-config': { policy: 'workers-builds-only', what: 'Pages config instead of Workers' },
   'cloudflare-in-workflows': { policy: 'workers-builds-only', what: 'Cloudflare API token or wrangler write in a workflow' },
+  'blocked-in-cn': { policy: 'market-cn', what: 'resources blocked in mainland China' },
+  consent: { policy: 'consent-before-tracking', what: 'tracking before consent' },
   'node-pin': { what: 'Node pin missing or below the floor' },
   'public-lighthouse': { what: 'Lighthouse reports in public storage' },
 };
@@ -142,6 +149,12 @@ const policies = cfg.policies ?? [];
 if (!Array.isArray(policies) || policies.some((p) => !(p in POLICIES)))
   err(`policies must be a list drawn from: ${Object.keys(POLICIES).join(', ')}.`);
 const policyOn = (p) => Array.isArray(policies) && policies.includes(p);
+// Other search engines' crawlers the site must admit, on top of Googlebot and Bingbot.
+const searchCrawlers = cfg.discovery?.searchCrawlers ?? [];
+if (!isNameList(searchCrawlers, CRAWLER_TOKEN))
+  err('discovery.searchCrawlers must be a list of crawler tokens such as "Baiduspider", "Yeti" or "YandexBot".');
+else for (const c of searchCrawlers) if (SEARCH_CRAWLERS.some((b) => b.toLowerCase() === c.toLowerCase()))
+  err(`discovery.searchCrawlers: ${c} is always checked — remove it.`);
 
 // ── Discovery rules (SEO, AEO, GEO, AIO): raising a level is free; lowering needs a reason and a date ──
 const discoveryLevels = Object.fromEntries(Object.entries(DISCOVERY_RULES).map(([k, r]) => [k, r.level]));
@@ -160,7 +173,7 @@ for (const [i, o] of (Array.isArray(dOverrides) ? dOverrides : []).entries()) {
   discoveryLevels[o.rule] = o.level;
 }
 const discovery = cfg.discovery ?? {};
-for (const k of Object.keys(discovery)) if (!['sitemap', 'ignoreLinks'].includes(k)) err(`discovery.${k} is not a setting. Use sitemap, ignoreLinks.`);
+for (const k of Object.keys(discovery)) if (!['sitemap', 'ignoreLinks', 'searchCrawlers'].includes(k)) err(`discovery.${k} is not a setting. Use sitemap, ignoreLinks, searchCrawlers.`);
 if (discovery.sitemap !== undefined && !(typeof discovery.sitemap === 'string' && /^\/\S+\.xml$/.test(discovery.sitemap)))
   err('discovery.sitemap must be the sitemap\'s path, e.g. "/sitemap-index.xml".');
 if (discovery.ignoreLinks !== undefined && !isPathList(discovery.ignoreLinks))
@@ -172,6 +185,7 @@ if (mode === 'post-deploy') {
   exportEnv('SHIP_GATE_SMOKE_PATHS', smokePaths.join(' '));
   exportEnv('SHIP_GATE_POLICIES', policies.join(' '));
   exportEnv('SHIP_GATE_DISCOVERY_LEVELS', JSON.stringify(discoveryLevels));
+  exportEnv('SHIP_GATE_SEARCH_CRAWLERS', searchCrawlers.join(' '));
   console.log('Post-deploy config loaded.');
   process.exit(0);
 }
@@ -212,6 +226,14 @@ else for (const h of DEFAULT_SECURITY_HEADERS) if (!securityHeaders.includes(h))
 const reflowWidths = cfg.reflowWidths ?? DEFAULT_REFLOW_WIDTHS;
 if (!Array.isArray(reflowWidths) || !reflowWidths.every((w) => Number.isInteger(w) && w >= 280 && w <= 1440) || !reflowWidths.includes(320))
   err('reflowWidths must be a list of viewport widths in px that includes 320 (WCAG 1.4.10).');
+// Keyboard operability warns by default while sites adopt it; a site may raise it to error.
+const keyboard = cfg.keyboard ?? 'warn';
+if (!['warn', 'error'].includes(keyboard)) err('keyboard must be "warn" (the default) or "error".');
+const consentEssentialCookies = cfg.consentEssentialCookies ?? [];
+if (!isNameList(consentEssentialCookies, /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/))
+  err('consentEssentialCookies must be a list of cookie names, e.g. "session" or "cf_clearance".');
+else if (consentEssentialCookies.length && !policyOn('consent-before-tracking'))
+  warn('consentEssentialCookies lists cookies, but only the consent-before-tracking policy uses it. Add the policy or remove the list.');
 
 // ── Assertions: stricter is always allowed; looser needs a reason and a restore date ──
 function strictness(std, o) {
@@ -417,7 +439,10 @@ if (mode === 'after-build') {
     reflowWidths,
     exempt,
     policies,
-    discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [] },
+    keyboard,
+    consentEssentialCookies,
+    trackerPatterns: TRACKER_PATTERNS,
+    discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [], searchCrawlers },
   }, null, 2));
   console.log(`Ship Gate after build: ${all.length} indexable page(s) in ${root}; Lighthouse ${lhUrls.length} URL(s) × ${runs} run(s).`);
   process.exit(0);
@@ -427,7 +452,7 @@ if (mode === 'after-build') {
 mkdirSync(OUT, { recursive: true });
 // Ship Gate's own test tooling, pinned by its lockfile. Sites don't carry these dependencies.
 for (const f of ['package.json', 'package-lock.json']) copyFileSync(join(HERE, '..', 'tools', f), join(OUT, f));
-for (const f of ['smoke.spec.ts', 'reflow.spec.ts', 'csp.spec.ts', 'edge.spec.ts', 'helpers.ts']) copyFileSync(join(HERE, '..', 'e2e', f), join(OUT, f));
+for (const f of ['smoke.spec.ts', 'reflow.spec.ts', 'csp.spec.ts', 'edge.spec.ts', 'keyboard.spec.ts', 'consent.spec.ts', 'helpers.ts']) copyFileSync(join(HERE, '..', 'e2e', f), join(OUT, f));
 writeFileSync(
   join(OUT, 'playwright.config.ts'),
   `// Generated by Ship Gate — do not edit or commit.

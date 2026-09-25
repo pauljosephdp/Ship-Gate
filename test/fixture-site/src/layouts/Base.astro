@@ -1,6 +1,12 @@
 ---
-interface Props { title: string; description: string }
-const { title, description } = Astro.props;
+interface Props { title: string; description: string; lang?: string }
+const { title, description, lang = 'en' } = Astro.props;
+const dir = ['ar', 'he', 'fa', 'ur'].includes(lang.split('-')[0]) ? 'rtl' : undefined;
+// The home page and its Arabic version name each other, so hreflang pairs link both ways.
+const languages = { en: '/', ar: '/ar/' };
+const alternates = Object.values(languages).includes(Astro.url.pathname)
+  ? Object.entries(languages).map(([hreflang, path]) => ({ hreflang, href: new URL(path, Astro.site).href }))
+  : [];
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const image = new URL('/og.png', Astro.site);
 // The site entity goes on the home page; every page names the site it belongs to.
@@ -13,13 +19,14 @@ const graph = [
 ];
 ---
 <!doctype html>
-<html lang="en">
+<html lang={lang} dir={dir}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
+    {alternates.map((a) => <link rel="alternate" hreflang={a.hreflang} href={a.href} />)}
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -28,7 +35,7 @@ const graph = [
     <script type="application/ld+json" set:html={JSON.stringify({ '@context': 'https://schema.org', '@graph': graph })} />
   </head>
   <body>
-    <header><nav aria-label="Main"><a href="/">Home</a> <a href="/about/">About</a> <a href="/contact/">Contact</a></nav></header>
+    <header><nav aria-label="Main"><a href="/">Home</a> <a href="/about/">About</a> <a href="/contact/">Contact</a> <a href="/ar/" lang="ar" hreflang="ar">العربية</a></nav></header>
     <main><slot /></main>
     <footer><p>Ship Gate fixture site.</p></footer>
   </body>

@@ -6,7 +6,8 @@
 //   node check-live.mjs   (reads SHIP_GATE_SITE_URL, SHIP_GATE_SMOKE_PATHS, SHIP_GATE_DISCOVERY_LEVELS)
 //
 // robots-txt: 200, text/plain, at least one User-agent group, and no Googlebot,
-//   Bingbot or AI search crawler blocked from a smoke path (ai-search-crawlers).
+//   Bingbot, crawler in discovery.searchCrawlers (SHIP_GATE_SEARCH_CRAWLERS) or AI
+//   search crawler blocked from a smoke path (ai-search-crawlers).
 // sitemap-live: every on-site Sitemap in robots.txt answers 200 with a sitemap.
 // link-headers: the home page sends a Link header with an agent-discovery rel.
 // markdown-negotiation: Accept: text/markdown gets Markdown; browsers still get HTML.
@@ -19,6 +20,7 @@ import {
 } from './discovery.mjs';
 
 const site = process.env.SHIP_GATE_SITE_URL;
+const extra = (process.env.SHIP_GATE_SEARCH_CRAWLERS || '').split(/\s+/).filter(Boolean);
 const paths = (process.env.SHIP_GATE_SMOKE_PATHS || '/').split(/\s+/).filter((p) => p && !/\.(txt|xml)$/.test(p));
 let levels = {};
 try { levels = JSON.parse(process.env.SHIP_GATE_DISCOVERY_LEVELS || '{}'); } catch { /* defaults */ }
@@ -41,9 +43,9 @@ else {
   robots = parseRobots(await res.text());
   if (type(res) !== 'text/plain') add('robots-txt', `Production robots.txt is served as "${type(res) || 'no Content-Type'}"; RFC 9309 expects text/plain.`);
   if (robots.groups.length === 0) add('robots-txt', 'Production robots.txt has no "User-agent:" line, so it holds no rules. Check the CDN\'s managed robots.txt.');
-  for (const bot of [...SEARCH_CRAWLERS, ...AI_SEARCH_CRAWLERS]) {
+  for (const bot of [...SEARCH_CRAWLERS, ...extra, ...AI_SEARCH_CRAWLERS]) {
     const blocked = paths.filter((p) => !robotsAllows(robots, bot, p));
-    if (blocked.length) add(SEARCH_CRAWLERS.includes(bot) ? 'robots-blocks-page' : 'ai-search-crawlers',
+    if (blocked.length) add(AI_SEARCH_CRAWLERS.includes(bot) ? 'ai-search-crawlers' : 'robots-blocks-page',
       `Production robots.txt blocks ${bot} from ${blocked.join(', ')}. Check the CDN's managed robots.txt and AI-crawler settings.`);
   }
   const training = AI_TRAINING_TOKENS.filter((t) => !robotsAllows(robots, t, '/'));

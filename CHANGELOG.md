@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.1.0 — 2026-09-25
+## v2.2.0 — 2026-09-25
 
 Agent-readiness checks: the gaps an isitagentready.com scan reported, as
 discovery rules. New rules warn by default. A site whose `robots.txt` follows
@@ -28,7 +28,8 @@ RFC 9309 stays green; the ones that can fail are listed first.
   `text/markdown`, and browsers still get HTML.
 
 **Post-deploy**
-- `check-robots-live.mjs` is now `check-live.mjs`. It honours
+- `check-robots-live.mjs` is now `check-live.mjs` (it keeps
+  `discovery.searchCrawlers`). It honours
   `discoveryOverrides`, so a site can lower or raise the live rules like the
   build ones. Its robots crawler checks report as `robots-blocks-page` and
   `ai-search-crawlers`.
@@ -36,9 +37,62 @@ RFC 9309 stays green; the ones that can fail are listed first.
 **Not added**: DNS-AID. It is an individual Internet-Draft and applies only to
 sites with agent endpoints.
 
-**Self-test**: 218 cases (was 192), including a stand-in production server for
+**Self-test**: 248 cases (was 222), including a stand-in production server for
 the live checks. New fixture variant `robots-no-agents` must fail the discovery
 scan.
+
+## v2.1.0 — 2026-09-25
+
+Closes gaps found by checking Ship Gate against a 2026 global SEO and GEO
+checklist. The new rules either warn or are opt-in, with one exception:
+`rtl-direction` fails, and only a page in a right-to-left language without
+`dir="rtl"` can trigger it. That page is already broken for its readers.
+
+**Discovery scan: four new rules**
+- `redirect-permanence` (SEO, warn): a `_redirects` rule answering 302 or 307,
+  including a rule with no status (Cloudflare's default is 302).
+- `rtl-direction` (SEO, error): a page whose `lang` is a right-to-left language
+  has no `dir="rtl"`.
+- `hreflang-pairs` (SEO, warn): an `hreflang` alternate names a page that is
+  missing from the build or doesn't link back.
+- `markdown-mirrors` (GEO, warn): a Markdown or text file linked from
+  `llms.txt` has no `X-Robots-Tag: noindex` or canonical `Link` header. A
+  `robots.txt` Disallow does not keep a URL out of the index.
+- New `discovery.searchCrawlers` setting: extra crawler tokens (`Baiduspider`,
+  `Yeti`, `YandexBot`) that `robots-blocks-page` and the post-deploy
+  robots.txt check must admit.
+
+**Browser checks**
+- Keyboard: Tab reaches every control, focus is never trapped, and every
+  focused control is on screen and visibly changes (WCAG 2.1.2, 2.4.7,
+  2.4.11). It warns by default; `"keyboard": "error"` makes it fail.
+- Consent (`consent-before-tracking` policy): no non-essential cookie and no
+  tracker before the visitor chooses. `consentEssentialCookies` lists the
+  strictly necessary ones.
+
+**New stack policies (off by default)**
+- `market-cn`: fails when the build loads from hosts blocked in mainland China
+  (Google, YouTube, Facebook, Instagram, X, Vimeo, Gravatar). Exemptible guard:
+  `blocked-in-cn`.
+- `rtl-logical-css`: warns on physical left/right CSS that won't mirror under
+  `dir="rtl"`.
+- `consent-before-tracking`: see Browser checks. Exemptible guard: `consent`.
+- New "Market scan" row in the summary.
+
+**Post-deploy**
+- Fails when `/`, `/robots.txt` or a smoke path answers 403 or 429 to a plain
+  request (a WAF refusing ordinary traffic refuses crawlers too).
+- Warns when a page has neither `ETag` nor `Last-Modified`.
+- Optional `crux-api-key` input: field Core Web Vitals (p75 LCP, INP, CLS on
+  phones) from the Chrome UX Report, warn-only.
+
+**Docs**
+- README "Out of scope" section: content-quality heuristics, WAF
+  configuration, legal compliance, accessibility overlays and IndexNow
+  submission, each with the reason it isn't gated.
+- The fixture site gains an Arabic page with hreflang pairs, a Markdown mirror
+  and the new policies. The new break variants are `rtl-no-dir`, `google-font`,
+  `no-focus-ring` and `tracker-cookie`.
 
 ## v2.0.0 — 2026-09-24
 

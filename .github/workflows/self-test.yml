@@ -52,6 +52,10 @@ jobs:
           - { variant: blocks-ai-search, fails: "Discovery (SEO, AEO, GEO, AIO)" }
           - { variant: bad-jsonld, fails: "Discovery (SEO, AEO, GEO, AIO)" }
           - { variant: robots-no-agents, fails: "Discovery (SEO, AEO, GEO, AIO)" }
+          - { variant: rtl-no-dir, fails: "Discovery (SEO, AEO, GEO, AIO)" }
+          - { variant: google-font, fails: "Market scan" }
+          - { variant: no-focus-ring, fails: "Smoke, axe, reflow, CSP, edge" }
+          - { variant: tracker-cookie, fails: "Smoke, axe, reflow, CSP, edge" }
     steps:
       - uses: actions/checkout@v4
       - name: Break the fixture

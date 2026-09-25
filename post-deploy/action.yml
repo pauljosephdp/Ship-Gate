@@ -3,8 +3,10 @@ description: >
   After a merge to main: waits until production serves the merged commit
   (build-sha meta tag), smoke-checks key URLs, checks the robots.txt,
   sitemaps, Link headers and Markdown negotiation production serves to
-  crawlers and agents, and (posthog-server-only policy) that production
-  HTML is PostHog-free. On failure: roll back, then fix forward.
+  crawlers and agents and that no WAF refuses plain requests, reports
+  freshness headers and (optional) field Core Web Vitals, and
+  (posthog-server-only policy) that production HTML is PostHog-free.
+  On failure: roll back, then fix forward.
 author: Ship Gate
 inputs:
   working-directory:
@@ -16,6 +18,11 @@ inputs:
   wait-minutes:
     description: How long to wait for the deploy pipeline to serve the new commit.
     default: "10"
+  crux-api-key:
+    description: >
+      Optional Google API key with the Chrome UX Report API enabled. When set, field Core Web
+      Vitals (p75 LCP, INP, CLS on phones) are reported, warning on any miss. Pass a secret.
+    default: ""
 runs:
   using: composite
   steps:
@@ -53,6 +60,12 @@ runs:
     - name: Production serves crawlers and agents (robots.txt, sitemaps, Link, Markdown)
       shell: bash
       run: node "$GITHUB_ACTION_PATH/../scripts/check-live.mjs"
+
+    - name: Production answers plain requests; freshness headers; field Core Web Vitals
+      shell: bash
+      env:
+        CRUX_API_KEY: ${{ inputs.crux-api-key }}
+      run: node "$GITHUB_ACTION_PATH/../scripts/check-headers-live.mjs"
 
     - name: Production HTML is PostHog-free
       if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only ')

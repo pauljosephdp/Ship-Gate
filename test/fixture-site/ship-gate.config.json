@@ -1,9 +1,12 @@
 {
   "siteUrl": "https://example.com",
-  "policies": ["posthog-server-only", "tags-via-zaraz", "turnstile-forms", "workers-builds-only"],
-  "pages": ["/", "/about/", "/contact/"],
+  "policies": ["posthog-server-only", "tags-via-zaraz", "turnstile-forms", "workers-builds-only",
+               "market-cn", "rtl-logical-css", "consent-before-tracking"],
+  "pages": ["/", "/about/", "/contact/", "/ar/"],
   "formPages": ["/contact/"],
   "smokePaths": ["/"],
   "lighthouseUrls": "all",
-  "e2ePages": "all"
+  "e2ePages": "all",
+  "keyboard": "error",
+  "discovery": { "searchCrawlers": ["Baiduspider", "Yeti"] }
 }

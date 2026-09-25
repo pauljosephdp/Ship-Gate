@@ -187,6 +187,15 @@ expect_prepare "discovery: changes nothing"       "changes nothing"           "c
 expect_prepare "discovery: unknown rule"          "rule must be one of"       "cfg '\"discoveryOverrides\":[{\"rule\":\"seo-score\",\"level\":\"warn\"}]'"
 expect_prepare "discovery: bad sitemap path"      "discovery.sitemap"         "cfg '\"discovery\":{\"sitemap\":\"sitemap.xml\"}'"
 expect_prepare "discovery: unknown setting"       "is not a setting"          "cfg '\"discovery\":{\"llms\":true}'"
+expect_prepare "discovery: extra search crawlers"  pass                        "cfg '\"discovery\":{\"searchCrawlers\":[\"Baiduspider\",\"Yeti\",\"YandexBot\"]}'"
+expect_prepare "discovery: crawler always checked" "is always checked"         "cfg '\"discovery\":{\"searchCrawlers\":[\"googlebot\"]}'"
+expect_prepare "discovery: crawler token invalid"  "crawler tokens"            "cfg '\"discovery\":{\"searchCrawlers\":[\"Baidu spider\"]}'"
+expect_prepare "market and consent policies"       pass                        "cfg '\"policies\":[\"market-cn\",\"rtl-logical-css\",\"consent-before-tracking\"],\"consentEssentialCookies\":[\"session\"]'"
+expect_prepare "essential cookies without policy"  "warn:only the consent-before-tracking" "cfg '\"consentEssentialCookies\":[\"session\"]'"
+expect_prepare "essential cookie name invalid"     "consentEssentialCookies must be" "cfg '\"policies\":[\"consent-before-tracking\"],\"consentEssentialCookies\":[\"a b\"]'"
+expect_prepare "keyboard raised to error"          pass                        "cfg '\"keyboard\":\"error\"'"
+expect_prepare "keyboard level invalid"            "keyboard must be"          "cfg '\"keyboard\":\"off\"'"
+expect_prepare "blocked-in-cn exempt, no policy"   "changes nothing"           "cfg '\"guardExemptions\":[{\"guard\":\"blocked-in-cn\",\"reason\":\"Fonts self-hosted next sprint\",\"restoreBy\":\"$FUTURE\"}]'"
 expect_prepare "check reaches deploy via npm run" "touches production"        "sed -i 's/\"test\": \"vitest run\"/\"test\": \"vitest run\", \"verify\": \"npm run check:canon \&\& npm run deploy\"/' package.json && cfg '\"checks\":{\"postBuild\":[\"verify\"]}'"
 expect_prepare "check runs a file that deploys"   "touches production"        "mkdir -p scripts && echo \"execFileSync('npx', ['wrangler', 'r2', 'object', 'put'])\" > scripts/canon.mjs && cfg '\"checks\":{\"postBuild\":[\"check:canon\"]}'"
 expect_prepare "check submits to IndexNow"        "touches production"        "mkdir -p scripts && echo \"fetch('https://api.indexnow.org/IndexNow')\" > scripts/canon.mjs && cfg '\"checks\":{\"postBuild\":[\"check:canon\"]}'"
@@ -308,6 +317,17 @@ built_case "copy: TODO left in"                   "TODO:"               $C "page
 built_case "copy: citations and labels pass"      pass                  $C "page /x.html 'Page x of the site' 'A page with citations for the self-test run.' '<p>As shown [1], see the brochure [PDF] [sic].</p><pre>TODO: code sample</pre>'"
 built_case "copy: allowlisted string"             pass                  $C "page /x.html 'Page x of the site' 'A page with an allowed bracket for the self-test.' '<p>Sign as [Your Name].</p>'" '"copyAllowlist":["[Your Name]"]'
 built_case "copy: noindex draft not scanned"      pass                  $C "page /x.html 'Draft' 'Draft page' '<p>TODO: all of it</p>' && sed -i 's#<head>#<head><meta name=\"robots\" content=\"noindex\">#' dist/client/x.html"
+M=check-market.mjs
+CN='"policies":["market-cn"]'
+GFONT='<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">'
+built_case "market-cn: Google Fonts stylesheet"   "blocked in mainland China" $M "page /x.html 'Page x of the site' 'A page with a Google font for the self-test run.' '$GFONT'" "$CN"
+built_case "market-cn: YouTube image in CSS"      "blocked in mainland China" $M "mkdir -p dist/client/_astro && echo '.hero{background:url(//i.ytimg.com/vi/x/0.jpg)}' > dist/client/_astro/a.css" "$CN"
+built_case "market-cn: links and sameAs load nothing" pass                $M "page /x.html 'Page x of the site' 'A page with social links for the self-test run.' '<a href=\"https://www.youtube.com/@example\">YouTube</a><script type=\"application/ld+json\">{\"sameAs\":[\"https://x.com/example\"]}</script>'" "$CN"
+built_case "market-cn: jsdelivr warns"            "warn:unreliable from mainland China" $M "page /x.html 'Page x of the site' 'A page with a public CDN script for the self-test.' '<script src=\"https://cdn.jsdelivr.net/npm/a@1/a.js\"></script>'" "$CN"
+built_case "market-cn: exemption warns"           "warn:[exempt: blocked-in-cn]" $M "page /x.html 'Page x of the site' 'A page with a Google font for the self-test run.' '$GFONT'" "\"policies\":[\"market-cn\"],\"guardExemptions\":[{\"guard\":\"blocked-in-cn\",\"reason\":\"Fonts self-hosted next sprint\",\"restoreBy\":\"$FUTURE\"}]"
+built_case "market-cn off: Google Fonts allowed"  pass                    $M "page /x.html 'Page x of the site' 'A page with a Google font for the self-test run.' '$GFONT'"
+built_case "rtl-logical-css: physical CSS warns"  "warn:won't mirror under dir" $M "mkdir -p dist/client/_astro && echo '.a{margin-left:1rem;text-align:left}.b{left:0}' > dist/client/_astro/a.css" '"policies":["rtl-logical-css"]'
+built_case "rtl-logical-css: logical CSS passes"  pass                    $M "mkdir -p dist/client/_astro && echo '.a{margin-inline-start:1rem;text-align:start}.b{inset-inline-start:0}' > dist/client/_astro/a.css" '"policies":["rtl-logical-css"]'
 all_case() {
   local d out; d="$(baseline)"; cd "$d" || return
   cfg '"lighthouseUrls":"all","e2ePages":"all"'; built
@@ -437,6 +457,23 @@ disco_case "nosnippet (warn)"                    "warn:stops Google quoting"    
 disco_case "max-image-preview:none (warn)"       "warn:hides the page"            "inject dist/client/about/index.html '</head>' '<meta name=\"googlebot\" content=\"max-image-preview:none\">'"
 disco_case "no llms.txt (warn)"                  "warn:llms.txt: not in the build" "rm dist/client/llms.txt"
 disco_case "llms.txt malformed"                  "must start with"                "printf 'Example site\n- [About](/about/)\n' > dist/client/llms.txt"
+ROBOTS_BAIDU="printf 'User-agent: Baiduspider\nDisallow: /\n\nUser-agent: *\nContent-Signal: search=yes\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "extra crawler blocked when listed"   "blocks Baiduspider"             "$ROBOTS_BAIDU" '"discovery":{"searchCrawlers":["Baiduspider"]}'
+disco_case "extra crawler not listed: unchecked" pass                             "$ROBOTS_BAIDU"
+disco_case "302 redirect (warn)"                 "warn:a temporary move"          "printf '/old /about/ 302\n' > dist/client/_redirects"
+disco_case "redirect with no status (warn)"      "warn:default when no status"    "printf '/old /about/\n' > dist/client/_redirects"
+disco_case "301, 308 and rewrites pass"          pass                             "printf '/old /about/ 301\n/new /about/ 308\n/alias /about/ 200\n' > dist/client/_redirects"
+RTL="dpage /ar/index.html Arabic && sed -i 's#<html lang=\"en\">#<html lang=\"ar\">#' dist/client/ar/index.html && sitemap / /about/ /ar/"
+RTLDIR="$RTL && sed -i 's#<html lang=\"ar\">#<html lang=\"ar\" dir=\"rtl\">#' dist/client/ar/index.html"
+disco_case "RTL page without dir"                "has no dir=\"rtl\""             "$RTL"
+disco_case "RTL page with dir on html"           pass                             "$RTLDIR"
+disco_case "RTL region subtag, dir on body"      pass                             "$RTL && sed -i 's#<html lang=\"ar\">#<html lang=\"ar-AE\">#; s#<body>#<body dir=\"rtl\">#' dist/client/ar/index.html"
+HL_EN='<link rel="alternate" hreflang="en" href="https://example.com/"><link rel="alternate" hreflang="ar" href="https://example.com/ar/">'
+disco_case "hreflang pair links both ways"       pass                             "$RTLDIR && inject dist/client/index.html '</head>' '$HL_EN' && inject dist/client/ar/index.html '</head>' '$HL_EN'"
+disco_case "hreflang one way (warn)"             "warn:has no hreflang link back" "$RTLDIR && inject dist/client/index.html '</head>' '$HL_EN'"
+disco_case "hreflang to a missing page (warn)"   "warn:not an indexable page"     "inject dist/client/index.html '</head>' '<link rel=\"alternate\" hreflang=\"fr\" href=\"https://example.com/fr/\">'"
+disco_case "Markdown mirror indexable (warn)"    "warn:can be indexed as duplicates" "echo '# About' > dist/client/about.md && printf '# Example\n\n> The example site.\n\n- [About](/about.md)\n' > dist/client/llms.txt"
+disco_case "Markdown mirror sends noindex"       pass                             "echo '# About' > dist/client/about.md && printf '# Example\n\n> The example site.\n\n- [About](https://example.com/about.md)\n' > dist/client/llms.txt && printf '/*.md\n  X-Robots-Tag: noindex\n' >> dist/client/_headers"
 disco_case "rule lowered with a reason"          "warn:0 canonical links"         "sed -i 's#<link rel=\"canonical\"[^>]*>##' dist/client/about/index.html" "\"discoveryOverrides\":[{\"rule\":\"canonical\",\"level\":\"warn\",\"reason\":\"Canonicals ship with the new layout\",\"restoreBy\":\"$FUTURE\"}]"
 disco_case "warning raised to error"             "llms.txt: not in the build"     "rm dist/client/llms.txt" '"discoveryOverrides":[{"rule":"llms-txt","level":"error"}]'
 disco_case "rule turned off (warns it is lowered)" "warn:lowered to off"          "rm dist/client/llms.txt" "\"discoveryOverrides\":[{\"rule\":\"llms-txt\",\"level\":\"off\",\"reason\":\"llms.txt waits on the content audit\",\"restoreBy\":\"$FUTURE\"}]"

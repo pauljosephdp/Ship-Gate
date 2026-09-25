@@ -5,20 +5,22 @@
 //
 //   node check-robots-live.mjs     (reads SHIP_GATE_SITE_URL and SHIP_GATE_SMOKE_PATHS)
 //
-// Fails when production blocks Googlebot, Bingbot or an AI search crawler from a
-// smoke path; reports which AI training crawlers are blocked.
+// Fails when production blocks Googlebot, Bingbot, a crawler in discovery.searchCrawlers
+// (SHIP_GATE_SEARCH_CRAWLERS) or an AI search crawler from a smoke path; reports which AI
+// training crawlers are blocked.
 // No dependencies: Node built-ins only.
 
 import { SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, parseRobots, robotsAllows } from './discovery.mjs';
 
 const site = process.env.SHIP_GATE_SITE_URL;
+const extra = (process.env.SHIP_GATE_SEARCH_CRAWLERS || '').split(/\s+/).filter(Boolean);
 const paths = (process.env.SHIP_GATE_SMOKE_PATHS || '/').split(/\s+/).filter((p) => p && !/\.(txt|xml)$/.test(p));
 const res = await fetch(`${site}/robots.txt?cb=${Date.now()}`);
 if (res.status === 404) { console.log('::warning::Production serves no robots.txt — every crawler is allowed.'); process.exit(0); }
 if (!res.ok) { console.log(`::error::Production robots.txt answered ${res.status}. Crawlers treat 5xx as "disallow everything".`); process.exit(1); }
 const robots = parseRobots(await res.text());
 const errors = [];
-for (const bot of [...SEARCH_CRAWLERS, ...AI_SEARCH_CRAWLERS]) {
+for (const bot of [...SEARCH_CRAWLERS, ...extra, ...AI_SEARCH_CRAWLERS]) {
   const blocked = paths.filter((p) => !robotsAllows(robots, bot, p));
   if (blocked.length) errors.push(`Production robots.txt blocks ${bot} from ${blocked.join(', ')}. Check the CDN's managed robots.txt and AI-crawler settings.`);
 }

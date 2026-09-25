@@ -10,7 +10,8 @@
   "e2ePages": "all",
   "structure": { "titleMax": 75 },
   "copyAllowlist": [],
-  "discovery": { "ignoreLinks": [] },
+  "keyboard": "warn",
+  "discovery": { "ignoreLinks": [], "searchCrawlers": [] },
   "checks": {
     "preBuild": [],
     "postBuild": [],

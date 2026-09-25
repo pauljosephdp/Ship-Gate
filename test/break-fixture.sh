@@ -14,6 +14,10 @@ case "$1" in
   two-h1) add '<h1>A second top-level heading</h1>' ;;
   blocks-ai-search) printf '\nUser-agent: PerplexityBot\nDisallow: /\n' >> public/robots.txt ;;
   bad-jsonld) add '<script type="application/ld+json" set:html="{not json" />' ;;
+  rtl-no-dir) sed -i 's# dir={dir}##' src/layouts/Base.astro ;;
+  google-font) add '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">' ;;
+  no-focus-ring) add '<p><a href="/contact/" style="outline:none">Write to the fixture</a></p>' ;;
+  tracker-cookie) printf '/\n  Set-Cookie: _ga=GA1.1.123.456; Path=/\n' >> public/_headers ;;
   direct-tag) add '<script is:inline async src="https://www.googletagmanager.com/gtm.js?id=GTM-ABCD123"></script>' ;;
   *) echo "Unknown variant: $1" >&2; exit 2 ;;
 esac

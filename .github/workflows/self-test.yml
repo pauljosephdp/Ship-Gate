@@ -86,11 +86,12 @@ jobs:
 
   # Every push to main that passes every check above publishes the version named by
   # the newest CHANGELOG.md heading, once. Sites pin these tags, so a release never
-  # tags a red commit. Pull requests and other branches never release.
+  # tags a red commit. Pull requests and other branches never release. A manual run
+  # (workflow_dispatch) on main re-runs every check, then publishes a release a push missed.
   release:
     name: release
     needs: [self-test, fixture]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

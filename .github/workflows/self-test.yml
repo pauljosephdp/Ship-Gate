@@ -51,6 +51,7 @@ jobs:
           - { variant: direct-tag, fails: "Stack guards" }
           - { variant: blocks-ai-search, fails: "Discovery (SEO, AEO, GEO, AIO)" }
           - { variant: bad-jsonld, fails: "Discovery (SEO, AEO, GEO, AIO)" }
+          - { variant: robots-no-agents, fails: "Discovery (SEO, AEO, GEO, AIO)" }
     steps:
       - uses: actions/checkout@v4
       - name: Break the fixture

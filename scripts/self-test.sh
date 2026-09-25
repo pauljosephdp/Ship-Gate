@@ -356,7 +356,8 @@ discovered() {
   dpage /index.html "Home"; dpage /about/index.html "About"
   inject dist/client/index.html '</head>' "$ORG"
   echo png > dist/client/og.png
-  printf 'User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt
+  printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt
+  printf '/\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n' > dist/client/_headers
   sitemap / /about/
   printf '# Example\n\n> The example site.\n\n- [About](/about/)\n' > dist/client/llms.txt
 }
@@ -376,12 +377,25 @@ disco_case "robots.txt without Sitemap"          "no \"Sitemap:\" line"         
 disco_case "robots.txt Sitemap off-site"         "is not an absolute URL on"      "printf 'User-agent: *\nAllow: /\nSitemap: https://cdn.example.net/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "robots.txt blocks everything"        "blocks Googlebot"               "printf 'User-agent: *\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "robots.txt blocks one page for Bing" "blocks Bingbot"                 "printf 'User-agent: bingbot\nDisallow: /about/\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "longest match: Allow beats Disallow" pass                             "printf 'User-agent: *\nDisallow: /\nAllow: /$\nAllow: /about/\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "longest match: Allow beats Disallow" pass                             "printf 'User-agent: *\nContent-Signal: search=yes\nDisallow: /\nAllow: /$\nAllow: /about/\n\nUser-agent: GPTBot\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "AI search crawler blocked"           "blocks OAI-SearchBot"           "printf 'User-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "AI user-fetch crawler blocked"       "blocks Claude-User"             "printf 'User-agent: Claude-User\nUser-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "only training crawlers blocked"      pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "robots.txt without User-agent"        "has no \"User-agent:\" line"   "printf 'Content-Signal: search=yes\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "no AI crawler group (warn)"          "warn:names no AI crawler"       "printf 'User-agent: *\nContent-Signal: search=yes\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "no Content-Signal (warn)"            "warn:no \"Content-Signal:\" line" "sed -i '/Content-Signal/d' dist/client/robots.txt"
+disco_case "Content-Signal unknown key"          "\"ai_train\" is not"            "sed -i 's#ai-train=no#ai_train=no#' dist/client/robots.txt"
+disco_case "Content-Signal bad value"            "\"ai-train=maybe\" is not"      "sed -i 's#ai-train=no#ai-train=maybe#' dist/client/robots.txt"
+disco_case "Content-Signal outside a group"      "before any User-agent line"     "sed -i '1i Content-Signal: search=yes' dist/client/robots.txt"
+disco_case "no /sitemap.xml (warn)"              "warn:/sitemap.xml: not in the build" "mv dist/client/sitemap.xml dist/client/sitemap-index.xml && sed -i 's#sitemap.xml#sitemap-index.xml#' dist/client/robots.txt"
+disco_case "/sitemap.xml redirects"              pass                             "mv dist/client/sitemap.xml dist/client/sitemap-index.xml && sed -i 's#sitemap.xml#sitemap-index.xml#' dist/client/robots.txt && printf '/sitemap.xml /sitemap-index.xml 301\n' > dist/client/_redirects"
+disco_case "no Link header (warn)"               "warn:no Link header"            "rm dist/client/_headers"
+disco_case "Link header from a /* rule"          pass                             "printf '/*\n  Link: </.well-known/api-catalog>; rel=\"api-catalog\"\n' > dist/client/_headers && mkdir -p dist/client/.well-known && echo '{}' > dist/client/.well-known/api-catalog"
+disco_case "Link without an agent rel (warn)"    "warn:has no rel of"             "sed -i 's#describedby#bogus#' dist/client/_headers"
+disco_case "Link target not built (warn)"        "warn:is not in the build"       "rm dist/client/llms.txt" '"discoveryOverrides":[{"rule":"llms-txt","level":"off","reason":"llms.txt waits on the content audit","restoreBy":"'"$FUTURE"'"}]'
+disco_case "Link malformed (warn)"               "warn:does not start with <URI>" "printf '/\n  Link: /llms.txt; rel=describedby\n' > dist/client/_headers"
 disco_case "no sitemap"                          "no sitemap found"               "rm dist/client/sitemap.xml && printf 'User-agent: *\nAllow: /\n' > dist/client/robots.txt"
-disco_case "sitemap index with a child sitemap"  pass                             "mv dist/client/sitemap.xml dist/client/sitemap-0.xml && printf '<sitemapindex><sitemap><loc>https://example.com/sitemap-0.xml</loc></sitemap></sitemapindex>' > dist/client/sitemap-index.xml && sed -i 's#sitemap.xml#sitemap-index.xml#' dist/client/robots.txt"
+disco_case "sitemap index with a child sitemap"  pass                             "mv dist/client/sitemap.xml dist/client/sitemap-0.xml && printf '<sitemapindex><sitemap><loc>https://example.com/sitemap-0.xml</loc></sitemap></sitemapindex>' > dist/client/sitemap-index.xml && sed -i 's#sitemap.xml#sitemap-index.xml#' dist/client/robots.txt && printf '/sitemap.xml /sitemap-index.xml 301\n' > dist/client/_redirects"
 disco_case "sitemap child missing"               "not in the build"               "printf '<sitemapindex><sitemap><loc>https://example.com/sitemap-9.xml</loc></sitemap></sitemapindex>' > dist/client/sitemap.xml"
 disco_case "sitemap misses a page"               "indexable, but not in the sitemap" "sitemap /"
 disco_case "sitemap lists a redirecting URL"     "that URL redirects"             "sitemap / /about/ /about"
@@ -426,6 +440,58 @@ disco_case "llms.txt malformed"                  "must start with"              
 disco_case "rule lowered with a reason"          "warn:0 canonical links"         "sed -i 's#<link rel=\"canonical\"[^>]*>##' dist/client/about/index.html" "\"discoveryOverrides\":[{\"rule\":\"canonical\",\"level\":\"warn\",\"reason\":\"Canonicals ship with the new layout\",\"restoreBy\":\"$FUTURE\"}]"
 disco_case "warning raised to error"             "llms.txt: not in the build"     "rm dist/client/llms.txt" '"discoveryOverrides":[{"rule":"llms-txt","level":"error"}]'
 disco_case "rule turned off (warns it is lowered)" "warn:lowered to off"          "rm dist/client/llms.txt" "\"discoveryOverrides\":[{\"rule\":\"llms-txt\",\"level\":\"off\",\"reason\":\"llms.txt waits on the content audit\",\"restoreBy\":\"$FUTURE\"}]"
+
+echo "Post-deploy live checks (check-live.mjs)"
+# live_case NAME EXPECT(pass|warn:substring|substring) OVERRIDES-JSON [LEVELS-JSON]
+# A stand-in production: a conforming site unless OVERRIDES replaces a path's
+# { status, type, body, link } (the "md" key answers Accept: text/markdown on /).
+LIVE_SERVER='
+const http = require("http");
+const good = {
+  "/robots.txt": { type: "text/plain", body: "User-agent: *\nContent-Signal: search=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /\n\nSitemap: SITE/sitemap.xml\n" },
+  "/sitemap.xml": { type: "application/xml", body: "<urlset><url><loc>SITE/</loc></url></urlset>" },
+  "/": { type: "text/html; charset=utf-8", body: "<!doctype html><h1>Home</h1>", link: "</llms.txt>; rel=\"describedby\"" },
+  md: { type: "text/markdown; charset=utf-8", body: "# Home\n" },
+};
+const routes = { ...good, ...JSON.parse(process.env.OVERRIDES) };
+const srv = http.createServer((req, res) => {
+  const path = req.url.split("?")[0];
+  const md = path === "/" && /text\/markdown/.test(req.headers.accept || "");
+  const r = routes[md ? "md" : path];
+  if (!r) { res.writeHead(404); return res.end(); }
+  const site = "http://127.0.0.1:" + srv.address().port;
+  res.writeHead(r.status || 200, { "content-type": r.type || "", ...(r.link ? { link: r.link } : {}) });
+  res.end((r.body || "").replaceAll("SITE", site));
+});
+srv.listen(0, "127.0.0.1", () => console.log(srv.address().port));
+'
+live_case() {
+  local name=$1 expect=$2 port pid out code
+  exec 3< <(OVERRIDES="$3" node -e "$LIVE_SERVER")
+  pid=$!; read -r port <&3
+  out="$(SHIP_GATE_SITE_URL="http://127.0.0.1:$port" SHIP_GATE_SMOKE_PATHS="/ /robots.txt" SHIP_GATE_DISCOVERY_LEVELS="${4:-}" \
+    node "$HERE/check-live.mjs" 2>&1)"; code=$?
+  kill "$pid" 2>/dev/null; exec 3<&-
+  if [ "$expect" = pass ] && grep -q '::warning::' <<<"$out"; then bad "$name" "expected a clean pass, got warnings" "$out"
+  else check "$name" "$expect" "$code" "$out"; fi
+}
+live_case "production conforms"                  pass                           '{}'
+live_case "robots.txt served as HTML"            "expects text/plain"           '{"/robots.txt":{"type":"text/html","body":"User-agent: *\nAllow: /\n"}}'
+live_case "robots.txt without User-agent"        "no \"User-agent:\" line"      '{"/robots.txt":{"type":"text/plain","body":"Sitemap: SITE/sitemap.xml\n"}}'
+live_case "robots.txt answers 500"               "answered 500"                 '{"/robots.txt":{"status":500}}'
+live_case "robots.txt blocks an AI search bot"   "blocks PerplexityBot"         '{"/robots.txt":{"type":"text/plain","body":"User-agent: PerplexityBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n"}}'
+live_case "sitemap in robots.txt is 404"         "answered 404"                 '{"/sitemap.xml":{"status":404}}'
+live_case "sitemap served as HTML"               "not XML"                      '{"/sitemap.xml":{"type":"text/html","body":"<urlset></urlset>"}}'
+live_case "no Link header (warn)"                "warn:sends no Link header"    '{"/":{"type":"text/html","body":"<h1>Home</h1>"}}'
+live_case "no Markdown negotiation (warn)"       "warn:got \"text/html\""       '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}'
+live_case "Markdown turned off by override"      pass                           '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}' '{"markdown-negotiation":"off"}'
+live_case "Markdown raised to error"             "got \"text/html\""            '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}' '{"markdown-negotiation":"error"}'
+d="$(baseline)"; cd "$d" && cfg '"discoveryOverrides":[{"rule":"markdown-negotiation","level":"error"}]' && : > "$d/env"
+out="$(GITHUB_ENV="$d/env" node "$PREPARE" post-deploy 2>&1)"; code=$?
+check "post-deploy exports discovery levels" pass "$code" "$out"
+if grep -q '^SHIP_GATE_DISCOVERY_LEVELS=.*"markdown-negotiation":"error"' "$d/env"; then ok "post-deploy levels carry the override"
+else bad "post-deploy levels carry the override" "SHIP_GATE_DISCOVERY_LEVELS missing or wrong" "$(cat "$d/env")"; fi
+cd / && rm -rf "$d"
 
 echo "Release (release.sh)"
 # rel_case NAME EXPECT(pass|substring) CHANGELOG-TEXT — a dry run, so nothing is published

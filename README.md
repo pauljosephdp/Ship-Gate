@@ -155,12 +155,14 @@ The four terms overlap, so each rule sits under the one it matters most to:
 
 | Area | Rule | Default | Fails when |
 |---|---|---|---|
-| SEO | `robots-txt` | error | no `robots.txt` in the build, or a line that doesn't parse |
+| SEO | `robots-txt` | error | no `robots.txt` in the build, a line that doesn't parse, or no `User-agent` group; after deploy, also not 200 or not `text/plain` |
 | SEO | `robots-sitemap` | error | `robots.txt` has no `Sitemap:` line on `siteUrl` |
 | SEO | `robots-blocks-page` | error | an indexable page is disallowed for Googlebot or Bingbot |
 | SEO | `sitemap` | error | no sitemap, or it doesn't parse, lists another origin, or has a malformed `lastmod`; sitemap indexes are followed |
 | SEO | `sitemap-coverage` | error | an indexable, self-canonical page is missing, or the sitemap lists a noindex, redirecting, canonicalised or missing URL |
 | SEO | `sitemap-lastmod` | warn | a URL has no `lastmod`, or one in the future |
+| SEO | `sitemap-xml` | warn | `/sitemap.xml` is neither built nor redirected to the sitemap (agents probe that path without reading `robots.txt`) |
+| SEO | `sitemap-live` | error | after deploy: a sitemap named in production `robots.txt` doesn't answer 200 with XML |
 | SEO | `canonical` | error | not exactly one canonical, not on `siteUrl`, or it names a URL that redirects or is not an indexable page |
 | SEO | `html-lang` | error | `<html>` has no valid `lang` |
 | SEO | `viewport` | error | no `width=device-width` viewport |
@@ -171,6 +173,11 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content) |
 | AEO | `breadcrumbs` | warn | a page two or more levels deep has no BreadcrumbList |
 | GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, Applebot, DuckAssistBot |
+| GEO | `ai-crawler-rules` | warn | no `User-agent` group names an AI crawler (GPTBot, OAI-SearchBot, ClaudeBot, Claude-SearchBot, Google-Extended, …) |
+| GEO | `content-signals` | warn | `robots.txt` has no `Content-Signal` line ([contentsignals.org](https://contentsignals.org)) |
+| GEO | `content-signals-format` | error | a `Content-Signal` entry isn't `search`, `ai-input` or `ai-train` `=yes`/`=no`, or sits before any `User-agent` line |
+| GEO | `link-headers` | warn | `_headers` gives `/` no `Link` header with rel `api-catalog`, `service-desc`, `service-doc` or `describedby` (RFC 8288, RFC 9727), a value doesn't parse, or an on-site target isn't built; after deploy, the real header |
+| GEO | `markdown-negotiation` | warn | after deploy: `Accept: text/markdown` on `/` doesn't return `text/markdown`, or a browser request no longer gets HTML |
 | GEO | `open-graph` | error | no `og:title`, `og:description` or absolute `og:image`, an `og:image` on the site that the build lacks, or an off-site `og:url` |
 | GEO | `article-dates` | warn | an Article has no `dateModified` |
 | GEO | `rendered-content` | warn | fewer than 50 words of text in the HTML (content rendered by JavaScript) |
@@ -214,10 +221,45 @@ overridden:
 ]
 ```
 
-After deploy, the post-deploy action reads the `robots.txt` production
-**actually serves** and fails if it blocks Googlebot, Bingbot or an AI search
-crawler from a smoke path. A CDN's managed robots.txt or "block AI bots" setting
-can rewrite the file after the build passed.
+**An explicit AI policy.** A bot with its own `User-agent` group ignores the
+`*` group entirely, so a named group must repeat every `Disallow` that bot
+should obey. `Claude-Web` and `anthropic-ai` are retired tokens; the scan notes
+them. A minimal file that passes every robots rule:
+
+```
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
+
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: Google-Extended
+Disallow: /
+
+Sitemap: https://example.com/sitemap-index.xml
+```
+
+With `@astrojs/sitemap`, add `/sitemap.xml /sitemap-index.xml 301` to
+`public/_redirects`, and give agents a `Link` in `public/_headers`:
+
+```
+/
+  Link: </llms.txt>; rel="describedby"; type="text/markdown"
+```
+
+After deploy, the post-deploy action checks what production **actually
+serves**, at the site's discovery levels: `robots.txt` is 200, `text/plain`,
+has a `User-agent` group and doesn't block Googlebot, Bingbot or an AI search
+crawler from a smoke path; every sitemap it names answers with XML; the home
+page sends its `Link` header; and `Accept: text/markdown` gets Markdown
+(Cloudflare's Markdown for Agents does this at the edge, so the build can't
+test it). A CDN's managed robots.txt, "block AI bots" setting or transform rule
+can change any of these after the build passed.
+
+**Not checked: DNS-AID.** DNS for AI Discovery
+(`_index._agents.example.com` SVCB records) is an individual Internet-Draft,
+not adopted by an IETF working group, and only applies to sites that run agent
+endpoints. It is left out until it is adopted.
 
 ### Stack policies
 
@@ -423,11 +465,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v2.0.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v2.1.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v2.0.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v2.1.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

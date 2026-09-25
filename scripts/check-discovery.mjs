@@ -11,9 +11,10 @@
 
 import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { htmlFiles, pageKind, attr, metaContent, assetsIgnore, parseRedirects, compilePattern } from './site-files.mjs';
+import { htmlFiles, pageKind, attr, metaContent, assetsIgnore, parseRedirects, parseHeaders, compilePattern } from './site-files.mjs';
 import {
-  RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, visibleText, normalise, ogContent, robotsDirectives,
+  RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, RETIRED_TOKENS, parseContentSignal,
+  AGENT_LINK_RELS, parseLinkHeader, visibleText, normalise, ogContent, robotsDirectives,
   parseRobots, robotsAllows, parseSitemap, W3C_DATE, jsonLd, typesOf, missingProps, isEntity, isArticle,
 } from './discovery.mjs';
 
@@ -57,6 +58,7 @@ const robots = parseRobots(robotsText ?? '');
 if (robotsText === null) add('robots-txt', 'robots.txt', 'not in the build. Add public/robots.txt so crawlers read your rules, not a platform default.');
 for (const p of robots.problems) add('robots-txt', 'robots.txt', p);
 if (robotsText !== null) {
+  if (robots.groups.length === 0) add('robots-txt', 'robots.txt', 'has no "User-agent:" line, so it holds no rules for any crawler (RFC 9309). Start with "User-agent: *" and an Allow or Disallow line.');
   if (robots.sitemaps.length === 0) add('robots-sitemap', 'robots.txt', `no "Sitemap:" line. Add "Sitemap: ${siteUrl}/sitemap-index.xml" (or your sitemap's URL).`);
   for (const s of robots.sitemaps) if (!onSite(s)) add('robots-sitemap', 'robots.txt', `Sitemap "${s}" is not an absolute URL on ${siteUrl}.`);
 }
@@ -70,8 +72,19 @@ for (const bot of AI_SEARCH_CRAWLERS) {
 }
 const training = AI_TRAINING_TOKENS.filter((t) => !robotsAllows(robots, t, '/'));
 notes.push(`AI training crawlers blocked at "/": ${training.length ? training.join(', ') : 'none'}.`);
-const signal = robots.fields.find((f) => f.field === 'content-signal');
-if (signal) notes.push(`Content-Signal: ${signal.value}`);
+if (robotsText !== null && robots.groups.length) {
+  const named = new Set(robots.groups.flatMap((g) => g.agents));
+  const explicit = AI_AGENT_TOKENS.filter((t) => named.has(t.toLowerCase()));
+  if (explicit.length === 0) add('ai-crawler-rules', 'robots.txt', `names no AI crawler (${AI_AGENT_TOKENS.slice(0, 6).join(', ')}, …). The * group covers them, but an explicit group states the policy. A bot with its own group ignores the * group, so repeat any Disallow lines it must obey.`);
+  for (const [t, now] of Object.entries(RETIRED_TOKENS)) if (named.has(t)) notes.push(`robots.txt names ${t}, which Anthropic no longer uses; ${now} are the current tokens.`);
+}
+const signals = robots.fields.filter((f) => f.field === 'content-signal');
+if (robotsText !== null && signals.length === 0) add('content-signals', 'robots.txt', 'no "Content-Signal:" line. Declare how content may be used, inside the "User-agent: *" group, e.g. "Content-Signal: search=yes, ai-input=yes, ai-train=no" (contentsignals.org).');
+for (const s of signals) {
+  if (s.group === null) add('content-signals-format', 'robots.txt', `line ${s.line}: Content-Signal before any User-agent line; it applies to the group it sits in.`);
+  for (const p of parseContentSignal(s.value).problems) add('content-signals-format', 'robots.txt', `line ${s.line}: Content-Signal ${p}.`);
+  notes.push(`Content-Signal: ${s.value}`);
+}
 
 // ── Sitemap ──
 const sitemapPaths = cfg.sitemap ? [cfg.sitemap]
@@ -98,6 +111,26 @@ const readSitemap = (path, from) => {
 };
 if (sitemapPaths.length === 0) add('sitemap', 'build', 'no sitemap found (robots.txt Sitemap line, /sitemap-index.xml or /sitemap.xml). Add @astrojs/sitemap or a static sitemap.');
 for (const p of sitemapPaths) readSitemap(p);
+// Agents and many tools probe /sitemap.xml without reading robots.txt first.
+if (sitemapPaths.length && !isFile('sitemap.xml') && !redirectRules.some((match) => match('/sitemap.xml')))
+  add('sitemap-xml', '/sitemap.xml', `not in the build. Add "/sitemap.xml ${sitemapPaths[0]} 301" to public/_redirects.`);
+
+// ── Link headers on the home page (RFC 8288), from _headers ──
+const headerText = read('_headers');
+const homeLinks = headerText === null ? [] : parseHeaders(headerText).rules
+  .filter((r) => compilePattern(r.pattern)('/') && !r.unset.includes('link'))
+  .flatMap((r) => r.set.filter(([n]) => n === 'link').map(([, v]) => v));
+const links = homeLinks.flatMap(parseLinkHeader);
+if (homeLinks.length === 0) add('link-headers', '/', `no Link header in public/_headers for "/". Point agents at machine-readable resources, e.g. "Link: </llms.txt>; rel=\"describedby\"; type=\"text/markdown\"" (RFC 8288; rel ${AGENT_LINK_RELS.join(', ')}).`);
+else if (!links.some((l) => l.rels.some((r) => AGENT_LINK_RELS.includes(r)))) add('link-headers', '/', `Link header has no rel of ${AGENT_LINK_RELS.join(', ')} (RFC 9727, RFC 8631).`);
+for (const l of links) {
+  for (const p of l.problems) add('link-headers', '/', `Link ${p}.`);
+  if (!l.target) continue;
+  let url;
+  try { url = new URL(l.target, siteUrl + '/'); } catch { add('link-headers', '/', `Link target <${l.target}> is not a URL.`); continue; }
+  if (url.origin === siteUrl && !served(url.pathname) && !redirectRules.some((match) => match(url.pathname)))
+    add('link-headers', '/', `Link target <${l.target}> is not in the build.`);
+}
 
 // ── Pages ──
 const canonicalOf = new Map();
@@ -218,8 +251,8 @@ let failed = 0;
 const rows = [];
 for (const [id, rule] of Object.entries(RULES)) {
   const level = levels[id] ?? rule.level;
-  const found = findings[id];
-  const result = level === 'off' ? '➖ off' : found.length === 0 ? '✅ pass' : level === 'error' ? '❌ fail' : '⚠️ warn';
+  const found = findings[id] ?? [];
+  const result = rule.where === 'live' ? '➖ post-deploy' : level === 'off' ? '➖ off' : found.length === 0 ? '✅ pass' : level === 'error' ? '❌ fail' : '⚠️ warn';
   if (level !== 'off') {
     for (const f of found.slice(0, 20)) console.log(`::${level === 'error' ? 'error' : 'warning'}::[${rule.category} ${id}] ${f}`);
     if (found.length > 20) console.log(`::${level === 'error' ? 'error' : 'warning'}::[${rule.category} ${id}] …and ${found.length - 20} more.`);

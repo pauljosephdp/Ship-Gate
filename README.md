@@ -473,7 +473,10 @@ The v1 form `{ "category": "performance", ... }` is still accepted.
 3. **Releases are automatic.** The `release` job in `self-test.yml` publishes
    the tag and GitHub release for the newest `CHANGELOG.md` version on the first
    green push to `main` that carries it (see Changing Ship Gate). Nothing to do
-   by hand; site templates pin these tags.
+   by hand; site templates pin these tags. If a push run was cancelled before
+   it released, run the Self-test workflow on `main` by hand (Actions → Self-test
+   → Run workflow). It re-runs every check, then publishes the missing release.
+   Never create a release tag by hand: only green commits are tagged.
 
 ## What stays in the site repo
 
@@ -541,11 +544,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v2.3.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v2.3.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v2.3.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v2.3.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -569,12 +572,23 @@ violation, a dead redirect, two `h1`s, a directly loaded tag, an AI search
 crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
 `dir="rtl"`, a Google Fonts stylesheet (`market-cn`), a link with its focus
 ring removed, a tracking cookie before consent. The conforming
-run must pass; each broken run must fail on the check that owns the fault
-(`test/expect-gate.sh`). Variants run five to a job, `fixture (1)` to
-`fixture (3)`, to save Actions minutes; a new variant goes in a free `vN` slot
-or a new group, and `self-test` fails until it has an expectation and a slot.
-Pull requests skip the fixture jobs while in draft and when they change only
-Markdown outside `test/`; pushes to `main` always run them.
+run, and one that shows a site file named after a tracking vendor, must pass;
+each broken run must fail on the check that owns the fault (`test/expect-gate.sh`).
+Variants run five to a job, `fixture (1)` to `fixture (3)`, to save Actions
+minutes; a new variant goes in a free `vN` slot or a new group, and `self-test`
+fails until it has an expectation and a slot. Pull requests skip the fixture
+jobs while in draft and when they change only Markdown outside `test/`; pushes
+to `main` always run them.
+
+**README.md stays current.** `scripts/check-readme.sh` runs in `self-test` and
+fails when:
+- a PR changes what Ship Gate does (`action.yml`, `post-deploy/`, `scripts/`,
+  `e2e/`, `templates/`, `tools/`, workflows) without changing this README;
+- a version this README or the caller templates tell sites to pin is not the
+  newest `CHANGELOG.md` version.
+
+Changes to tests, `CLAUDE.md`, `CHANGELOG.md` and `docs/` alone need no README
+change.
 
 Every PR that should ship adds a section at the top of `CHANGELOG.md`, headed
 `## vX.Y.Z — YYYY-MM-DD`. When the PR merges and every `self-test` and

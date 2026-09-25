@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -52,7 +52,7 @@ jobs:
           - { variant: blocks-ai-search, fails: "Discovery (SEO, AEO, GEO, AIO)" }
           - { variant: bad-jsonld, fails: "Discovery (SEO, AEO, GEO, AIO)" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Break the fixture
         run: bash test/break-fixture.sh ${{ matrix.variant }}
       - name: Ship Gate
@@ -91,7 +91,7 @@ jobs:
       group: release
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Publish the release named in CHANGELOG.md
         env:
           GH_TOKEN: ${{ github.token }}

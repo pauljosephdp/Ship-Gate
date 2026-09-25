@@ -1,5 +1,46 @@
 # Changelog
 
+## v2.2.0 — 2026-09-25
+
+Agent-readiness checks: the gaps an isitagentready.com scan reported, as
+discovery rules. New rules warn by default. A site whose `robots.txt` follows
+RFC 9309 stays green; the ones that can fail are listed first.
+
+**Can fail**
+- `robots-txt` now fails a `robots.txt` with no `User-agent` group (it holds no
+  rules). After deploy, it also fails when production serves `robots.txt` with
+  a status other than 200 or 404, or not as `text/plain`.
+- `content-signals-format` (error): a `Content-Signal` entry that isn't
+  `search`, `ai-input` or `ai-train` set to `yes` or `no`, or one before any
+  `User-agent` line.
+- `sitemap-live` (error, post-deploy): every on-site sitemap named in
+  production `robots.txt` answers 200 with XML that parses.
+
+**Warn**
+- `ai-crawler-rules`: no `User-agent` group names an AI crawler. Retired
+  Anthropic tokens (`Claude-Web`, `anthropic-ai`) are noted.
+- `content-signals`: no `Content-Signal` line.
+- `sitemap-xml`: `/sitemap.xml` is neither built nor redirected.
+- `link-headers`: the home page has no RFC 8288 `Link` header with rel
+  `api-catalog`, `service-desc`, `service-doc` or `describedby`; checked in
+  `_headers` on the PR and on the real response after deploy.
+- `markdown-negotiation` (post-deploy): `Accept: text/markdown` on `/` gets
+  `text/markdown`, and browsers still get HTML.
+
+**Post-deploy**
+- `check-robots-live.mjs` is now `check-live.mjs` (it keeps
+  `discovery.searchCrawlers`). It honours
+  `discoveryOverrides`, so a site can lower or raise the live rules like the
+  build ones. Its robots crawler checks report as `robots-blocks-page` and
+  `ai-search-crawlers`.
+
+**Not added**: DNS-AID. It is an individual Internet-Draft and applies only to
+sites with agent endpoints.
+
+**Self-test**: 248 cases (was 222), including a stand-in production server for
+the live checks. New fixture variant `robots-no-agents` must fail the discovery
+scan.
+
 ## v2.1.0 — 2026-09-25
 
 Closes gaps found by checking Ship Gate against a 2026 global SEO and GEO

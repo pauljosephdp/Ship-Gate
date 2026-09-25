@@ -4,7 +4,7 @@
 //   node prepare.mjs verify      [config]  → checks contract + config, writes test config
 //   node prepare.mjs after-build [config]  → after the build: resolves page lists, writes
 //                                            the Lighthouse config and run.json for the checks
-//   node prepare.mjs post-deploy [config]  → exports site URL, smoke paths and policies
+//   node prepare.mjs post-deploy [config]  → exports site URL, smoke paths, policies and discovery levels
 //
 // Run from the site directory (the action's working-directory). Standards live
 // HERE, not in site repos. A site may make one stricter freely; it may loosen one
@@ -156,11 +156,35 @@ if (!isNameList(searchCrawlers, CRAWLER_TOKEN))
 else for (const c of searchCrawlers) if (SEARCH_CRAWLERS.some((b) => b.toLowerCase() === c.toLowerCase()))
   err(`discovery.searchCrawlers: ${c} is always checked — remove it.`);
 
+// ── Discovery rules (SEO, AEO, GEO, AIO): raising a level is free; lowering needs a reason and a date ──
+const discoveryLevels = Object.fromEntries(Object.entries(DISCOVERY_RULES).map(([k, r]) => [k, r.level]));
+const dOverrides = cfg.discoveryOverrides ?? [];
+if (!Array.isArray(dOverrides)) err('discoveryOverrides must be a list.');
+for (const [i, o] of (Array.isArray(dOverrides) ? dOverrides : []).entries()) {
+  const where = `discoveryOverrides[${i}] (${o?.rule ?? '?'})`;
+  if (!(o?.rule in DISCOVERY_RULES)) { err(`${where}: rule must be one of ${Object.keys(DISCOVERY_RULES).join(', ')}.`); continue; }
+  if (!(o.level in DISCOVERY_LEVELS)) { err(`${where}: level must be "error", "warn" or "off".`); continue; }
+  const std = DISCOVERY_RULES[o.rule].level;
+  if (o.level === std) { err(`${where}: changes nothing — remove it.`); continue; }
+  if (DISCOVERY_LEVELS[o.level] < DISCOVERY_LEVELS[std]) {
+    if (!checkLoosening(where, o)) continue;
+    warn(`Discovery rule ${o.rule} lowered to ${o.level} until ${o.restoreBy}: ${o.reason}`);
+  } else console.log(`Discovery rule ${o.rule} raised to ${o.level} by this site.`);
+  discoveryLevels[o.rule] = o.level;
+}
+const discovery = cfg.discovery ?? {};
+for (const k of Object.keys(discovery)) if (!['sitemap', 'ignoreLinks', 'searchCrawlers'].includes(k)) err(`discovery.${k} is not a setting. Use sitemap, ignoreLinks, searchCrawlers.`);
+if (discovery.sitemap !== undefined && !(typeof discovery.sitemap === 'string' && /^\/\S+\.xml$/.test(discovery.sitemap)))
+  err('discovery.sitemap must be the sitemap\'s path, e.g. "/sitemap-index.xml".');
+if (discovery.ignoreLinks !== undefined && !isPathList(discovery.ignoreLinks))
+  err('discovery.ignoreLinks must be a list of path prefixes served by the Worker, not the static build, e.g. "/api/".');
+
 if (mode === 'post-deploy') {
   if (errors.length) fail();
   exportEnv('SHIP_GATE_SITE_URL', cfg.siteUrl);
   exportEnv('SHIP_GATE_SMOKE_PATHS', smokePaths.join(' '));
   exportEnv('SHIP_GATE_POLICIES', policies.join(' '));
+  exportEnv('SHIP_GATE_DISCOVERY_LEVELS', JSON.stringify(discoveryLevels));
   exportEnv('SHIP_GATE_SEARCH_CRAWLERS', searchCrawlers.join(' '));
   console.log('Post-deploy config loaded.');
   process.exit(0);
@@ -280,29 +304,6 @@ for (const [i, x] of (Array.isArray(exemptions) ? exemptions : []).entries()) {
   warn(`Guard "${x.guard}" (${GUARDS[x.guard].what}) exempted until ${x.restoreBy}: ${x.reason}`);
   exempt.push(x.guard);
 }
-
-// ── Discovery rules (SEO, AEO, GEO, AIO): raising a level is free; lowering needs a reason and a date ──
-const discoveryLevels = Object.fromEntries(Object.entries(DISCOVERY_RULES).map(([k, r]) => [k, r.level]));
-const dOverrides = cfg.discoveryOverrides ?? [];
-if (!Array.isArray(dOverrides)) err('discoveryOverrides must be a list.');
-for (const [i, o] of (Array.isArray(dOverrides) ? dOverrides : []).entries()) {
-  const where = `discoveryOverrides[${i}] (${o?.rule ?? '?'})`;
-  if (!(o?.rule in DISCOVERY_RULES)) { err(`${where}: rule must be one of ${Object.keys(DISCOVERY_RULES).join(', ')}.`); continue; }
-  if (!(o.level in DISCOVERY_LEVELS)) { err(`${where}: level must be "error", "warn" or "off".`); continue; }
-  const std = DISCOVERY_RULES[o.rule].level;
-  if (o.level === std) { err(`${where}: changes nothing — remove it.`); continue; }
-  if (DISCOVERY_LEVELS[o.level] < DISCOVERY_LEVELS[std]) {
-    if (!checkLoosening(where, o)) continue;
-    warn(`Discovery rule ${o.rule} lowered to ${o.level} until ${o.restoreBy}: ${o.reason}`);
-  } else console.log(`Discovery rule ${o.rule} raised to ${o.level} by this site.`);
-  discoveryLevels[o.rule] = o.level;
-}
-const discovery = cfg.discovery ?? {};
-for (const k of Object.keys(discovery)) if (!['sitemap', 'ignoreLinks', 'searchCrawlers'].includes(k)) err(`discovery.${k} is not a setting. Use sitemap, ignoreLinks, searchCrawlers.`);
-if (discovery.sitemap !== undefined && !(typeof discovery.sitemap === 'string' && /^\/\S+\.xml$/.test(discovery.sitemap)))
-  err('discovery.sitemap must be the sitemap\'s path, e.g. "/sitemap-index.xml".');
-if (discovery.ignoreLinks !== undefined && !isPathList(discovery.ignoreLinks))
-  err('discovery.ignoreLinks must be a list of path prefixes served by the Worker, not the static build, e.g. "/api/".');
 
 // ── Repo contract ──
 let pkg = {};

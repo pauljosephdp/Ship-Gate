@@ -1,10 +1,12 @@
 name: Ship Gate — post-deploy
 description: >
   After a merge to main: waits until production serves the merged commit
-  (build-sha meta tag), smoke-checks key URLs, confirms production robots.txt
-  lets search and AI search crawlers in and that no WAF refuses plain requests,
-  reports freshness headers and (optional) field Core Web Vitals, and (posthog-server-only policy)
-  that production HTML is PostHog-free. On failure: roll back, then fix forward.
+  (build-sha meta tag), smoke-checks key URLs, checks the robots.txt,
+  sitemaps, Link headers and Markdown negotiation production serves to
+  crawlers and agents and that no WAF refuses plain requests, reports
+  freshness headers and (optional) field Core Web Vitals, and
+  (posthog-server-only policy) that production HTML is PostHog-free.
+  On failure: roll back, then fix forward.
 author: Ship Gate
 inputs:
   working-directory:
@@ -55,9 +57,9 @@ runs:
         done
         exit $status
 
-    - name: Production robots.txt admits search and AI search crawlers
+    - name: Production serves crawlers and agents (robots.txt, sitemaps, Link, Markdown)
       shell: bash
-      run: node "$GITHUB_ACTION_PATH/../scripts/check-robots-live.mjs"
+      run: node "$GITHUB_ACTION_PATH/../scripts/check-live.mjs"
 
     - name: Production answers plain requests; freshness headers; field Core Web Vitals
       shell: bash

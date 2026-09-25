@@ -1,7 +1,7 @@
 // Ship Gate discovery rules — SEO, AEO, GEO and AIO readiness, and the parsers
 // they need (robots.txt, sitemaps, JSON-LD). Shared by prepare.mjs (levels and
-// overrides), check-discovery.mjs (the build scan) and check-robots-live.mjs
-// (the production robots.txt after deploy).
+// overrides), check-discovery.mjs (the build scan) and check-live.mjs
+// (what production serves after deploy).
 // No dependencies: Node built-ins only.
 
 import { escapeRe, attr, metaTags } from './site-files.mjs';
@@ -12,13 +12,16 @@ import { escapeRe, attr, metaTags } from './site-files.mjs';
 //   AEO — answer engines can read the page as structured facts (schema.org JSON-LD)
 //   GEO — generative engines (ChatGPT, Claude, Perplexity…) can reach, read and cite it
 //   AIO — Google AI Overviews and AI Mode can quote it (indexed and snippet-eligible)
+//   where: 'build' (the build scan), 'live' (post-deploy, against production) or 'both'.
 export const RULES = {
-  'robots-txt':         { category: 'SEO', level: 'error', title: 'robots.txt exists and parses' },
+  'robots-txt':         { category: 'SEO', level: 'error', where: 'both', title: 'robots.txt exists, parses and has a User-agent group' },
   'robots-sitemap':     { category: 'SEO', level: 'error', title: 'robots.txt names the sitemap on siteUrl' },
   'robots-blocks-page': { category: 'SEO', level: 'error', title: 'No indexable page is blocked for Googlebot or Bingbot' },
   sitemap:              { category: 'SEO', level: 'error', title: 'Sitemap exists, parses and lists only siteUrl' },
   'sitemap-coverage':   { category: 'SEO', level: 'error', title: 'Sitemap lists every indexable page and nothing else' },
   'sitemap-lastmod':    { category: 'SEO', level: 'warn',  title: 'Every sitemap URL has a plausible lastmod' },
+  'sitemap-xml':        { category: 'SEO', level: 'warn',  title: '/sitemap.xml is served or redirects to the sitemap' },
+  'sitemap-live':       { category: 'SEO', level: 'error', where: 'live', title: 'Every sitemap in production robots.txt answers 200 with XML' },
   canonical:            { category: 'SEO', level: 'error', title: 'One canonical per page, pointing at an indexable page' },
   'html-lang':          { category: 'SEO', level: 'error', title: 'The html element sets lang' },
   viewport:             { category: 'SEO', level: 'error', title: 'Mobile viewport meta tag' },
@@ -32,6 +35,11 @@ export const RULES = {
   'faq-visible':        { category: 'AEO', level: 'error', title: 'FAQ markup matches questions visible on the page' },
   breadcrumbs:          { category: 'AEO', level: 'warn',  title: 'Nested pages carry BreadcrumbList markup' },
   'ai-search-crawlers': { category: 'GEO', level: 'error', title: 'AI search and user-fetch crawlers are not blocked' },
+  'ai-crawler-rules':   { category: 'GEO', level: 'warn',  title: 'robots.txt states an explicit policy for AI crawlers' },
+  'content-signals':    { category: 'GEO', level: 'warn',  title: 'robots.txt declares Content-Signal preferences' },
+  'content-signals-format': { category: 'GEO', level: 'error', title: 'Content-Signal lines follow contentsignals.org' },
+  'link-headers':       { category: 'GEO', level: 'warn',  where: 'both', title: 'Home page sends Link headers for agent discovery (RFC 8288)' },
+  'markdown-negotiation': { category: 'GEO', level: 'warn', where: 'live', title: 'Accept: text/markdown returns Markdown' },
   'open-graph':         { category: 'GEO', level: 'error', title: 'Open Graph title, description and image' },
   'article-dates':      { category: 'GEO', level: 'warn',  title: 'Articles carry dateModified' },
   'rendered-content':   { category: 'GEO', level: 'warn',  title: 'Page text is in the HTML, not rendered by JavaScript' },
@@ -60,6 +68,10 @@ export const AI_SEARCH_CRAWLERS = ['OAI-SearchBot', 'ChatGPT-User', 'Claude-Sear
 // grounding). Blocking them is a legitimate choice and never affects search; reported only.
 export const AI_TRAINING_TOKENS = ['GPTBot', 'ClaudeBot', 'Google-Extended', 'Applebot-Extended', 'CCBot',
   'meta-externalagent', 'Bytespider'];
+// Any of these in a User-agent line counts as an explicit AI crawler policy.
+export const AI_AGENT_TOKENS = [...AI_SEARCH_CRAWLERS.filter((t) => t !== 'Applebot'), ...AI_TRAINING_TOKENS, 'Amazonbot'];
+// Tokens Anthropic no longer uses: a rule for them governs nothing.
+export const RETIRED_TOKENS = { 'claude-web': 'ClaudeBot, Claude-SearchBot and Claude-User', 'anthropic-ai': 'ClaudeBot' };
 
 // ── Text ──
 const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”',
@@ -85,7 +97,8 @@ export const robotsDirectives = (html) => metaTags(html)
   .flatMap((t) => (attr(t, 'content') ?? '').toLowerCase().split(',').map((d) => d.trim()).filter(Boolean));
 
 // ── robots.txt (RFC 9309) ──
-// Returns { groups: [{ agents, rules: [{ allow, path }] }], sitemaps, fields, problems }.
+// Returns { groups: [{ agents, rules: [{ allow, path }] }], sitemaps, fields: [{ field, value, line, group }], problems }.
+// A field's group is the index of the group it sits in, or null before the first User-agent line.
 export function parseRobots(text) {
   const groups = [], sitemaps = [], fields = [], problems = [];
   let cur = null, inAgents = false;
@@ -108,7 +121,7 @@ export function parseRobots(text) {
       if (value) cur.rules.push({ allow: field === 'allow', path: value });
       return;
     }
-    fields.push({ field, value }); // Crawl-delay, Content-Signal and others: crawlers ignore what they don't know
+    fields.push({ field, value, line: i + 1, group: cur ? groups.length - 1 : null }); // Crawl-delay, Content-Signal and others: crawlers ignore what they don't know
   });
   return { groups, sitemaps, fields, problems };
 }
@@ -129,6 +142,56 @@ export function robotsAllows(robots, agent, path) {
     if (!best || r.path.length > best.path.length || (r.path.length === best.path.length && r.allow)) best = r;
   }
   return best ? best.allow : true;
+}
+
+// ── Content Signals (contentsignals.org, draft-romm-aipref-contentsignals) ──
+export const CONTENT_SIGNALS = ['search', 'ai-input', 'ai-train'];
+// "search=yes, ai-train=no" → { entries: { search: 'yes', … }, problems }.
+export function parseContentSignal(value) {
+  const entries = {}, problems = [];
+  for (const part of value.split(',').map((x) => x.trim()).filter(Boolean)) {
+    const m = part.match(/^([\w-]+)\s*=\s*(yes|no)$/i);
+    if (!m) { problems.push(`"${part}" is not "signal=yes" or "signal=no"`); continue; }
+    const key = m[1].toLowerCase();
+    if (!CONTENT_SIGNALS.includes(key)) { problems.push(`"${m[1]}" is not a signal (use ${CONTENT_SIGNALS.join(', ')})`); continue; }
+    if (key in entries) problems.push(`"${key}" is set twice`);
+    entries[key] = m[2].toLowerCase();
+  }
+  if (!Object.keys(entries).length && !problems.length) problems.push('is empty');
+  return { entries, problems };
+}
+
+// ── Link header (RFC 8288) ──
+// Relation types that point an agent at machine-readable descriptions (RFC 9727 §3, RFC 8631).
+export const AGENT_LINK_RELS = ['api-catalog', 'service-desc', 'service-doc', 'describedby'];
+// One Link field value → [{ target, rels, problems }]. Commas split links only outside <…> and quotes.
+export function parseLinkHeader(value) {
+  const parts = [];
+  let buf = '', inUri = false, inQuote = false;
+  for (const ch of value) {
+    if (inQuote) { if (ch === '"') inQuote = false; buf += ch; continue; }
+    if (ch === '"' && !inUri) inQuote = true;
+    else if (ch === '<') inUri = true;
+    else if (ch === '>') inUri = false;
+    else if (ch === ',' && !inUri) { parts.push(buf); buf = ''; continue; }
+    buf += ch;
+  }
+  parts.push(buf);
+  return parts.map((p) => p.trim()).filter(Boolean).map((p) => {
+    const m = p.match(/^<([^>]*)>\s*(.*)$/);
+    if (!m) return { target: null, rels: [], problems: [`"${p.slice(0, 60)}" does not start with <URI>`] };
+    const params = {};
+    const problems = [];
+    for (const raw of m[2].split(';').map((x) => x.trim()).filter(Boolean)) {
+      const pm = raw.match(/^([A-Za-z0-9!#$&+.^_`|~*-]+)\s*(?:=\s*("([^"]*)"|[^\s";]+))?$/);
+      if (!pm) { problems.push(`<${m[1]}>: parameter "${raw.slice(0, 40)}" does not parse`); continue; }
+      const k = pm[1].toLowerCase();
+      if (!(k in params)) params[k] = pm[3] ?? pm[2] ?? '';
+    }
+    if (m[2].trim() && !m[2].trim().startsWith(';')) problems.push(`<${m[1]}>: parameters must follow ";"`);
+    if (!params.rel) problems.push(`<${m[1]}> has no rel parameter`);
+    return { target: m[1], rels: (params.rel ?? '').toLowerCase().split(/\s+/).filter(Boolean), problems };
+  });
 }
 
 // ── Sitemaps ──

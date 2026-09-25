@@ -5,7 +5,8 @@
 //
 // Indexable pages: one h1, no skipped heading levels, target=_blank links carry
 // noopener, a title and meta description within the site's bands and unique
-// across the site, and a canonical (when present) on siteUrl.
+// across the site. Canonicals, sitemaps, robots.txt and structured data are the
+// discovery scan's (check-discovery.mjs).
 // Every file: no unrendered {{template}} tokens.
 // Edge files: _headers and _redirects parse, with no merge-conflict markers.
 // llms.txt: every on-site link resolves to a built file.
@@ -21,7 +22,6 @@ const { root, siteUrl, structure: band } = run;
 
 const problems = [];
 const bad = (where, msg) => problems.push(`${where}: ${msg}`);
-const warn = (m) => console.log(`::warning::${m}`);
 
 const decode = (s) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
   .replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, ' ').replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n))
@@ -70,12 +70,6 @@ for (const p of pages) {
     if (band.descMin && desc.length < band.descMin) bad(at, `meta description is ${desc.length} characters, under ${band.descMin}.`);
     descs.set(desc, [...(descs.get(desc) ?? []), at]);
   }
-
-  const canon = [...p.html.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0]).find((t) => /\brel\s*=\s*["']?canonical\b/i.test(t));
-  if (canon) {
-    const href = attr(canon, 'href') ?? '';
-    if (!href.startsWith(siteUrl + '/') && href !== siteUrl) bad(at, `canonical "${href}" is not an absolute URL on ${siteUrl}.`);
-  }
 }
 for (const [t, where] of titles) if (where.length > 1) bad(where.join(', '), `share the title "${t}" — every page needs its own.`);
 for (const [d, where] of descs) if (where.length > 1) bad(where.join(', '), `share the meta description "${d.slice(0, 60)}…".`);
@@ -122,5 +116,4 @@ if (problems.length) {
   console.log(`Structure scan: ${problems.length} problem(s).`);
   process.exit(1);
 }
-if (!pages.some((p) => /rel\s*=\s*["']?canonical/i.test(p.html))) warn('No page declares a canonical URL.');
 console.log('Structure scan passed.');

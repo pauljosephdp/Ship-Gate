@@ -12,6 +12,8 @@ case "$1" in
   csp-violation) add '<script is:inline src="https://cdn.example.org/widget.js"></script>' ;;
   bad-redirect) echo '/old-contact /contact-us/ 301' >> public/_redirects ;;
   two-h1) add '<h1>A second top-level heading</h1>' ;;
+  blocks-ai-search) printf '\nUser-agent: PerplexityBot\nDisallow: /\n' >> public/robots.txt ;;
+  bad-jsonld) add '<script type="application/ld+json" set:html="{not json" />' ;;
   direct-tag) add '<script is:inline async src="https://www.googletagmanager.com/gtm.js?id=GTM-ABCD123"></script>' ;;
   *) echo "Unknown variant: $1" >&2; exit 2 ;;
 esac

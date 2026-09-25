@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Stack guards — fail CI when code breaks the Gallivant portfolio standard.
+# Stack guards — fail CI when code breaks the standard.
+# Guards 1–3 and 5 are stack policies, run only when the site's config opts into them
+# (policies, passed in SHIP_GATE_POLICIES by prepare.mjs). The rest apply to every site.
 set -uo pipefail
 
 fail=0
@@ -18,8 +20,12 @@ DIRS="src public"
 # Runs from the site directory (the action's working-directory). Repo-wide files
 # (workflows, Dependabot/Renovate config) are read from the repository root.
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+POLICIES=" ${SHIP_GATE_POLICIES:-} "
+policy() { [[ "$POLICIES" == *" $1 "* ]]; }
 
-# 1. PostHog: server-side only, EU Cloud, key never public.
+if policy posthog-server-only; then
+
+# 1. [posthog-server-only] PostHog: server-side only, EU Cloud, key never public.
 #    Direct PostHog use (SDK, host, key) is allowed only in server paths; everything else calls a wrapper there.
 SERVER_PATHS='^src/(lib/server|pages/api|actions|middleware)'
 grep -qE '"(posthog-js|posthog-react-native|@posthog/react)"' package.json \
@@ -46,15 +52,16 @@ while IFS= read -r f; do
   grep -q '__DEPLOY_ENV__' "$f" \
     || err posthog-env-tag "$f uses posthog-node without tagging events with __DEPLOY_ENV__ — preview traffic would pollute production analytics."
 done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
+fi
 
-# 2. No third-party tags loaded directly. All tags, GTM included, go through Zaraz. No sGTM in this stack.
+# 2. [tags-via-zaraz] No third-party tags loaded directly. All tags, GTM included, go through Zaraz. No sGTM in this stack.
 #    HubSpot form embeds (js-*.hsforms.net) are forms, not tags: they are the portfolio's form
 #    standard until HubSpot's forms API is available, so they are allowed. HubSpot tracking is not.
 BLOCKED='googletagmanager\.com/(gtm|gtag)|google-analytics\.com|connect\.facebook\.net|static\.hotjar\.com|snap\.licdn\.com|analytics\.tiktok\.com|clarity\.ms/tag|www\.clarity\.ms|js\.hs-scripts\.com|js\.hs-analytics\.net|["'\''\`]GTM-[A-Z0-9]{4,}["'\''\`]'
-scan "$BLOCKED" $DIRS && err direct-tags "Third-party tag loaded directly. Route it through Zaraz (GTM runs as a Zaraz tool)."
+policy tags-via-zaraz && scan "$BLOCKED" $DIRS && err direct-tags "Third-party tag loaded directly. Route it through Zaraz (GTM runs as a Zaraz tool)."
 
-# 3. Every form has Turnstile (opt out non-public forms with: turnstile-exempt: reason).
-while IFS= read -r f; do
+# 3. [turnstile-forms] Every form has Turnstile (opt out non-public forms with: turnstile-exempt: reason).
+policy turnstile-forms && while IFS= read -r f; do
   grep -q 'turnstile-exempt' "$f" && continue
   grep -qiE 'cf-turnstile|<Turnstile' "$f" || err turnstile "$f has a <form> without Turnstile."
 done < <(grep -rlE '<form[ >]' src --include='*.astro' --include='*.tsx' --include='*.jsx' --include='*.svelte' --include='*.vue' 2>/dev/null)
@@ -62,8 +69,8 @@ done < <(grep -rlE '<form[ >]' src --include='*.astro' --include='*.tsx' --inclu
 # 4. No committed env or Worker secret files.
 git ls-files | grep -E '(^|/)(\.env|\.dev\.vars)(\..+)?$' | grep -vE '\.example$' && err env-file "Env/secret file committed. Remove it and rotate its secrets."
 
-# 5. Deploy target is Workers, not Pages.
-for w in wrangler.toml wrangler.json wrangler.jsonc; do
+# 5. [workers-builds-only] Deploy target is Workers, not Pages.
+policy workers-builds-only && for w in wrangler.toml wrangler.json wrangler.jsonc; do
   [ -f "$w" ] && grep -q 'pages_build_output_dir' "$w" && err pages-config "$w is Pages config; the standard is Workers."
 done
 
@@ -93,8 +100,8 @@ for wf in "$ROOT"/.github/workflows/*.yml "$ROOT"/.github/workflows/*.yaml; do
   # Pushing to main skips the PR and its required checks. No exemption: open a PR instead.
   grep -qE 'git push[^#]*(HEAD:main|HEAD:refs/heads/main|origin main([^-A-Za-z0-9_/]|$))' "$wf" \
     && err push-to-main "$name pushes to main directly, bypassing the PR gate. Have it open a pull request instead."
-  # Cloudflare Workers Builds is the only deployer; no Cloudflare credentials belong in GitHub.
-  grep -qE 'CLOUDFLARE_API_TOKEN|cloudflare/wrangler-action|wrangler(@[0-9.]+)?[[:space:]]+(deploy|publish|secret|pages|r2|kv|d1)' "$wf" \
+  # [workers-builds-only] Cloudflare Workers Builds is the only deployer; no Cloudflare credentials belong in GitHub.
+  policy workers-builds-only && grep -qE 'CLOUDFLARE_API_TOKEN|cloudflare/wrangler-action|wrangler(@[0-9.]+)?[[:space:]]+(deploy|publish|secret|pages|r2|kv|d1)' "$wf" \
     && err cloudflare-in-workflows "$name uses a Cloudflare API token or wrangler write command. Workers Builds is the only deployer. If this is unavoidable for now, add a dated guardExemptions entry for cloudflare-in-workflows."
 done
 # Lighthouse reports stay private: temporary public storage publishes them at a public URL.

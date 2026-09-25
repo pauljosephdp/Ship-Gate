@@ -1,9 +1,10 @@
 name: Ship Gate — post-deploy
 description: >
   After a merge to main: waits until production serves the merged commit
-  (build-sha meta tag), smoke-checks key URLs, and confirms production HTML
-  is PostHog-free. On failure: roll back in Cloudflare, then fix forward.
-author: Gallivant Ventures
+  (build-sha meta tag), smoke-checks key URLs, confirms production robots.txt
+  lets search and AI search crawlers in, and (posthog-server-only policy)
+  that production HTML is PostHog-free. On failure: roll back, then fix forward.
+author: Ship Gate
 inputs:
   working-directory:
     description: The site's directory inside the repo, e.g. "site". Defaults to the repo root.
@@ -12,7 +13,7 @@ inputs:
     description: Path to the site's Ship Gate config, relative to working-directory.
     default: ship-gate.config.json
   wait-minutes:
-    description: How long to wait for Workers Builds to serve the new commit.
+    description: How long to wait for the deploy pipeline to serve the new commit.
     default: "10"
 runs:
   using: composite
@@ -22,7 +23,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: node "$GITHUB_ACTION_PATH/../scripts/prepare.mjs" post-deploy "${{ inputs.config }}"
 
-    - name: Wait for Cloudflare to serve this commit
+    - name: Wait for production to serve this commit
       shell: bash
       env:
         WAIT_MINUTES: ${{ inputs.wait-minutes }}
@@ -34,7 +35,7 @@ runs:
           fi
           sleep 20
         done
-        echo "::error::Production not serving $GITHUB_SHA after $WAIT_MINUTES min. Check Workers Builds; roll back in Cloudflare if needed."
+        echo "::error::Production not serving $GITHUB_SHA after $WAIT_MINUTES min. Check the deploy pipeline; roll back if needed."
         exit 1
 
     - name: Smoke check key URLs
@@ -48,7 +49,12 @@ runs:
         done
         exit $status
 
+    - name: Production robots.txt admits search and AI search crawlers
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../scripts/check-robots-live.mjs"
+
     - name: Production HTML is PostHog-free
+      if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only ')
       shell: bash
       run: |
         if curl -fsS "$SHIP_GATE_SITE_URL/" | grep -qE 'posthog-js|posthog\.init|i\.posthog\.com|ph[cx]_[A-Za-z0-9]{20,}'; then

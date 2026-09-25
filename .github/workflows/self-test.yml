@@ -49,6 +49,8 @@ jobs:
           - { variant: bad-redirect, fails: "Smoke, axe, reflow, CSP, edge" }
           - { variant: two-h1, fails: "Structure scan" }
           - { variant: direct-tag, fails: "Stack guards" }
+          - { variant: blocks-ai-search, fails: "Discovery (SEO, AEO, GEO, AIO)" }
+          - { variant: bad-jsonld, fails: "Discovery (SEO, AEO, GEO, AIO)" }
     steps:
       - uses: actions/checkout@v4
       - name: Break the fixture

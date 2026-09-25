@@ -4,5 +4,7 @@ import Base from '../layouts/Base.astro';
 <Base title="About the Ship Gate fixture" description="Why the fixture exists: a gate that stops biting would otherwise stay green while enforcing nothing.">
   <h1>About the fixture</h1>
   <h2>Why</h2>
-  <p>It proves the action itself works, not only its scripts.</p>
+  <p>It proves the action itself works, not only its scripts. The self-test builds fixtures at run time for
+    each rule; this site runs the whole action end to end, with the same server, browser and Lighthouse
+    setup a real site gets on every pull request.</p>
 </Base>

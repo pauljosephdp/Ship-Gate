@@ -14,6 +14,7 @@ export const run = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.met
   securityHeaders: string[];
   reflowWidths: number[];
   exempt: string[];
+  policies: string[];
 };
 
 // Other origins are aborted: a vendor outage must not fail a PR, and the gate

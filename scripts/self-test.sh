@@ -13,6 +13,7 @@ FUTURE="$(date -u -d '+90 days' +%F 2>/dev/null || date -u -v+90d +%F)"
 PAST="2020-01-01"
 PH="ph""c_"   # split so this file itself never matches a key pattern
 pass=0; failn=0
+ALL_POLICIES="posthog-server-only tags-via-zaraz turnstile-forms workers-builds-only"
 
 # A conforming site: every rule satisfied.
 baseline() {
@@ -66,7 +67,7 @@ expect_guard() {
   local name=$1 expect=$2; shift 2
   local d out code; d="$(baseline)"; cd "$d" || return
   eval "$@"; commit_all
-  out="$(SHIP_GATE_EXEMPT="${EXEMPT:-}" bash "$GUARDS" 2>&1)"; code=$?
+  out="$(SHIP_GATE_EXEMPT="${EXEMPT:-}" SHIP_GATE_POLICIES="${POLICIES-$ALL_POLICIES}" bash "$GUARDS" 2>&1)"; code=$?
   check "$name" "$expect" "$code" "$out"
   rm -rf "$d"
 }
@@ -84,6 +85,9 @@ check() {
   local name=$1 expect=$2 code=$3 out=$4
   if [ "$expect" = "pass" ]; then
     if [ "$code" -eq 0 ]; then ok "$name"; else bad "$name" "expected pass, got exit $code" "$out"; fi
+  elif [[ "$expect" == warn:* ]]; then
+    if [ "$code" -eq 0 ] && grep -F -- "${expect#warn:}" <<<"$out" | grep -q '::warning::'; then ok "$name"
+    else bad "$name" "expected a pass with a warning containing: ${expect#warn:} (exit $code)" "$out"; fi
   else
     if [ "$code" -ne 0 ] && grep -qF -- "$expect" <<<"$out"; then ok "$name"
     else bad "$name" "expected failure containing: $expect (exit $code)" "$out"; fi
@@ -127,6 +131,14 @@ expect_guard "HubSpot form embed allowed"        pass                          "
 expect_guard "HubSpot embed, region variable"    pass                          "echo 'const s = \\\`https://js-\${region}.hsforms.net/forms/embed/1.js\\\`' > src/pages/f.ts"
 expect_guard "inline GTM container id"            "Third-party tag"           "echo \"export const gtm = 'GTM-M7WZHXT7';\" > src/pages/site.ts"
 expect_guard "public Lighthouse storage"          "public storage"            "wf lh.yml '          temporaryPublicStorage: true'"
+POLICIES="" \
+expect_guard "no policies: vendor choices are free" pass                        "sed -i 's/\"dependencies\": {/\"dependencies\": { \"posthog-js\": \"1\",/' package.json && echo '<script src=\"https://www.googletagmanager.com/gtm.js?id=GTM-X\"></script>' > src/pages/gtm.astro && echo '<form method=\"post\"></form>' > src/pages/signup.astro && echo 'pages_build_output_dir = \"dist\"' > wrangler.toml && wf s.yml '          CLOUDFLARE_API_TOKEN: x'"
+POLICIES="" \
+expect_guard "no policies: env file still fails"  "Env/secret file committed" "echo 'A=1' > .env"
+POLICIES="" \
+expect_guard "no policies: push to main still fails" "pushes to main"         "wf auto.yml '      - run: git push origin HEAD:main'"
+POLICIES="tags-via-zaraz" \
+expect_guard "one policy on: only its guard runs" "Third-party tag"           "echo '<form method=\"post\"></form>' > src/pages/signup.astro && echo '<script src=\"https://www.clarity.ms/tag/abc\"></script>' > src/pages/c.astro"
 expect_guard "Renovate and Dependabot both (warn)" pass                       "echo '{}' > renovate.json && mkdir -p .github && echo 'version: 2' > .github/dependabot.yml"
 
 echo "Config and contract (prepare.mjs)"
@@ -158,11 +170,23 @@ expect_prepare "expired override"                 "expired on"          "cfg '\"
 expect_prepare "override that changes nothing"    "changes nothing"           "cfg '\"thresholdOverrides\":[{\"category\":\"accessibility\",\"minScore\":1}]'"
 expect_prepare "override on unknown audit"        "audit must be one of"      "cfg '\"thresholdOverrides\":[{\"audit\":\"robots-txt\",\"level\":\"warn\"}]'"
 expect_prepare "valid loosening accepted"         pass                        "cfg '\"thresholdOverrides\":[{\"audit\":\"cumulative-layout-shift\",\"maxNumericValue\":0.1,\"reason\":\"Hero video pending re-encode\",\"restoreBy\":\"$FUTURE\"}]'"
-expect_prepare "guard exemption accepted"         pass                        "cfg '\"guardExemptions\":[{\"guard\":\"posthog-client\",\"reason\":\"Moving analytics server-side in PR 12\",\"restoreBy\":\"$FUTURE\"}]'"
-expect_prepare "guard exemption expired"          "expired on"                "cfg '\"guardExemptions\":[{\"guard\":\"direct-tags\",\"reason\":\"GTM moves to Zaraz next sprint\",\"restoreBy\":\"$PAST\"}]'"
-expect_prepare "guard exemption without reason"   "needs a real reason"       "cfg '\"guardExemptions\":[{\"guard\":\"direct-tags\",\"reason\":\"later\",\"restoreBy\":\"$FUTURE\"}]'"
+expect_prepare "guard exemption accepted"         pass                        "cfg '\"policies\":[\"posthog-server-only\",\"tags-via-zaraz\"],\"guardExemptions\":[{\"guard\":\"posthog-client\",\"reason\":\"Moving analytics server-side in PR 12\",\"restoreBy\":\"$FUTURE\"}]'"
+expect_prepare "guard exemption expired"          "expired on"                "cfg '\"policies\":[\"posthog-server-only\",\"tags-via-zaraz\"],\"guardExemptions\":[{\"guard\":\"direct-tags\",\"reason\":\"GTM moves to Zaraz next sprint\",\"restoreBy\":\"$PAST\"}]'"
+expect_prepare "guard exemption without reason"   "needs a real reason"       "cfg '\"policies\":[\"posthog-server-only\",\"tags-via-zaraz\"],\"guardExemptions\":[{\"guard\":\"direct-tags\",\"reason\":\"later\",\"restoreBy\":\"$FUTURE\"}]'"
 expect_prepare "push to main cannot be exempted"  "can never be exempted"     "cfg '\"guardExemptions\":[{\"guard\":\"push-to-main\",\"reason\":\"Episode sync commits nightly\",\"restoreBy\":\"$FUTURE\"}]'"
 expect_prepare "unknown guard exemption"          "guard must be one of"      "cfg '\"guardExemptions\":[{\"guard\":\"everything\",\"reason\":\"Just this once please\",\"restoreBy\":\"$FUTURE\"}]'"
+expect_prepare "exemption for a policy not in use" "changes nothing"          "cfg '\"guardExemptions\":[{\"guard\":\"direct-tags\",\"reason\":\"GTM moves to Zaraz next sprint\",\"restoreBy\":\"$FUTURE\"}]'"
+expect_prepare "core guard exempt without policy" pass                        "cfg '\"guardExemptions\":[{\"guard\":\"node-pin\",\"reason\":\"Upgrading Node with Astro next sprint\",\"restoreBy\":\"$FUTURE\"}]'"
+expect_prepare "all four policies accepted"       pass                        "cfg '\"policies\":[\"posthog-server-only\",\"tags-via-zaraz\",\"turnstile-forms\",\"workers-builds-only\"]'"
+expect_prepare "unknown policy"                   "policies must be a list"   "cfg '\"policies\":[\"house-style\"]'"
+expect_prepare "discovery: raise a warning"       pass                        "cfg '\"discoveryOverrides\":[{\"rule\":\"llms-txt\",\"level\":\"error\"}]'"
+expect_prepare "discovery: lower without reason"  "needs a real reason"       "cfg '\"discoveryOverrides\":[{\"rule\":\"open-graph\",\"level\":\"warn\"}]'"
+expect_prepare "discovery: lower with reason"     pass                        "cfg '\"discoveryOverrides\":[{\"rule\":\"open-graph\",\"level\":\"off\",\"reason\":\"Social images ship with the redesign\",\"restoreBy\":\"$FUTURE\"}]'"
+expect_prepare "discovery: lowering expired"      "expired on"                "cfg '\"discoveryOverrides\":[{\"rule\":\"open-graph\",\"level\":\"warn\",\"reason\":\"Social images ship with the redesign\",\"restoreBy\":\"$PAST\"}]'"
+expect_prepare "discovery: changes nothing"       "changes nothing"           "cfg '\"discoveryOverrides\":[{\"rule\":\"canonical\",\"level\":\"error\"}]'"
+expect_prepare "discovery: unknown rule"          "rule must be one of"       "cfg '\"discoveryOverrides\":[{\"rule\":\"seo-score\",\"level\":\"warn\"}]'"
+expect_prepare "discovery: bad sitemap path"      "discovery.sitemap"         "cfg '\"discovery\":{\"sitemap\":\"sitemap.xml\"}'"
+expect_prepare "discovery: unknown setting"       "is not a setting"          "cfg '\"discovery\":{\"llms\":true}'"
 expect_prepare "check reaches deploy via npm run" "touches production"        "sed -i 's/\"test\": \"vitest run\"/\"test\": \"vitest run\", \"verify\": \"npm run check:canon \&\& npm run deploy\"/' package.json && cfg '\"checks\":{\"postBuild\":[\"verify\"]}'"
 expect_prepare "check runs a file that deploys"   "touches production"        "mkdir -p scripts && echo \"execFileSync('npx', ['wrangler', 'r2', 'object', 'put'])\" > scripts/canon.mjs && cfg '\"checks\":{\"postBuild\":[\"check:canon\"]}'"
 expect_prepare "check submits to IndexNow"        "touches production"        "mkdir -p scripts && echo \"fetch('https://api.indexnow.org/IndexNow')\" > scripts/canon.mjs && cfg '\"checks\":{\"postBuild\":[\"check:canon\"]}'"
@@ -272,7 +296,6 @@ built_case "structure: title over the band"       "over 60"             $S "page
 built_case "structure: description under band"    "under 140"           $S ":" '"structure":{"descMin":140}'
 built_case "structure: duplicate title"           "share the title"     $S "page /x.html 'Home of the example site' 'A different description for the duplicate title case.'"
 built_case "structure: missing description"       "no meta description" $S "page /x.html 'Page x of the site' ''"
-built_case "structure: canonical off-site"        "not an absolute URL" $S "sed -i 's#https://example.com#https://staging.example.com#' dist/client/about/index.html"
 built_case "structure: noindex page not scanned"  pass                  $S "page /draft.html 'Draft' '' '<h1>two</h1>' && sed -i 's#<head>#<head><meta name=\"robots\" content=\"noindex\">#' dist/client/draft.html"
 built_case "structure: template token left"       "unrendered template" $S "echo 'Call {{ phone }} today' > dist/client/llms-full.txt"
 built_case "structure: _headers typo"             "is not \"Name: value\"" $S "printf '/*\n  X-Frame-Options DENY\n' > dist/client/_headers"
@@ -314,6 +337,95 @@ EXEMPT=posthog-client \
 dist_case "posthog-js under exemption warns"        pass                  "echo 'import \"posthog-js\"' > dist/client/_astro/b.js"
 EXEMPT=posthog-client \
 dist_case "key in client output never exempt"       "PostHog key found"   "echo \"k='${PH}abcdefghijklmnopqrstuvwxyz0123'\" > dist/client/_astro/b.js"
+
+echo "Discovery scan (check-discovery.mjs): SEO, AEO, GEO, AIO"
+WORDS="This page exists so the discovery scan has real text to read: enough words that a crawler which does not run JavaScript still finds the substance of the page in its HTML, which is what search engines, answer engines and AI assistants index, quote and cite when they send people here."
+ORG='<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Example","url":"https://example.com/","sameAs":["https://www.linkedin.com/company/example"]}</script>'
+# dpage FILE TITLE — a page that passes every discovery rule
+dpage() {
+  local url="${1%index.html}"; url="${url%.html}"
+  mkdir -p "dist/client$(dirname "$1")"
+  printf '<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>%s</title><meta name="description" content="About %s."><link rel="canonical" href="https://example.com%s"><meta property="og:title" content="%s"><meta property="og:description" content="About %s."><meta property="og:image" content="https://example.com/og.png"></head><body><h1>%s</h1><p>%s</p><a href="/">Home</a> <a href="/about/">About</a></body></html>' \
+    "$2" "$2" "$url" "$2" "$2" "$2" "$WORDS" > "dist/client$1"
+}
+# inject FILE BEFORE HTML — insert HTML before the first BEFORE
+inject() { node -e 'const fs=require("fs");const [f,w,h]=process.argv.slice(1);fs.writeFileSync(f,fs.readFileSync(f,"utf8").replace(w,h+w))' "$@"; }
+sitemap() { { echo '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+  for u in "$@"; do echo "<url><loc>https://example.com$u</loc><lastmod>2026-09-01</lastmod></url>"; done; echo '</urlset>'; } > dist/client/sitemap.xml; }
+discovered() {
+  dpage /index.html "Home"; dpage /about/index.html "About"
+  inject dist/client/index.html '</head>' "$ORG"
+  echo png > dist/client/og.png
+  printf 'User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt
+  sitemap / /about/
+  printf '# Example\n\n> The example site.\n\n- [About](/about/)\n' > dist/client/llms.txt
+}
+# disco_case NAME EXPECT(pass|warn:substring|substring) SETUP [CONFIG-FRAGMENT]
+disco_case() {
+  local name=$1 expect=$2 setup=$3 d out code; d="$(baseline)"; cd "$d" || return
+  cfg "${4:-}"; discovered; eval "$setup"
+  out="$(GITHUB_ENV= GITHUB_STEP_SUMMARY= SHIP_GATE_DIR="$d/.sg" node "$PREPARE" after-build 2>&1 &&
+    SHIP_GATE_DIR="$d/.sg" node "$HERE/check-discovery.mjs" 2>&1)"; code=$?
+  if [ "$expect" = pass ] && grep -q '::warning::' <<<"$out"; then bad "$name" "expected a clean pass, got warnings" "$out"
+  else check "$name" "$expect" "$code" "$out"; fi
+  rm -rf "$d"
+}
+disco_case "conforming build passes, no warnings" pass ":"
+disco_case "robots.txt missing"                  "robots.txt: not in the build"   "rm dist/client/robots.txt"
+disco_case "robots.txt without Sitemap"          "no \"Sitemap:\" line"           "printf 'User-agent: *\nAllow: /\n' > dist/client/robots.txt"
+disco_case "robots.txt Sitemap off-site"         "is not an absolute URL on"      "printf 'User-agent: *\nAllow: /\nSitemap: https://cdn.example.net/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "robots.txt blocks everything"        "blocks Googlebot"               "printf 'User-agent: *\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "robots.txt blocks one page for Bing" "blocks Bingbot"                 "printf 'User-agent: bingbot\nDisallow: /about/\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "longest match: Allow beats Disallow" pass                             "printf 'User-agent: *\nDisallow: /\nAllow: /$\nAllow: /about/\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "AI search crawler blocked"           "blocks OAI-SearchBot"           "printf 'User-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "AI user-fetch crawler blocked"       "blocks Claude-User"             "printf 'User-agent: Claude-User\nUser-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "only training crawlers blocked"      pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "no sitemap"                          "no sitemap found"               "rm dist/client/sitemap.xml && printf 'User-agent: *\nAllow: /\n' > dist/client/robots.txt"
+disco_case "sitemap index with a child sitemap"  pass                             "mv dist/client/sitemap.xml dist/client/sitemap-0.xml && printf '<sitemapindex><sitemap><loc>https://example.com/sitemap-0.xml</loc></sitemap></sitemapindex>' > dist/client/sitemap-index.xml && sed -i 's#sitemap.xml#sitemap-index.xml#' dist/client/robots.txt"
+disco_case "sitemap child missing"               "not in the build"               "printf '<sitemapindex><sitemap><loc>https://example.com/sitemap-9.xml</loc></sitemap></sitemapindex>' > dist/client/sitemap.xml"
+disco_case "sitemap misses a page"               "indexable, but not in the sitemap" "sitemap /"
+disco_case "sitemap lists a redirecting URL"     "that URL redirects"             "sitemap / /about/ /about"
+disco_case "sitemap lists a noindex page"        "the page is noindex"            "dpage /draft/index.html Draft && inject dist/client/draft/index.html '</head>' '<meta name=\"robots\" content=\"noindex\">' && sitemap / /about/ /draft/"
+disco_case "sitemap lists a missing page"        "the build does not emit it"     "sitemap / /about/ /gone/"
+disco_case "sitemap URL off-site"                "is not on https://example.com"  "sed -i 's#https://example.com/about/#https://www.example.com/about/#' dist/client/sitemap.xml"
+disco_case "sitemap lastmod not a date"          "is not a W3C date"              "sed -i 's#2026-09-01#1 Sept 2026#' dist/client/sitemap.xml"
+disco_case "sitemap without lastmod (warn)"      "warn:without lastmod"           "sed -i 's#<lastmod>2026-09-01</lastmod>##g' dist/client/sitemap.xml"
+disco_case "canonical missing"                   "0 canonical links"              "sed -i 's#<link rel=\"canonical\"[^>]*>##' dist/client/about/index.html"
+disco_case "canonical off-site"                  "not an absolute URL on"         "sed -i 's#canonical\" href=\"https://example.com#canonical\" href=\"https://staging.example.com#' dist/client/about/index.html"
+disco_case "canonical to a redirecting URL"      "is not an indexable page"       "sed -i 's#canonical\" href=\"https://example.com/about/#canonical\" href=\"https://example.com/about#' dist/client/about/index.html"
+disco_case "canonicalised page left in sitemap"  "its canonical is /"             "sed -i 's#canonical\" href=\"https://example.com/about/#canonical\" href=\"https://example.com/#' dist/client/about/index.html"
+disco_case "canonicalised page out of sitemap"   pass                             "sed -i 's#canonical\" href=\"https://example.com/about/#canonical\" href=\"https://example.com/#' dist/client/about/index.html && sitemap /"
+disco_case "no html lang"                        "no lang attribute"              "sed -i 's#<html lang=\"en\">#<html>#' dist/client/about/index.html"
+disco_case "no viewport"                         "name=\"viewport\""              "sed -i 's#<meta name=\"viewport\"[^>]*>##' dist/client/about/index.html"
+disco_case "broken internal link"                "does not emit: /missing/"       "inject dist/client/about/index.html '</body>' '<a href=\"/missing/\">x</a>'"
+disco_case "relative and absolute links resolve" pass                             "inject dist/client/about/index.html '</body>' '<a href=\"../\">up</a><a href=\"https://example.com/about/#team\">team</a><a href=\"/about\">slashless</a><a href=\"/og.png?v=2\">img</a><a href=\"https://other.example/\">out</a><a href=\"mailto:a@example.com\">mail</a>'"
+disco_case "link covered by _redirects"          pass                             "inject dist/client/about/index.html '</body>' '<a href=\"/old/page\">old</a>' && printf '/old/* /about/ 301\n' > dist/client/_redirects"
+disco_case "link under ignoreLinks"              pass                             "inject dist/client/about/index.html '</body>' '<a href=\"/api/logout\">x</a>'" '"discovery":{"ignoreLinks":["/api/"]}'
+disco_case "og:image missing"                    "missing og:image"               "sed -i 's#<meta property=\"og:image\"[^>]*>##' dist/client/about/index.html"
+disco_case "og:image relative"                   "must be an absolute URL"        "sed -i 's#og:image\" content=\"https://example.com/og.png#og:image\" content=\"/og.png#' dist/client/about/index.html"
+disco_case "og:image not in the build"           "is not in the build"            "rm dist/client/og.png"
+disco_case "JSON-LD invalid"                     "is not valid JSON"              "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@type\":}</script>'"
+disco_case "JSON-LD without schema.org context"  "no schema.org @context"         "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@type\":\"WebPage\"}</script>'"
+disco_case "Article missing datePublished"       "missing datePublished"          "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"BlogPosting\",\"headline\":\"About\",\"author\":{\"@type\":\"Person\",\"name\":\"Sam\"},\"dateModified\":\"2026-09-01\"}</script>'"
+disco_case "Article without dateModified (warn)" "warn:no dateModified"          "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"Article\",\"headline\":\"About\",\"author\":{\"@type\":\"Person\",\"name\":\"Sam\"},\"datePublished\":\"2026-09-01\"}</script>'"
+disco_case "@graph nodes share the context"      pass                             "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@graph\":[{\"@type\":\"WebSite\",\"name\":\"Example\",\"url\":\"https://example.com/\"},{\"@type\":\"WebPage\",\"name\":\"About\"}]}</script>'"
+FAQ='<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"How long does setup take?","acceptedAnswer":{"@type":"Answer","text":"About a week."}}]}</script>'
+disco_case "FAQ question not on the page"        "not on the page"                "inject dist/client/about/index.html '</head>' '$FAQ'"
+disco_case "FAQ question on the page"            pass                             "inject dist/client/about/index.html '</head>' '$FAQ' && inject dist/client/about/index.html '</body>' '<h2>How long does setup take&#x3F;</h2><p>About a week.</p>'"
+disco_case "FAQ answer missing"                  "acceptedAnswer.text"            "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"FAQPage\",\"mainEntity\":[{\"@type\":\"Question\",\"name\":\"Why?\"}]}</script>'"
+disco_case "home without site entity"            "no Organization"                "sed -i 's#<script type=\"application/ld+json\">.*</script>##' dist/client/index.html"
+disco_case "LocalBusiness needs an address"      "missing address"                "sed -i 's#\"@type\":\"Organization\"#\"@type\":\"LocalBusiness\"#' dist/client/index.html"
+disco_case "site entity url off-site"            "url must be on"                 "sed -i 's#\"url\":\"https://example.com/\"#\"url\":\"https://example.org/\"#' dist/client/index.html"
+disco_case "site entity without sameAs (warn)"   "warn:no sameAs"                 "sed -i 's#,\"sameAs\":\[[^]]*\]##' dist/client/index.html"
+disco_case "nested page without breadcrumbs (warn)" "warn:BreadcrumbList"         "dpage /guides/setup/index.html Setup && sitemap / /about/ /guides/setup/"
+disco_case "thin page (warn)"                    "warn:words of text"             "sed -i \"s#\$WORDS#Short.#\" dist/client/about/index.html"
+disco_case "nosnippet (warn)"                    "warn:stops Google quoting"      "inject dist/client/about/index.html '</head>' '<meta name=\"robots\" content=\"index, nosnippet\">'"
+disco_case "max-image-preview:none (warn)"       "warn:hides the page"            "inject dist/client/about/index.html '</head>' '<meta name=\"googlebot\" content=\"max-image-preview:none\">'"
+disco_case "no llms.txt (warn)"                  "warn:llms.txt: not in the build" "rm dist/client/llms.txt"
+disco_case "llms.txt malformed"                  "must start with"                "printf 'Example site\n- [About](/about/)\n' > dist/client/llms.txt"
+disco_case "rule lowered with a reason"          "warn:0 canonical links"         "sed -i 's#<link rel=\"canonical\"[^>]*>##' dist/client/about/index.html" "\"discoveryOverrides\":[{\"rule\":\"canonical\",\"level\":\"warn\",\"reason\":\"Canonicals ship with the new layout\",\"restoreBy\":\"$FUTURE\"}]"
+disco_case "warning raised to error"             "llms.txt: not in the build"     "rm dist/client/llms.txt" '"discoveryOverrides":[{"rule":"llms-txt","level":"error"}]'
+disco_case "rule turned off (warns it is lowered)" "warn:lowered to off"          "rm dist/client/llms.txt" "\"discoveryOverrides\":[{\"rule\":\"llms-txt\",\"level\":\"off\",\"reason\":\"llms.txt waits on the content audit\",\"restoreBy\":\"$FUTURE\"}]"
 echo
 echo "Self-test: $pass passed, $failn failed."
 [ "$failn" -eq 0 ]

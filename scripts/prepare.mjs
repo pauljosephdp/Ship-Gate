@@ -4,7 +4,7 @@
 //   node prepare.mjs verify      [config]  → checks contract + config, writes test config
 //   node prepare.mjs after-build [config]  → after the build: resolves page lists, writes
 //                                            the Lighthouse config and run.json for the checks
-//   node prepare.mjs post-deploy [config]  → exports site URL + smoke paths
+//   node prepare.mjs post-deploy [config]  → exports site URL, smoke paths and policies
 //
 // Run from the site directory (the action's working-directory). Standards live
 // HERE, not in site repos. A site may make one stricter freely; it may loosen one
@@ -15,6 +15,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, appen
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { staticRoot, indexablePages } from './site-files.mjs';
+import { RULES as DISCOVERY_RULES, LEVELS as DISCOVERY_LEVELS } from './discovery.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const [modeArg = 'verify', configPath = 'ship-gate.config.json'] = process.argv.slice(2);
@@ -27,8 +28,8 @@ const ORIGIN = `http://localhost:${PORT}`;
 
 // ── The standard ──
 // Deterministic lab signals fail the build. Throttled performance on a shared
-// CI runner moves several points between identical runs (Playway measured
-// 89–96 on identical pages), so it warns; a site that wants it to fail raises
+// CI runner moves several points between identical runs (a measured baseline
+// moved 89–96 on identical pages), so it warns; a site that wants it to fail raises
 // it to "error" in its own config.
 // Not asserted:
 //   categories:seo — Lighthouse fails robots-txt on the Content-Signal directive
@@ -55,21 +56,32 @@ const RETIRED_AUDITS = ['categories:seo', 'canonical'];
 const LEVEL_RANK = { warn: 1, error: 2 };
 // Other companies' code is blocked in Lighthouse, so a vendor release never moves a site's score.
 const BLOCKED_URLS = ['*posthog*', '*hubspot*', '*hsforms*', '*hs-scripts*', '*hs-analytics*', '*clarity.ms*',
-  '*googletagmanager*', '*google-analytics*', '*/cdn-cgi/*', '*challenges.cloudflare.com*'];
+  '*googletagmanager*', '*google-analytics*', '*doubleclick.net*', '*connect.facebook.net*', '*hotjar*',
+  '*snap.licdn.com*', '*analytics.tiktok.com*', '*/cdn-cgi/*', '*challenges.cloudflare.com*'];
 
-// Guards a site may exempt for a while, with a reason and a restore date.
+// Stack policies: opinions about which vendors a site uses and how. Off by default, so
+// the core gate fits any Astro site; a site (or a portfolio) opts in by name.
+export const POLICIES = {
+  'posthog-server-only': 'PostHog runs server-side only (posthog-node in server paths, EU host, no key in the client)',
+  'tags-via-zaraz': 'Every third-party tag, GTM included, loads through Cloudflare Zaraz',
+  'turnstile-forms': 'Every public form carries Cloudflare Turnstile',
+  'workers-builds-only': 'Cloudflare Workers Builds is the only deployer (no Pages config, no Cloudflare tokens in workflows)',
+};
+
+// Guards a site may exempt for a while, with a reason and a restore date. A guard
+// tied to a policy runs only when the site opts into that policy.
 // Never exemptible: committed secrets, and anything that skips the PR gate.
 export const GUARDS = {
-  'posthog-client': 'PostHog in the browser (client SDK, snippet, direct use outside server paths, client bundle, browser calls)',
-  'posthog-public-var': 'PostHog variable with a PUBLIC_ prefix',
-  'posthog-us-host': 'PostHog US host',
-  'posthog-env-tag': 'posthog-node events without __DEPLOY_ENV__',
-  'direct-tags': 'third-party tags loaded directly instead of through Zaraz',
-  turnstile: 'forms without Turnstile',
-  'pages-config': 'Pages config instead of Workers',
-  'node-pin': 'Node pin missing or below the floor',
-  'cloudflare-in-workflows': 'Cloudflare API token or wrangler write in a workflow',
-  'public-lighthouse': 'Lighthouse reports in public storage',
+  'posthog-client': { policy: 'posthog-server-only', what: 'PostHog in the browser (client SDK, snippet, direct use outside server paths, client bundle, browser calls)' },
+  'posthog-public-var': { policy: 'posthog-server-only', what: 'PostHog variable with a PUBLIC_ prefix' },
+  'posthog-us-host': { policy: 'posthog-server-only', what: 'PostHog US host' },
+  'posthog-env-tag': { policy: 'posthog-server-only', what: 'posthog-node events without __DEPLOY_ENV__' },
+  'direct-tags': { policy: 'tags-via-zaraz', what: 'third-party tags loaded directly instead of through Zaraz' },
+  turnstile: { policy: 'turnstile-forms', what: 'forms without Turnstile' },
+  'pages-config': { policy: 'workers-builds-only', what: 'Pages config instead of Workers' },
+  'cloudflare-in-workflows': { policy: 'workers-builds-only', what: 'Cloudflare API token or wrangler write in a workflow' },
+  'node-pin': { what: 'Node pin missing or below the floor' },
+  'public-lighthouse': { what: 'Lighthouse reports in public storage' },
 };
 const NEVER_EXEMPT = { 'posthog-key': 'a hard-coded PostHog key', 'env-file': 'a committed env file', 'push-to-main': 'a workflow pushing to main' };
 
@@ -123,14 +135,19 @@ const isNameList = (v, re) => Array.isArray(v) && v.every((s) => typeof s === 's
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
 
 if (typeof cfg.siteUrl !== 'string' || !/^https:\/\/[^/]+$/.test(cfg.siteUrl))
-  err('siteUrl must be an https origin with no path or trailing slash, e.g. "https://liveincocoon.com".');
+  err('siteUrl must be an https origin with no path or trailing slash, e.g. "https://example.com".');
 const smokePaths = cfg.smokePaths ?? ['/', '/robots.txt', '/sitemap-index.xml'];
 if (!isPathList(smokePaths) || smokePaths.length === 0) err('smokePaths must be a non-empty list of paths starting with "/".');
+const policies = cfg.policies ?? [];
+if (!Array.isArray(policies) || policies.some((p) => !(p in POLICIES)))
+  err(`policies must be a list drawn from: ${Object.keys(POLICIES).join(', ')}.`);
+const policyOn = (p) => Array.isArray(policies) && policies.includes(p);
 
 if (mode === 'post-deploy') {
   if (errors.length) fail();
   exportEnv('SHIP_GATE_SITE_URL', cfg.siteUrl);
   exportEnv('SHIP_GATE_SMOKE_PATHS', smokePaths.join(' '));
+  exportEnv('SHIP_GATE_POLICIES', policies.join(' '));
   console.log('Post-deploy config loaded.');
   process.exit(0);
 }
@@ -235,10 +252,35 @@ for (const [i, x] of (Array.isArray(exemptions) ? exemptions : []).entries()) {
   const where = `guardExemptions[${i}] (${x?.guard ?? '?'})`;
   if (x?.guard in NEVER_EXEMPT) { err(`${where}: ${NEVER_EXEMPT[x.guard]} can never be exempted.`); continue; }
   if (!(x?.guard in GUARDS)) { err(`${where}: guard must be one of ${Object.keys(GUARDS).join(', ')}.`); continue; }
+  const pol = GUARDS[x.guard].policy;
+  if (pol && !policyOn(pol)) { err(`${where}: this guard belongs to the "${pol}" policy, which this site does not use, so the exemption changes nothing — remove it.`); continue; }
   if (!checkLoosening(where, x)) continue;
-  warn(`Guard "${x.guard}" (${GUARDS[x.guard]}) exempted until ${x.restoreBy}: ${x.reason}`);
+  warn(`Guard "${x.guard}" (${GUARDS[x.guard].what}) exempted until ${x.restoreBy}: ${x.reason}`);
   exempt.push(x.guard);
 }
+
+// ── Discovery rules (SEO, AEO, GEO, AIO): raising a level is free; lowering needs a reason and a date ──
+const discoveryLevels = Object.fromEntries(Object.entries(DISCOVERY_RULES).map(([k, r]) => [k, r.level]));
+const dOverrides = cfg.discoveryOverrides ?? [];
+if (!Array.isArray(dOverrides)) err('discoveryOverrides must be a list.');
+for (const [i, o] of (Array.isArray(dOverrides) ? dOverrides : []).entries()) {
+  const where = `discoveryOverrides[${i}] (${o?.rule ?? '?'})`;
+  if (!(o?.rule in DISCOVERY_RULES)) { err(`${where}: rule must be one of ${Object.keys(DISCOVERY_RULES).join(', ')}.`); continue; }
+  if (!(o.level in DISCOVERY_LEVELS)) { err(`${where}: level must be "error", "warn" or "off".`); continue; }
+  const std = DISCOVERY_RULES[o.rule].level;
+  if (o.level === std) { err(`${where}: changes nothing — remove it.`); continue; }
+  if (DISCOVERY_LEVELS[o.level] < DISCOVERY_LEVELS[std]) {
+    if (!checkLoosening(where, o)) continue;
+    warn(`Discovery rule ${o.rule} lowered to ${o.level} until ${o.restoreBy}: ${o.reason}`);
+  } else console.log(`Discovery rule ${o.rule} raised to ${o.level} by this site.`);
+  discoveryLevels[o.rule] = o.level;
+}
+const discovery = cfg.discovery ?? {};
+for (const k of Object.keys(discovery)) if (!['sitemap', 'ignoreLinks'].includes(k)) err(`discovery.${k} is not a setting. Use sitemap, ignoreLinks.`);
+if (discovery.sitemap !== undefined && !(typeof discovery.sitemap === 'string' && /^\/\S+\.xml$/.test(discovery.sitemap)))
+  err('discovery.sitemap must be the sitemap\'s path, e.g. "/sitemap-index.xml".');
+if (discovery.ignoreLinks !== undefined && !isPathList(discovery.ignoreLinks))
+  err('discovery.ignoreLinks must be a list of path prefixes served by the Worker, not the static build, e.g. "/api/".');
 
 // ── Repo contract ──
 let pkg = {};
@@ -312,6 +354,8 @@ if (!isPathList(pages) || pages.length === 0)
   err('pages must be a non-empty list of paths starting with "/" — one per key template (home, service/product, contact, article).');
 const formPages = cfg.formPages ?? [];
 if (!isPathList(formPages)) err('formPages must be a list of paths starting with "/".');
+const turnstile = policyOn('turnstile-forms');
+if (!turnstile && formPages.length) warn('formPages lists pages, but only the turnstile-forms policy uses it. Add the policy or remove the list.');
 const turnstileEnv = {
   siteKey: cfg.turnstileEnv?.siteKey ?? 'PUBLIC_TURNSTILE_SITE_KEY',
   secretKey: cfg.turnstileEnv?.secretKey ?? 'TURNSTILE_SECRET_KEY',
@@ -371,6 +415,8 @@ if (mode === 'after-build') {
     securityHeaders,
     reflowWidths,
     exempt,
+    policies,
+    discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [] },
   }, null, 2));
   console.log(`Ship Gate after build: ${all.length} indexable page(s) in ${root}; Lighthouse ${lhUrls.length} URL(s) × ${runs} run(s).`);
   process.exit(0);
@@ -417,8 +463,12 @@ for (const phase of PHASES) exportEnv(`SHIP_GATE_CHECKS_${phase.toUpperCase()}`,
 exportEnv('SHIP_GATE_PYTHON', py?.version ?? '');
 exportEnv('SHIP_GATE_PIP', (py?.packages ?? []).join(' '));
 exportEnv('SHIP_GATE_EXEMPT', exempt.join(' '));
-exportEnv(turnstileEnv.siteKey, TURNSTILE_TEST_KEYS.siteKey);
-exportEnv(turnstileEnv.secretKey, TURNSTILE_TEST_KEYS.secretKey);
+exportEnv('SHIP_GATE_POLICIES', policies.join(' '));
+if (turnstile) {
+  exportEnv(turnstileEnv.siteKey, TURNSTILE_TEST_KEYS.siteKey);
+  exportEnv(turnstileEnv.secretKey, TURNSTILE_TEST_KEYS.secretKey);
+}
 const n = (p) => checkLists[p].length;
 console.log(`Ship Gate prepared: ${pages.length} key page(s), ${formPages.length} form page(s), ` +
-  `${n('preBuild') + n('postBuild') + n('browser')} site check(s), server "${server}", config in ${OUT}.`);
+  `${n('preBuild') + n('postBuild') + n('browser')} site check(s), server "${server}", ` +
+  `policies: ${policies.length ? policies.join(', ') : 'none'}, config in ${OUT}.`);

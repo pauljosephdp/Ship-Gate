@@ -2,7 +2,8 @@ name: Ship Gate — post-deploy
 description: >
   After a merge to main: waits until production serves the merged commit
   (build-sha meta tag), smoke-checks key URLs, confirms production robots.txt
-  lets search and AI search crawlers in, and (posthog-server-only policy)
+  lets search and AI search crawlers in and that no WAF refuses plain requests,
+  reports freshness headers and (optional) field Core Web Vitals, and (posthog-server-only policy)
   that production HTML is PostHog-free. On failure: roll back, then fix forward.
 author: Ship Gate
 inputs:
@@ -15,6 +16,11 @@ inputs:
   wait-minutes:
     description: How long to wait for the deploy pipeline to serve the new commit.
     default: "10"
+  crux-api-key:
+    description: >
+      Optional Google API key with the Chrome UX Report API enabled. When set, field Core Web
+      Vitals (p75 LCP, INP, CLS on phones) are reported, warning on any miss. Pass a secret.
+    default: ""
 runs:
   using: composite
   steps:
@@ -52,6 +58,12 @@ runs:
     - name: Production robots.txt admits search and AI search crawlers
       shell: bash
       run: node "$GITHUB_ACTION_PATH/../scripts/check-robots-live.mjs"
+
+    - name: Production answers plain requests; freshness headers; field Core Web Vitals
+      shell: bash
+      env:
+        CRUX_API_KEY: ${{ inputs.crux-api-key }}
+      run: node "$GITHUB_ACTION_PATH/../scripts/check-headers-live.mjs"
 
     - name: Production HTML is PostHog-free
       if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only ')

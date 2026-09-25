@@ -23,6 +23,9 @@ export const RULES = {
   'html-lang':          { category: 'SEO', level: 'error', title: 'The html element sets lang' },
   viewport:             { category: 'SEO', level: 'error', title: 'Mobile viewport meta tag' },
   'internal-links':     { category: 'SEO', level: 'error', title: 'Every internal link resolves' },
+  'redirect-permanence':{ category: 'SEO', level: 'warn',  title: 'Static redirects are permanent (301/308)' },
+  'rtl-direction':      { category: 'SEO', level: 'error', title: 'Right-to-left pages set dir="rtl"' },
+  'hreflang-pairs':     { category: 'SEO', level: 'warn',  title: 'hreflang alternates exist and link back' },
   'structured-data':    { category: 'AEO', level: 'error', title: 'JSON-LD parses, uses schema.org and has the key properties' },
   'site-entity':        { category: 'AEO', level: 'error', title: 'Home page declares the Organization or Person behind the site' },
   'entity-sameas':      { category: 'AEO', level: 'warn',  title: 'The site entity links its profiles (sameAs)' },
@@ -34,10 +37,18 @@ export const RULES = {
   'rendered-content':   { category: 'GEO', level: 'warn',  title: 'Page text is in the HTML, not rendered by JavaScript' },
   'llms-txt':           { category: 'GEO', level: 'warn',  title: '/llms.txt exists' },
   'llms-txt-format':    { category: 'GEO', level: 'error', title: '/llms.txt follows the llmstxt.org format' },
+  'markdown-mirrors':   { category: 'GEO', level: 'warn',  title: 'Markdown and text mirrors stay out of the search index' },
   'snippet-controls':   { category: 'AIO', level: 'warn',  title: 'Indexable pages allow text snippets' },
   'image-preview':      { category: 'AIO', level: 'warn',  title: 'Indexable pages allow image previews' },
 };
 export const LEVELS = { off: 0, warn: 1, error: 2 };
+
+// Languages written right to left (ISO 639 primary subtags). A page in one of them needs
+// dir="rtl", or browsers lay it out left to right and screen readers misread it.
+export const RTL_LANGS = ['ar', 'arc', 'ckb', 'dv', 'fa', 'he', 'ps', 'sd', 'ug', 'ur', 'yi'];
+// Other search engines' crawler tokens a site may add to robots-blocks-page with
+// discovery.searchCrawlers (e.g. Baiduspider, Yeti for Naver, YandexBot, DuckDuckBot).
+export const CRAWLER_TOKEN = /^[A-Za-z][A-Za-z0-9._-]{1,40}$/;
 
 // Crawlers that fetch pages to answer a user or to build an AI search index. Blocking
 // one removes the site from that product's answers and citations. Sources, Sept 2026:

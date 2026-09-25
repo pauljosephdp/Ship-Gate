@@ -2,7 +2,7 @@ name: Ship Gate — verify
 description: >
   Merge gate for Astro sites. Stack guards, contract check, astro check, unit
   tests, the site's own checks, build, post-build scans, SEO/AEO/GEO/AIO
-  discovery readiness, Playwright + axe, reflow, CSP, edge files and
+  discovery readiness, Playwright + axe, keyboard, reflow, CSP, edge files and
   Lighthouse CI. Every check runs; one summary at the end says which failed.
   Run it as the only step after checkout in a job named "verify".
 author: Ship Gate
@@ -144,6 +144,14 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: node "$GITHUB_ACTION_PATH/scripts/check-copy.mjs"
 
+    - name: Market scan (market-cn, rtl-logical-css)
+      id: market
+      if: steps.afterbuild.outcome == 'success' && (contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' market-cn ') || contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' rtl-logical-css '))
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: node "$GITHUB_ACTION_PATH/scripts/check-market.mjs"
+
     - name: Site checks (after build)
       id: postbuild
       if: steps.build.outcome == 'success' && env.SHIP_GATE_CHECKS_POSTBUILD != ''
@@ -172,7 +180,7 @@ runs:
         npx --no-install playwright install --with-deps chromium
         bash "$GITHUB_ACTION_PATH/scripts/run-checks.sh" --serve $SHIP_GATE_CHECKS_BROWSER
 
-    - name: Smoke, axe (WCAG 2.2 AA), reflow, CSP and edge files
+    - name: Smoke, axe (WCAG 2.2 AA), keyboard, reflow, CSP, consent and edge files
       id: e2e
       if: steps.tools.outcome == 'success'
       continue-on-error: true
@@ -223,6 +231,7 @@ runs:
           |Structure scan=${{ steps.structure.outcome }}
           |Discovery (SEO, AEO, GEO, AIO)=${{ steps.discovery.outcome }}
           |Placeholder copy=${{ steps.copy.outcome }}
+          |Market scan=${{ steps.market.outcome }}
           |Site checks after build=${{ steps.postbuild.outcome }}
           |Site browser checks=${{ steps.browser.outcome }}
           |Smoke, axe, reflow, CSP, edge=${{ steps.e2e.outcome }}

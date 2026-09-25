@@ -41,9 +41,11 @@ Templates for all five are in `templates/caller/`.
 3. Site checks before the build, then the build
 4. On the built output: structure scan, discovery scan (SEO, AEO, GEO, AIO),
    placeholder scan, the client-bundle PostHog scan (`posthog-server-only`
-   policy), site checks after the build
+   policy), the market scan (`market-cn` and `rtl-logical-css` policies), site
+   checks after the build
 5. Against the served build: site browser checks, then the Playwright suite
-   (smoke + axe on desktop 1440 and Pixel 7, reflow, CSP, edge files)
+   (smoke + axe on desktop 1440 and Pixel 7, keyboard, reflow, CSP, consent,
+   edge files)
 6. Lighthouse CI (mobile)
 
 Every check runs even after another fails, so a PR shows all its failures at
@@ -104,11 +106,20 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
 - **axe, WCAG 2.2 AA** (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`),
   desktop and mobile, after scrolling the page and letting fade-in animations
   finish, so a card mid-fade is not scanned.
+- **Keyboard** (desktop): pressing Tab reaches every control, focus is never
+  trapped (WCAG 2.1.2), every focused control is on screen (2.4.11) and changes
+  visibly when focused (2.4.7): an outline, ring, border, background, colour or
+  underline that isn't there without focus. It warns by default;
+  `"keyboard": "error"` makes it fail. axe checks the markup; this presses the keys.
 - **Reflow:** no horizontal scroll at 320, 360 and 390px and at 200% zoom
   (1280px at 2x), WCAG 1.4.10 and 1.4.4. Content inside its own `overflow-x`
   scroller or clipper passes; the failure names the elements past the edge.
 - **CSP:** a page that sends a Content-Security-Policy (enforced or Report-Only)
   must load with zero violations.
+- **Consent** (`consent-before-tracking` policy, desktop): before any
+  interaction, no cookie is set beyond Cloudflare's essential ones and
+  `consentEssentialCookies`, and no tracker from the Lighthouse block list is
+  requested or present in the markup.
 
 Other origins are blocked in the browser, so a vendor outage never fails a PR.
 CSP still reports a disallowed URL before any request is made.
@@ -165,6 +176,9 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | SEO | `html-lang` | error | `<html>` has no valid `lang` |
 | SEO | `viewport` | error | no `width=device-width` viewport |
 | SEO | `internal-links` | error | an `<a href>` on the site resolves to no built file and no `_redirects` rule |
+| SEO | `redirect-permanence` | warn | a `_redirects` rule answers 302 or 307, a temporary move (302 is Cloudflare's default when a rule names no status) |
+| SEO | `rtl-direction` | error | a page in a right-to-left language (`ar`, `he`, `fa`, `ur`, `ps`, `yi`, `ckb` and others) has no `dir="rtl"` on `<html>` or `<body>` |
+| SEO | `hreflang-pairs` | warn | an `hreflang` alternate names a URL on the site that isn't an indexable page, or a page that doesn't link back |
 | AEO | `structured-data` | error | JSON-LD doesn't parse, lacks a schema.org `@context` or `@type`, or lacks key properties (below) |
 | AEO | `site-entity` | error | the home page declares no Organization, LocalBusiness or Person, or its `url` is off-site |
 | AEO | `entity-sameas` | warn | that entity has no `sameAs` profile links |
@@ -176,6 +190,7 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | GEO | `rendered-content` | warn | fewer than 50 words of text in the HTML (content rendered by JavaScript) |
 | GEO | `llms-txt` | warn | no `/llms.txt` |
 | GEO | `llms-txt-format` | error | `/llms.txt` lacks the `# Name` heading, `> summary` line or links ([llmstxt.org](https://llmstxt.org)) |
+| GEO | `markdown-mirrors` | warn | a `.md` or `.txt` file linked from `llms.txt` has no `X-Robots-Tag: noindex` (or canonical `Link`) header in `_headers` |
 | AIO | `snippet-controls` | warn | an indexable page sets `nosnippet` or `max-snippet:0` |
 | AIO | `image-preview` | warn | an indexable page sets `max-image-preview:none` |
 
@@ -196,6 +211,30 @@ Google-Extended does not affect Google Search or AI Overviews. Blocking a
 *search* crawler such as OAI-SearchBot or PerplexityBot removes the site from
 that product's answers, so it fails.
 
+**Other search engines.** `robots-blocks-page` always checks Googlebot and
+Bingbot. A site that serves China, Korea or Russia adds their crawlers, in the
+build scan and after deploy:
+
+```json
+"discovery": { "searchCrawlers": ["Baiduspider", "Yeti", "YandexBot"] }
+```
+
+`Yeti` is Naver's crawler. Some checklists give Naver title and description
+limits of 40 and 80 characters. A site that wants them tightens the existing
+band, `"structure": { "titleMax": 40, "descMax": 80 }`; the gate doesn't
+hard-code them.
+
+**Markdown mirrors.** Plain-text copies of pages for AI tools (`/llms/about.md`)
+duplicate the HTML. A `robots.txt` `Disallow` does not keep a URL out of the
+index: a blocked URL can still be indexed from links, and the crawler never
+sees a `noindex` it isn't allowed to fetch. Send the header instead, for a
+folder of mirrors:
+
+```
+/llms/*
+  X-Robots-Tag: noindex
+```
+
 **What it does not claim.** `llms.txt` is a proposal: some AI tools read it,
 but Google Search does not use it, so it only warns. No markup guarantees a
 citation in an AI answer; these rules make sure nothing on the site prevents
@@ -215,9 +254,22 @@ overridden:
 ```
 
 After deploy, the post-deploy action reads the `robots.txt` production
-**actually serves** and fails if it blocks Googlebot, Bingbot or an AI search
-crawler from a smoke path. A CDN's managed robots.txt or "block AI bots" setting
-can rewrite the file after the build passed.
+**actually serves** and fails if it blocks Googlebot, Bingbot, a
+`discovery.searchCrawlers` crawler or an AI search crawler from a smoke path. A
+CDN's managed robots.txt or "block AI bots" setting can rewrite the file after
+the build passed. It also fails when `/`, `/robots.txt` or a smoke path answers
+**403 or 429** to a plain request: a WAF rule or rate limit that refuses
+ordinary traffic refuses crawlers too, and AI platforms treat the site as
+unreachable. It warns when a page has neither `ETag` nor `Last-Modified`, which
+crawlers use to refetch only what changed. It never spoofs a crawler's user
+agent: a correctly configured WAF blocks spoofed bots, so that test would fail
+good sites.
+
+With a `crux-api-key` input (a Google API key with the Chrome UX Report API
+enabled, passed as a secret), it also reports **field Core Web Vitals** for
+phones and warns when p75 LCP is over 2.5 s, INP over 200 ms or CLS over 0.1.
+Lab tools cannot measure INP; only real visits can. Sites with too little
+traffic have no Chrome UX Report data, and the step says so and passes.
 
 ### Stack policies
 
@@ -230,10 +282,17 @@ checks:
 | `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot tracking (`hs-scripts`, `hs-analytics`) go through Cloudflare Zaraz. HubSpot form embeds (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until HubSpot's forms API is available. They render their own form, so list only Turnstile forms in `formPages` |
 | `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys |
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
+| `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: Google (Fonts, Maps, reCAPTCHA, tags), YouTube, Facebook, Instagram, X/Twitter, Vimeo, Gravatar. A blocked font or script stalls the page until it times out. Links and JSON-LD `sameAs` load nothing and pass. jsDelivr and unpkg warn; non-ASCII URLs warn |
+| `rtl-logical-css` | Warns with a count of physical `left`/`right` declarations in the built CSS (`margin-left`, `padding-right`, `left:`, `text-align: left`, `float: right`, `border-left`), which don't mirror under `dir="rtl"`. Use logical properties (`margin-inline-start`, `inset-inline-start`, `text-align: start`). Never fails: some physical values are right |
+| `consent-before-tracking` | The browser consent check: no non-essential cookie and no tracker before the visitor chooses. Strictly necessary cookies go in `consentEssentialCookies` |
 
 ```json
 "policies": ["posthog-server-only", "tags-via-zaraz", "turnstile-forms", "workers-builds-only"]
 ```
+
+`market-cn` checks what a gate can see in the build. Serving mainland China
+also needs an ICP licence and mainland hosting or CDN, which are outside any
+build check.
 
 A portfolio that shares a stack puts the same list in every site's config.
 
@@ -280,6 +339,8 @@ guards, exemptible only when the site uses the policy:
 - `tags-via-zaraz`: `direct-tags`
 - `turnstile-forms`: `turnstile`
 - `workers-builds-only`: `pages-config` and `cloudflare-in-workflows`
+- `market-cn`: `blocked-in-cn`
+- `consent-before-tracking`: `consent`
 
 Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 `posthog-server-only`) a hard-coded PostHog key.
@@ -304,6 +365,8 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `copyAllowlist` | `[]` | Exact strings the placeholder scan allows, e.g. `"[Your Name]"` |
 | `securityHeaders` | see Browser checks | Headers the home page must send; add to the list, never remove |
 | `reflowWidths` | `[320, 360, 390]` | Narrow widths for the reflow check; must include 320 |
+| `keyboard` | `warn` | `error` makes keyboard findings fail the gate |
+| `consentEssentialCookies` | `[]` | With `consent-before-tracking`: cookie names that are strictly necessary and may be set before consent |
 | `checks.preBuild` | `[]` | npm script names to run before the build (`test` already runs if present) |
 | `checks.postBuild` | `[]` | npm script names to run against the built output |
 | `checks.browser` | `[]` | npm script names run against the served build; they get `SHIP_GATE_BASE_URL` and `BASE_URL`, and use the site's own Playwright |
@@ -311,6 +374,7 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `discoveryOverrides` | `[]` | Raise or lower a discovery rule; see Discovery scan |
 | `discovery.sitemap` | from `robots.txt`, else `/sitemap-index.xml` or `/sitemap.xml` | The sitemap's path |
 | `discovery.ignoreLinks` | `[]` | Path prefixes the Worker serves rather than the static build, e.g. `"/api/"`; the link check skips them |
+| `discovery.searchCrawlers` | `[]` | Crawler tokens that must reach every indexable page besides Googlebot and Bingbot, e.g. `"Baiduspider"`, `"Yeti"` |
 | `python` | none | `{ "version": "3.11", "packages": ["fonttools"] }` for Python checks |
 | `turnstileEnv` | `PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | With `turnstile-forms`: env names that receive Cloudflare's always-pass test keys |
 | `thresholdOverrides` | `[]` | See below |
@@ -352,7 +416,7 @@ The v1 form `{ "category": "performance", ... }` is still accepted.
    fails to download the action.
 2. **Protect `main`.** Settings → Rules → Rulesets: require a pull request,
    require the `self-test` check, block force pushes and deletions.
-3. **Publish the release.** Releases → Draft a new release → tag `v2.0.0` on
+3. **Publish the release.** Releases → Draft a new release → tag `v2.1.0` on
    `main`. Site templates pin this tag.
 
 ## What stays in the site repo
@@ -421,11 +485,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v2.0.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v2.1.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v2.0.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v2.1.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -446,7 +510,9 @@ The `fixture` jobs then run the whole action, end to end, against
 `test/fixture-site` (a tiny Astro site) and against copies broken one way each
 by `test/break-fixture.sh`: missing alt text, a too-wide element, a CSP
 violation, a dead redirect, two `h1`s, a directly loaded tag, an AI search
-crawler blocked in `robots.txt`, invalid JSON-LD. The conforming
+crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
+`dir="rtl"`, a Google Fonts stylesheet (`market-cn`), a link with its focus
+ring removed, a tracking cookie before consent. The conforming
 run must pass; each broken run must fail on the check that owns the fault.
 
 Then publish a release. Version by effect on site repos:
@@ -460,6 +526,30 @@ Then publish a release. Version by effect on site repos:
 Dependabot then opens a PR in each site repo, and that PR runs through the
 site's own `verify` before merging. A bad release fails on one PR instead of
 breaking every site at once.
+
+## Out of scope
+
+Some items on common SEO and GEO checklists are not checked by the gate. Each
+is left out for a reason:
+
+- **Content quality for AI answers:** self-contained "answer island"
+  paragraphs, statistics density, expert quotes, fluency, keyword density.
+  These are editorial judgements. A heuristic would fail good pages, and no
+  search or AI vendor documents a threshold for them. Keep them in editorial
+  review, or in a site's own `checks`.
+- **WAF and bot management:** allowlisting AI crawlers' published IP ranges,
+  reverse-DNS verification, rate-limit exceptions, blocking crawlers that send
+  no user agent. These live in the CDN, where a CI runner can't see them.
+  Post-deploy catches the symptom (403/429 to a plain request). On Cloudflare,
+  allow verified bots in bot management and rate-limiting rules rather than
+  matching user-agent strings, which anyone can spoof.
+- **Legal and regional compliance:** prohibited content, VAT logic, ICP
+  licensing, privacy-policy accuracy.
+- **Accessibility overlays:** text-to-speech toggles, contrast widgets and
+  reading guides are not WCAG conformance. The gate tests the page itself
+  (axe, keyboard, reflow).
+- **IndexNow submission:** a write to a search engine. The contract forbids it
+  in the gate; keep it in a scheduled workflow.
 
 ## Open items
 

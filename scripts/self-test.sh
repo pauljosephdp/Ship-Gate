@@ -12,6 +12,8 @@ PREPARE="$HERE/prepare.mjs"
 FUTURE="$(date -u -d '+90 days' +%F 2>/dev/null || date -u -v+90d +%F)"
 PAST="2020-01-01"
 PH="ph""c_"   # split so this file itself never matches a key pattern
+PHX="ph""x_"
+TK="${PH}ShipGateCiOnlyNotARealProjectKey0000000000"   # prepare.mjs's CI-only posthog-hybrid key
 pass=0; failn=0
 ALL_POLICIES="posthog-server-only tags-via-zaraz turnstile-forms workers-builds-only"
 
@@ -85,6 +87,9 @@ check() {
   local name=$1 expect=$2 code=$3 out=$4
   if [ "$expect" = "pass" ]; then
     if [ "$code" -eq 0 ]; then ok "$name"; else bad "$name" "expected pass, got exit $code" "$out"; fi
+  elif [[ "$expect" == has:* ]]; then
+    if [ "$code" -eq 0 ] && grep -qF -- "${expect#has:}" <<<"$out"; then ok "$name"
+    else bad "$name" "expected a pass whose output contains: ${expect#has:} (exit $code)" "$out"; fi
   elif [[ "$expect" == warn:* ]]; then
     if [ "$code" -eq 0 ] && grep -F -- "${expect#warn:}" <<<"$out" | grep -q '::warning::'; then ok "$name"
     else bad "$name" "expected a pass with a warning containing: ${expect#warn:} (exit $code)" "$out"; fi
@@ -151,6 +156,34 @@ expect_guard "content file: POSTHOG_ variable"    "outside server paths"      "m
 expect_guard "content file: new PostHog("         "outside server paths"      "mkdir -p src/content/blog && echo 'export const p = new PostHog(k)' > src/content/blog/a.mdx"
 expect_guard "content file: posthog.init"         "Client-side PostHog snippet" "mkdir -p src/content/blog && echo '<script>posthog.init(1)</script>' > src/content/blog/a.mdx"
 expect_guard "posthog.com in a component fails"   "outside server paths"      "mkdir -p src/components && echo '<a href=\"https://posthog.com/privacy\">x</a>' > src/components/Footer.astro"
+
+# posthog-hybrid: the baseline's server wrapper plus a browser component that calls posthog.init.
+HYB="sed -i 's/\"dependencies\": {/\"dependencies\": { \"posthog-js\": \"1\",/' package.json && mkdir -p src/components && printf '<script>\nimport posthog from \"posthog-js\";\nposthog.init(import.meta.env.PUBLIC_POSTHOG_KEY, {});\nposthog.register({ environment: __DEPLOY_ENV__ });\n</script>\n' > src/components/PostHog.astro"
+HYB_ONLY="mkdir -p src/components && printf '<script is:inline>posthog.init(key, o); posthog.register({ environment });</script>\n<!-- __DEPLOY_ENV__ -->\n' > src/components/PostHog.astro"
+export SHIP_GATE_POSTHOG_EMBED=npm
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: browser + server PostHog passes" pass                   "$HYB"
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: no browser init"            "No posthog.init("          ":"
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: browser events untagged"    "without registering environment" "$HYB && sed -i 's/environment: __DEPLOY_ENV__/environment: \"x\"/' src/components/PostHog.astro"
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: npm embed without posthog-js" "posthog-js is not a dependency" "$HYB_ONLY"
+SHIP_GATE_POSTHOG_EMBED=snippet POLICIES=posthog-hybrid \
+expect_guard "hybrid: snippet needs no posthog-js" pass                       "$HYB_ONLY"
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: posthog-node missing"       "posthog-node is not a dependency" "$HYB && sed -i 's/\"posthog-node\": \"^5.0.0\"//' package.json"
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: posthog-node in a component" "outside server paths"     "$HYB && echo \"import { PostHog } from 'posthog-node'; __DEPLOY_ENV__; x.shutdown()\" > src/components/w.ts"
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: public personal key var"    "personal key or secret"    "$HYB && echo 'const k = import.meta.env.PUBLIC_POSTHOG_PERSONAL_API_KEY' > src/pages/k.ts"
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: US host"                    "US host"                   "$HYB && sed -i 's#eu.i.posthog.com#us.i.posthog.com#' src/lib/server/analytics.ts"
+POLICIES=posthog-hybrid \
+expect_guard "hybrid: hard-coded project key"     "Hard-coded PostHog key"    "$HYB && sed -i \"s#import.meta.env.PUBLIC_POSTHOG_KEY#'${PH}abcdefghijklmnopqrstuvwxyz0123'#\" src/components/PostHog.astro"
+EXEMPT=posthog-key POLICIES=posthog-hybrid \
+expect_guard "hybrid: personal key never exempt"  "Hard-coded PostHog key"    "$HYB && echo \"const k = '${PHX}abcdefghijklmnopqrstuvwxyz0123'\" > src/lib/server/key.ts"
+unset SHIP_GATE_POSTHOG_EMBED
 
 echo "Config and contract (prepare.mjs)"
 expect_prepare "conforming site passes"           pass ":"
@@ -243,6 +276,19 @@ expect_prepare "e2ePages all accepted"            pass                        "c
 expect_prepare "old local kit copy present"       "local copy of the old ship-gate kit" "mkdir -p scripts && echo x > scripts/guards.sh"
 expect_prepare "site's own Lighthouse config"     "Ship Gate runs Lighthouse now" "echo 'module.exports={}' > lighthouserc.cjs"
 expect_prepare "missing config file"              "not found"                 "rm ship-gate.config.json"
+
+HY='"policies":["posthog-hybrid"]'
+expect_prepare "both PostHog policies"            "contradict each other"     "cfg '\"policies\":[\"posthog-server-only\",\"posthog-hybrid\"]'"
+expect_prepare "hybrid: cookies before consent"   "which consent-before-tracking forbids" "cfg '\"policies\":[\"posthog-hybrid\",\"consent-before-tracking\"],\"posthog\":{\"cookieless\":\"off\"}'"
+expect_prepare "hybrid: cookieless off, no consent policy" pass              "cfg '$HY,\"posthog\":{\"cookieless\":\"off\"}'"
+expect_prepare "hybrid: unknown embed"            "posthog.embed must be"     "cfg '$HY,\"posthog\":{\"embed\":\"cdn\"}'"
+expect_prepare "hybrid: US API host"              "posthog.apiHost must be"   "cfg '$HY,\"posthog\":{\"apiHost\":\"https://us.i.posthog.com\"}'"
+expect_prepare "hybrid: proxy path accepted"      pass                        "cfg '$HY,\"posthog\":{\"apiHost\":\"/api/ingest\"}'"
+expect_prepare "hybrid: unknown setting"          "posthog.region is not a setting" "cfg '$HY,\"posthog\":{\"region\":\"eu\"}'"
+expect_prepare "posthog settings without policy"  "warn:only used by the posthog-hybrid policy" "cfg '\"posthog\":{\"embed\":\"npm\"}'"
+expect_prepare "hybrid: CI key for the build"     "has:PUBLIC_POSTHOG_KEY=$TK" "cfg '$HY'"
+expect_prepare "hybrid: shared guard exemptible"  "warn:exempted until"       "cfg '$HY,\"guardExemptions\":[{\"guard\":\"posthog-us-host\",\"reason\":\"Moving the project to EU Cloud\",\"restoreBy\":\"$FUTURE\"}]'"
+expect_prepare "hybrid guard, policy off"         "which this site does not use" "cfg '\"guardExemptions\":[{\"guard\":\"posthog-csp\",\"reason\":\"CSP update ships next sprint\",\"restoreBy\":\"$FUTURE\"}]'"
 
 echo "Lighthouse config and static server"
 lh_case() {
@@ -402,6 +448,31 @@ prod_ph_case() {
 prod_ph_case "production HTML: disclosure passes"   pass "<html><body>$DISCLOSURE</body></html>"
 prod_ph_case "production HTML: EU ingestion host"   fail "<html><body>$DISCLOSURE<script>fetch('https://eu.i.posthog.com/e')</script></body></html>"
 prod_ph_case "production HTML: posthog-js"          fail "<html><script src=\"/_astro/posthog-js.abc.js\"></script></html>"
+
+# check-posthog.mjs (posthog-hybrid): the CI key on every page, no other key, a CSP that lets PostHog work.
+P=check-posthog.mjs
+HY_NPM='"policies":["posthog-hybrid"],"posthog":{"embed":"npm"}'
+HY_SNIP='"policies":["posthog-hybrid"],"posthog":{"embed":"snippet"}'
+# npm: every page loads a bundle whose imported chunk holds the key
+NPM_PAGES="mkdir -p dist/client/_astro && echo \"import './c.js';\" > dist/client/_astro/a.js && echo \"const k='$TK';\" > dist/client/_astro/c.js && sed -i 's#</head>#<script type=\"module\" src=\"/_astro/a.js\"></script></head>#' dist/client/index.html dist/client/about/index.html"
+SNIP_PAGES="sed -i \"s#</head>#<script>(function(){const key = \\\"$TK\\\"; posthog.init(key, {});})();</script></head>#\" dist/client/index.html dist/client/about/index.html"
+CSP_OK="script-src 'self' https://eu-assets.i.posthog.com; connect-src 'self' https://eu.i.posthog.com https://eu-assets.i.posthog.com; worker-src 'self' blob:"
+csp() { printf '/*\n  Content-Security-Policy: default-src '"'"'self'"'"'; %s\n' "$1" > dist/client/_headers; }
+built_case "posthog: npm bundle on every page"    pass                  $P "$NPM_PAGES" "$HY_NPM"
+built_case "posthog: snippet on every page"       pass                  $P "$SNIP_PAGES" "$HY_SNIP"
+built_case "posthog: a page without it"           "does not initialise on 1 of 2 page(s): /about/" $P "$NPM_PAGES && sed -i 's#<script type=\"module\" src=\"/_astro/a.js\"></script>##' dist/client/about/index.html" "$HY_NPM"
+EXEMPT_CFG=",\"guardExemptions\":[{\"guard\":\"posthog-missing\",\"reason\":\"Legacy landing pages move next sprint\",\"restoreBy\":\"$FUTURE\"}]"
+built_case "posthog: missing page under exemption" "warn:[exempt: posthog-missing]" $P "$NPM_PAGES && sed -i 's#<script type=\"module\" src=\"/_astro/a.js\"></script>##' dist/client/about/index.html" "$HY_NPM$EXEMPT_CFG"
+built_case "posthog: personal key in client"      "personal API key"    $P "$NPM_PAGES && echo \"const p='${PHX}abcdefghijklmnopqrstuvwxyz0123';\" >> dist/client/_astro/c.js" "$HY_NPM"
+built_case "posthog: another project key"         "other than Ship Gate's CI key" $P "$NPM_PAGES && echo \"const p='${PH}abcdefghijklmnopqrstuvwxyz0123';\" >> dist/client/_astro/c.js" "$HY_NPM"
+built_case "posthog: CSP allows PostHog"          pass                  $P "$NPM_PAGES && csp \"$CSP_OK\"" "$HY_NPM"
+built_case "posthog: CSP blocks the API"          "add connect-src https://eu.i.posthog.com" $P "$NPM_PAGES && csp \"script-src 'self' https://eu-assets.i.posthog.com; worker-src blob:\"" "$HY_NPM"
+built_case "posthog: CSP blocks replay workers"   "add worker-src blob:" $P "$NPM_PAGES && csp \"script-src 'self' https://*.posthog.com; connect-src 'self' https://*.posthog.com\"" "$HY_NPM"
+built_case "posthog: meta CSP checked too"        "add script-src https://eu-assets.i.posthog.com" $P "$NPM_PAGES && sed -i \"s#<head>#<head><meta http-equiv=\\\"Content-Security-Policy\\\" content=\\\"default-src 'self'\\\">#\" dist/client/index.html" "$HY_NPM"
+built_case "posthog: snippet needs unsafe-inline" "script-src 'unsafe-inline'" $P "$SNIP_PAGES && csp \"$CSP_OK\"" "$HY_SNIP"
+built_case "posthog: snippet, unsafe-inline"      pass                  $P "$SNIP_PAGES && csp \"$CSP_OK 'unsafe-inline'\" && sed -i \"s#script-src 'self'#script-src 'self' 'unsafe-inline'#\" dist/client/_headers" "$HY_SNIP"
+built_case "posthog: proxy path, CSP self"        pass                  $P "$NPM_PAGES && csp \"worker-src 'self' blob:\"" '"policies":["posthog-hybrid"],"posthog":{"embed":"npm","apiHost":"/api/ingest"}'
+built_case "posthog: policy off, nothing checked" pass                  $P ":"
 
 echo "Discovery scan (check-discovery.mjs): SEO, AEO, GEO, AIO"
 WORDS="This page exists so the discovery scan has real text to read: enough words that a crawler which does not run JavaScript still finds the substance of the page in its HTML, which is what search engines, answer engines and AI assistants index, quote and cite when they send people here."
@@ -608,6 +679,26 @@ cd / && rm -rf "$d"
 piped="$(grep -hvE '^[[:space:]]*#' "$HERE/../post-deploy/action.yml" "$HERE/../action.yml" | grep -E 'curl[^#]*\|[[:space:]]*grep[[:space:]]+-[a-zA-Z]*q' || true)"
 if [ -z "$piped" ]; then ok "actions never pipe curl into grep -q"
 else bad "actions never pipe curl into grep -q" "fetch into a variable, then grep" "$piped"; fi
+
+# check-posthog-live.mjs (posthog-hybrid): production starts PostHog with a live key.
+# The stand-in production proxies PostHog at /ingest, so the key check stays local.
+ph_live_case() {
+  local name=$1 expect=$2 port pid out code
+  exec 3< <(OVERRIDES="$3" node -e "$LIVE_SERVER")
+  pid=$!; read -r port <&3
+  out="$(SHIP_GATE_SITE_URL="http://127.0.0.1:$port" SHIP_GATE_POSTHOG_API_HOST=/ingest SHIP_GATE_POSTHOG_TEST_KEY="$TK" \
+    node "$HERE/check-posthog-live.mjs" 2>&1)"; code=$?
+  kill "$pid" 2>/dev/null; exec 3<&-
+  check "$name" "$expect" "$code" "$out"
+}
+LIVE_KEY="${PH}abcdefghijklmnopqrstuvwxyz0123"
+LIVE_CONFIG="\"/ingest/array/$LIVE_KEY/config.js\":{\"type\":\"text/javascript\",\"body\":\"x\"}"
+ph_live_case "production starts PostHog (inline)"  pass                     "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$LIVE_KEY')</script>\"},$LIVE_CONFIG}"
+ph_live_case "production starts PostHog (bundle)"  pass                     "{\"/\":{\"type\":\"text/html\",\"body\":\"<script type=module src=/_astro/a.js></script>\"},\"/_astro/a.js\":{\"body\":\"import './c.js';\"},\"/_astro/c.js\":{\"body\":\"const k='$LIVE_KEY'\"},$LIVE_CONFIG}"
+ph_live_case "production without PostHog"          "no project key"         '{}'
+ph_live_case "production ships the CI key"         "CI PostHog key"         "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$TK')</script>\"}}"
+ph_live_case "production key unknown to PostHog"   "does not know the project key" "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$LIVE_KEY')</script>\"}}"
+ph_live_case "production leaks a personal key"     "personal API key"       "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>const p='${PHX}abcdefghijklmnopqrstuvwxyz0123'</script>\"}}"
 
 echo "Release (release.sh)"
 # rel_case NAME EXPECT(pass|substring) CHANGELOG-TEXT — a dry run, so nothing is published

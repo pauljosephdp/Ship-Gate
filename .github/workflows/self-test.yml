@@ -121,8 +121,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { group: browser, v1: conforming, v2: vendor-named-asset, v3: missing-alt, v4: wide-element, v5: csp-violation, v6: bad-redirect, v7: no-focus-ring, v8: tracker-cookie }
-          - { group: scans, v1: two-h1, v2: direct-tag, v3: blocks-ai-search, v4: bad-jsonld, v5: robots-no-agents, v6: rtl-no-dir, v7: google-font, v8: allows-training }
+          - { group: browser, v1: conforming, v2: vendor-named-asset, v3: missing-alt, v4: wide-element, v5: csp-violation, v6: bad-redirect, v7: no-focus-ring, v8: tracker-cookie, v9: posthog-hybrid }
+          - { group: scans, v1: two-h1, v2: direct-tag, v3: blocks-ai-search, v4: bad-jsonld, v5: robots-no-agents, v6: rtl-no-dir, v7: google-font, v8: allows-training, v9: posthog-hybrid-missing, v10: posthog-hybrid-csp }
     steps:
       - uses: actions/checkout@v4
       - name: Break the fixture (1)
@@ -245,6 +245,36 @@ jobs:
       - name: Expected result (8)
         if: ${{ !cancelled() && matrix.v8 }}
         run: bash test/expect-gate.sh ${{ matrix.v8 }} ${{ steps.gate8.outcome }}
+      - name: Break the fixture (9)
+        if: ${{ !cancelled() && matrix.v9 }}
+        run: |
+          bash test/break-fixture.sh ${{ matrix.v9 }}
+          echo "SHIP_GATE_FIXTURE_STAGE=$(bash test/expect-gate.sh --stage ${{ matrix.v9 }})" >> "$GITHUB_ENV"
+      - name: Ship Gate (9)
+        id: gate9
+        if: ${{ !cancelled() && matrix.v9 }}
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: test/fixture-site
+      - name: Expected result (9)
+        if: ${{ !cancelled() && matrix.v9 }}
+        run: bash test/expect-gate.sh ${{ matrix.v9 }} ${{ steps.gate9.outcome }}
+      - name: Break the fixture (10)
+        if: ${{ !cancelled() && matrix.v10 }}
+        run: |
+          bash test/break-fixture.sh ${{ matrix.v10 }}
+          echo "SHIP_GATE_FIXTURE_STAGE=$(bash test/expect-gate.sh --stage ${{ matrix.v10 }})" >> "$GITHUB_ENV"
+      - name: Ship Gate (10)
+        id: gate10
+        if: ${{ !cancelled() && matrix.v10 }}
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: test/fixture-site
+      - name: Expected result (10)
+        if: ${{ !cancelled() && matrix.v10 }}
+        run: bash test/expect-gate.sh ${{ matrix.v10 }} ${{ steps.gate10.outcome }}
       # Lets the push to main skip this group when it lands the exact tree tested here.
       - name: Record the tree that passed
         id: passed

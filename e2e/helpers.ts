@@ -18,7 +18,24 @@ export const run = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.met
   keyboard: 'warn' | 'error';
   consentEssentialCookies: string[];
   trackerHosts: string[];
+  // posthog-hybrid only; null otherwise.
+  posthog: null | {
+    embed: 'snippet' | 'npm';
+    cookieless: 'on_reject' | 'always' | 'off';
+    apiHost: string;
+    assetsHost: string;
+    testKey: string;
+  };
 };
+
+// A request to PostHog: its cloud hosts, or the site's own proxy path (posthog.apiHost).
+export function isPostHog(url: string) {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  if (/(^|\.)posthog\.com$/i.test(u.hostname)) return true;
+  const proxy = run.posthog?.apiHost;
+  return !!proxy?.startsWith('/') && (u.pathname === proxy || u.pathname.startsWith(`${proxy}/`));
+}
 
 // Other origins are aborted: a vendor outage must not fail a PR, and the gate
 // tests this site's code. CSP still reports a blocked URL before any request is made.

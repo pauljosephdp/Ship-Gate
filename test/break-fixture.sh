@@ -13,6 +13,45 @@ if [ -n "${SHIP_GATE_DIR:-}" ] && [ -d "$SHIP_GATE_DIR" ]; then
 fi
 index=src/pages/index.astro
 add() { sed -i "s#<h2>What this is</h2>#<h2>What this is</h2>$1#" "$index"; }
+# posthog-hybrid, set up as a site would: the templates in templates/caller/posthog, the
+# build-time markers, <PostHog /> in the base layout, the policy, and the CSP PostHog needs.
+# The SDK versions are pinned here: the committed fixture is a posthog-server-only site,
+# whose guards forbid posthog-js in package.json.
+POSTHOG_PACKAGES="posthog-js@1.434.14 posthog-node@5.54.0"
+POSTHOG_CSP="script-src 'self' https://eu-assets.i.posthog.com; connect-src 'self' https://eu.i.posthog.com https://eu-assets.i.posthog.com; worker-src 'self' blob:; img-src 'self' data: https://eu.i.posthog.com; "
+posthog_hybrid() {
+  local t=../../templates/caller/posthog
+  mkdir -p src/components src/lib/server
+  cp "$t/src/lib/posthog-options.ts" src/lib/
+  cp "$t/src/lib/server/analytics.ts" src/lib/server/
+  cp "$t/src/components/PostHog.astro" src/components/
+  cp "$t/src/env.d.ts" src/
+  cat > astro.config.mjs <<'JS'
+import { defineConfig } from 'astro/config';
+
+export default defineConfig({
+  site: 'https://example.com', output: 'static', trailingSlash: 'always',
+  vite: {
+    define: {
+      __BUILD_SHA__: JSON.stringify(process.env.WORKERS_CI_COMMIT_SHA ?? 'local'),
+      __DEPLOY_ENV__: JSON.stringify(
+        process.env.WORKERS_CI_BRANCH === 'main' ? 'production'
+          : process.env.WORKERS_CI ? 'preview' : 'local'),
+    },
+  },
+});
+JS
+  sed -i '1s#^---$#---\nimport PostHog from "../components/PostHog.astro";#' src/layouts/Base.astro
+  sed -i 's#</head>#  <PostHog />\n  </head>#' src/layouts/Base.astro
+  node -e '
+    const fs = require("fs"); const c = JSON.parse(fs.readFileSync("ship-gate.config.json", "utf8"));
+    c.policies = c.policies.map((p) => (p === "posthog-server-only" ? "posthog-hybrid" : p));
+    c.posthog = { embed: "npm", cookieless: "on_reject" };
+    fs.writeFileSync("ship-gate.config.json", JSON.stringify(c, null, 2) + "\n");'
+  # shellcheck disable=SC2086 # one word per package
+  npm install --save --no-audit --no-fund --loglevel=error $POSTHOG_PACKAGES
+}
+posthog_csp() { sed -i "s#default-src 'self'; #default-src 'self'; $POSTHOG_CSP#" public/_headers; }
 case "$1" in
   conforming) ;;
   missing-alt) echo '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>' > public/dot.svg; add '<img src="/dot.svg" width="8" height="8">' ;;
@@ -29,6 +68,9 @@ case "$1" in
   no-focus-ring) add '<p><a href="/contact/" style="outline:none">Write to the fixture</a></p>' ;;
   tracker-cookie) printf '/\n  Set-Cookie: _ga=GA1.1.123.456; Path=/\n' >> public/_headers ;;
   vendor-named-asset) echo '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>' > public/hubspot-partner-badge.svg; add '<img src="/hubspot-partner-badge.svg" alt="HubSpot partner" width="8" height="8">' ;;
+  posthog-hybrid) posthog_hybrid; posthog_csp ;;
+  posthog-hybrid-missing) posthog_hybrid; posthog_csp; sed -i 's#<PostHog />#{Astro.url.pathname === "/" \&\& <PostHog />}#' src/layouts/Base.astro ;;
+  posthog-hybrid-csp) posthog_hybrid ;;
   direct-tag) add '<script is:inline async src="https://www.googletagmanager.com/gtm.js?id=GTM-ABCD123"></script>' ;;
   *) echo "Unknown variant: $1" >&2; exit 2 ;;
 esac

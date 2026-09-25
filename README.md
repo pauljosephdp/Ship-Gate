@@ -416,8 +416,10 @@ The v1 form `{ "category": "performance", ... }` is still accepted.
    fails to download the action.
 2. **Protect `main`.** Settings → Rules → Rulesets: require a pull request,
    require the `self-test` check, block force pushes and deletions.
-3. **Publish the release.** Releases → Draft a new release → tag `v2.1.0` on
-   `main`. Site templates pin this tag.
+3. **Releases are automatic.** The `release` job in `self-test.yml` publishes
+   the tag and GitHub release for the newest `CHANGELOG.md` version on the first
+   green push to `main` that carries it (see Changing Ship Gate). Nothing to do
+   by hand; site templates pin these tags.
 
 ## What stays in the site repo
 
@@ -515,7 +517,13 @@ crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
 ring removed, a tracking cookie before consent. The conforming
 run must pass; each broken run must fail on the check that owns the fault.
 
-Then publish a release. Version by effect on site repos:
+Every PR that should ship adds a section at the top of `CHANGELOG.md`, headed
+`## vX.Y.Z — YYYY-MM-DD`. When the PR merges and every `self-test` and
+`fixture` job passes on `main`, the `release` job (`scripts/release.sh`)
+creates the tag and a GitHub release with that section as its notes. A version
+already released, or a heading marked `(not released)`, publishes nothing, so
+a PR that changes only docs or CI can leave the changelog alone. A red `main`
+never releases. Choose the version by its effect on site repos:
 
 - **Major** (v2.0.0): a site must change something to stay green. A new failing
   guard, a new required script, a stricter standard.

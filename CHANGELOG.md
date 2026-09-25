@@ -101,7 +101,10 @@ discoverable.
 - New: the `robots.txt` production actually serves must not block Googlebot,
   Bingbot or an AI search crawler from a smoke path.
 
-**Self-test**: 185 cases (was 115). The fixture site is discovery-ready, and
+**Releases are automatic**: after every check passes on `main`, a `release` job
+publishes the newest `CHANGELOG.md` version as a tag and GitHub release, once.
+
+**Self-test**: 192 cases (was 115). The fixture site is discovery-ready, and
 the new fixture variants `blocks-ai-search` and `bad-jsonld` must fail the
 discovery scan.
 

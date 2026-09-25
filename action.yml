@@ -21,6 +21,17 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        # Ship Gate's own fixture tests (uses: ./ in this repo) may stop a broken variant
+        # at the stage that owns its fault. A site calling the published action always runs everything.
+        stage=full
+        # Compare resolved paths: for uses: ./ the runner sets GITHUB_ACTION_PATH to "<workspace>/./".
+        if [ -n "${SHIP_GATE_FIXTURE_STAGE:-}" ] \
+          && [ "$(cd "$GITHUB_ACTION_PATH" && pwd -P)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)" ]; then
+          stage=$SHIP_GATE_FIXTURE_STAGE
+        fi
+        case "$stage" in full|browser|scans) ;; *) echo "::error::Unknown fixture stage \"$stage\"."; exit 1 ;; esac
+        echo "Ship Gate stage: $stage"
+        echo "stage=$stage" >> "$GITHUB_OUTPUT"
         for f in .nvmrc .node-version; do
           if [ -f "$f" ]; then echo "node-version-file=${{ inputs.working-directory }}/$f" >> "$GITHUB_OUTPUT"; exit 0; fi
         done
@@ -175,24 +186,30 @@ runs:
     # The Playwright browser download is the slowest install; cache it per Playwright version.
     - name: Playwright version
       id: pw
-      if: steps.afterbuild.outcome == 'success'
+      if: steps.afterbuild.outcome == 'success' && steps.site.outputs.stage != 'scans'
       shell: bash
       run: echo "version=$(node -p "require(process.argv[1]).packages['node_modules/playwright-core']?.version ?? ''" "$SHIP_GATE_DIR/package-lock.json")" >> "$GITHUB_OUTPUT"
 
     - uses: actions/cache@v4
-      if: steps.afterbuild.outcome == 'success' && steps.pw.outputs.version != ''
+      if: steps.pw.outcome == 'success' && steps.pw.outputs.version != ''
       with:
         path: ~/.cache/ms-playwright
         key: ship-gate-playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
 
     - name: Install Ship Gate test tools
       id: tools
-      if: steps.afterbuild.outcome == 'success'
+      if: steps.afterbuild.outcome == 'success' && steps.site.outputs.stage != 'scans'
       shell: bash
       run: |
         cd "$SHIP_GATE_DIR"
         npm ci --no-audit --no-fund --loglevel=error
-        npx --no-install playwright install --with-deps chromium
+        # System packages once per runner: apt-get is slow and a second run in one job gains nothing.
+        if [ -f "$RUNNER_TEMP/.ship-gate-pw-deps" ]; then
+          npx --no-install playwright install chromium
+        else
+          npx --no-install playwright install --with-deps chromium
+          touch "$RUNNER_TEMP/.ship-gate-pw-deps"
+        fi
 
     # Site browser checks use the site's own Playwright, whose browser build may differ.
     - name: Site checks (browser, against the served build)
@@ -215,7 +232,7 @@ runs:
 
     - name: Lighthouse CI
       id: lighthouse
-      if: steps.tools.outcome == 'success'
+      if: steps.tools.outcome == 'success' && steps.site.outputs.stage == 'full'
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}

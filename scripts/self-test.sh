@@ -610,7 +610,8 @@ variants="$(sed -n 's/^  \([a-z0-9-]*\)) .*/\1/p' "$HERE/../test/break-fixture.s
 for v in $variants; do
   if ! grep -qE "^  ([a-z0-9|-]*\|)?$v(\|[a-z0-9|-]*)?\) " "$HERE/../test/expect-gate.sh"; then bad "$v has an expectation" "missing from test/expect-gate.sh" ""
   elif ! grep -qE "v[0-9]+: ${v}[ ,}]" "$HERE/../.github/workflows/self-test.yml"; then bad "$v runs in a fixture job" "missing from .github/workflows/self-test.yml" ""
-  else ok "$v is expected and runs"; fi
+  elif ! [[ "$(bash "$HERE/../test/expect-gate.sh" --stage "$v" 2>&1)" =~ ^(full|browser|scans)$ ]]; then bad "$v has a stage" "expect-gate.sh --stage gives no full, browser or scans" ""
+  else ok "$v is expected, staged and runs"; fi
 done
 [ -n "$variants" ] || bad "fixture variants found" "no cases read from test/break-fixture.sh" ""
 

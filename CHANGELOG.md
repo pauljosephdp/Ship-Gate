@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.0.1 — 2026-09-25
+
+Ship Gate's own CI costs about a quarter of the Actions minutes it did. No site
+needs to change anything; sites run every check exactly as before.
+
+**Fixed**
+- The Playwright system packages install once per runner. A second gate run in
+  the same job skips the apt step.
+
+**Ship Gate's own CI**
+- Each fixture variant stops at the stage that owns its fault: scan faults never
+  start a browser, browser faults skip Lighthouse, and only the conforming run
+  does everything. The stage is honoured only when the action runs from this
+  repo's own checkout.
+- Two fixture jobs, `fixture (browser)` and `fixture (scans)`, instead of four.
+- A push to `main` skips the fixture jobs when its pull request already passed
+  them on the exact same tree; the release still waits for `self-test`.
+
 ## v3.0.0 — 2026-09-25
 
 AI training is off by default; every other crawler and use stays on. This is a

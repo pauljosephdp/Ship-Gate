@@ -17,11 +17,8 @@ export const run = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.met
   policies: string[];
   keyboard: 'warn' | 'error';
   consentEssentialCookies: string[];
-  trackerPatterns: string[];
+  trackerHosts: string[];
 };
-
-// A Lighthouse-style URL pattern ("*hotjar*") as a regular expression.
-export const globRe = (glob: string) => new RegExp('^' + glob.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$', 'i');
 
 // Other origins are aborted: a vendor outage must not fail a PR, and the gate
 // tests this site's code. CSP still reports a blocked URL before any request is made.

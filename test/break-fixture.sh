@@ -19,6 +19,7 @@ case "$1" in
   google-font) add '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">' ;;
   no-focus-ring) add '<p><a href="/contact/" style="outline:none">Write to the fixture</a></p>' ;;
   tracker-cookie) printf '/\n  Set-Cookie: _ga=GA1.1.123.456; Path=/\n' >> public/_headers ;;
+  vendor-named-asset) echo '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>' > public/hubspot-partner-badge.svg; add '<img src="/hubspot-partner-badge.svg" alt="HubSpot partner" width="8" height="8">' ;;
   direct-tag) add '<script is:inline async src="https://www.googletagmanager.com/gtm.js?id=GTM-ABCD123"></script>' ;;
   *) echo "Unknown variant: $1" >&2; exit 2 ;;
 esac

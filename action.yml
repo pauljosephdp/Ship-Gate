@@ -218,7 +218,8 @@ runs:
       shell: bash
       env:
         OUTCOMES: >-
-          Contract and config=${{ steps.prepare.outcome }}
+          Node version pinned=${{ steps.site.outcome }}
+          |Contract and config=${{ steps.prepare.outcome }}
           |Install=${{ steps.install.outcome }}
           |Stack guards=${{ steps.guards.outcome }}
           |astro check=${{ steps.check.outcome }}
@@ -233,6 +234,7 @@ runs:
           |Placeholder copy=${{ steps.copy.outcome }}
           |Market scan=${{ steps.market.outcome }}
           |Site checks after build=${{ steps.postbuild.outcome }}
+          |Ship Gate test tools=${{ steps.tools.outcome }}
           |Site browser checks=${{ steps.browser.outcome }}
           |Smoke, axe, reflow, CSP, edge=${{ steps.e2e.outcome }}
           |Lighthouse=${{ steps.lighthouse.outcome }}

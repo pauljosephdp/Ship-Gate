@@ -118,8 +118,11 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   must load with zero violations.
 - **Consent** (`consent-before-tracking` policy, desktop): before any
   interaction, no cookie is set beyond Cloudflare's essential ones and
-  `consentEssentialCookies`, and no tracker from the Lighthouse block list is
-  requested or present in the markup.
+  `consentEssentialCookies`, and nothing from a tracking vendor's host
+  (PostHog, HubSpot tracking, Clarity, Google Analytics/Tag Manager,
+  DoubleClick, Meta, Hotjar, LinkedIn, TikTok) is requested or present in the
+  markup. Matching is by hostname, so the site's own files named after a
+  vendor pass, and HubSpot form embeds (`hsforms.net`) are allowed.
 
 Other origins are blocked in the browser, so a vendor outage never fails a PR.
 CSP still reports a disallowed URL before any request is made.
@@ -203,7 +206,10 @@ The four terms overlap, so each rule sits under the one it matters most to:
 
 **Key properties** checked by `structured-data`: Article types need
 `headline`, `datePublished` and `author`. Organization and Person need `name`,
-and LocalBusiness types need `name` and `address`. WebSite needs `name` and
+and LocalBusiness types need `name` and `address`. Every schema.org subtype
+counts (Hotel, Dentist, Attorney, Plumber…), from
+`scripts/schema-org-types.json`; regenerate it with
+`node tools/schema-org-types.mjs` after a schema.org release. WebSite needs `name` and
 `url`. Product needs `name` plus `offers`, `review` or `aggregateRating`. Event
 needs `name`, `startDate` and `location`. FAQPage needs Questions with
 `acceptedAnswer.text`, and BreadcrumbList needs `position`, `name` and `item`.
@@ -306,7 +312,8 @@ With a `crux-api-key` input (a Google API key with the Chrome UX Report API
 enabled, passed as a secret), it also reports **field Core Web Vitals** for
 phones and warns when p75 LCP is over 2.5 s, INP over 200 ms or CLS over 0.1.
 Lab tools cannot measure INP; only real visits can. Sites with too little
-traffic have no Chrome UX Report data, and the step says so and passes.
+traffic have no Chrome UX Report data, and the step says so and passes. If
+the API can't be reached, the step warns and passes.
 
 **Not checked: DNS-AID.** DNS for AI Discovery
 (`_index._agents.example.com` SVCB records) is an individual Internet-Draft,
@@ -342,7 +349,8 @@ A portfolio that shares a stack puts the same list in every site's config.
 
 These apply to every site:
 
-- **No committed `.env` or `.dev.vars` files.** `.example` files are fine.
+- **No committed `.env` or `.dev.vars` files**, anywhere in the repository, even
+  outside the site directory. `.example` files are fine.
 - **Node pinned** in `.nvmrc` or `.node-version`, at 22.12.0 or later (Astro
   7's floor). A bare `22` warns: pin the exact version so CI and Workers Builds
   agree.
@@ -352,11 +360,15 @@ These apply to every site:
 - **One dependency bot.** Dependabot and Renovate together warn: every update
   would arrive twice.
 
-The contract check also refuses any `build`, `check`, `lint` script or site
-check that writes to production: `wrangler deploy`/`secret`/`versions deploy`,
-R2 or KV writes, `--remote`, remote migrations, `git push`, IndexNow
-submissions. It follows `npm run` chains and reads the Node files a script
-starts, so `"verify": "npm run deploy"` is caught too. CI builds every PR; a
+The contract check also refuses any script CI runs that writes to production:
+`build`, `check`, `lint`, `test`, `preview`, the install scripts `npm ci` runs
+(`preinstall`, `install`, `postinstall`, `prepare`) and site checks. Production
+writes are `wrangler deploy`/`secret`/`versions deploy`, R2 or KV writes,
+`--remote`, remote migrations, `git push` and IndexNow submissions. It follows
+the `pre`/`post` scripts npm runs around each one, calls through `npm`, `pnpm`,
+`yarn`, `run-s`, `run-p` and `npm-run-all` (globs included), and reads the Node
+and shell files a script starts. So `"verify": "npm run deploy"` and
+`"postbuild": "node scripts/ping-indexnow.mjs"` are caught too. CI builds every PR; a
 merge gate must be read-only.
 
 ### Guard exemptions
@@ -529,11 +541,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v2.2.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v2.3.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v2.2.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v2.3.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

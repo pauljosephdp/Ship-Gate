@@ -12,8 +12,10 @@ on:
 permissions:
   contents: read
 
+# Pull requests cancel their own older runs. Pushes to main never cancel each other:
+# each one may carry a release.
 concurrency:
-  group: self-test-${{ github.ref }}
+  group: self-test-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -43,6 +45,7 @@ jobs:
       matrix:
         include:
           - { variant: conforming, fails: "" }
+          - { variant: vendor-named-asset, fails: "" }
           - { variant: missing-alt, fails: "Smoke, axe, reflow, CSP, edge" }
           - { variant: wide-element, fails: "Smoke, axe, reflow, CSP, edge" }
           - { variant: csp-violation, fails: "Smoke, axe, reflow, CSP, edge" }
@@ -73,7 +76,7 @@ jobs:
         run: |
           cat "$SHIP_GATE_DIR/summary.md"
           if [ -z "$FAILS" ]; then
-            [ "$OUTCOME" = success ] || { echo "::error::The conforming fixture must pass the gate."; exit 1; }
+            [ "$OUTCOME" = success ] || { echo "::error::Variant ${{ matrix.variant }} must pass the gate."; exit 1; }
           else
             [ "$OUTCOME" = failure ] || { echo "::error::Variant ${{ matrix.variant }} must fail the gate, but it passed."; exit 1; }
             grep -qF "| $FAILS | ❌ failed |" "$SHIP_GATE_DIR/summary.md" \
@@ -92,9 +95,6 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
-    concurrency:
-      group: release
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - name: Publish the release named in CHANGELOG.md

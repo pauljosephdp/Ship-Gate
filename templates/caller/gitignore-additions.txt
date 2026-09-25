@@ -1,2 +1,3 @@
 # Ship Gate — generated only when run locally, never commit
 .ship-gate/
+.lighthouseci/

@@ -36,16 +36,23 @@ for (const p of paths) {
 const key = process.env.CRUX_API_KEY;
 if (key) {
   const LIMITS = { largest_contentful_paint: [2500, 'LCP', 'ms'], interaction_to_next_paint: [200, 'INP', 'ms'], cumulative_layout_shift: [0.1, 'CLS', ''] };
-  const res = await fetch(`https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=${encodeURIComponent(key)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ origin: site, formFactor: 'PHONE', metrics: Object.keys(LIMITS) }),
-  });
-  if (res.status === 404) console.log('Field Core Web Vitals: the Chrome UX Report has no data for this origin yet (too little traffic).');
+  // Field data only warns, so a network error reaching the API must not fail the job.
+  let res;
+  try {
+    res = await fetch(`https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ origin: site, formFactor: 'PHONE', metrics: Object.keys(LIMITS) }),
+    });
+  } catch (e) { res = { error: e }; }
+  if (res.error) console.log(`::warning::Chrome UX Report unreachable (${res.error.message}); field Core Web Vitals not checked.`);
+  else if (res.status === 404) console.log('Field Core Web Vitals: the Chrome UX Report has no data for this origin yet (too little traffic).');
   else if (!res.ok) console.log(`::warning::Chrome UX Report answered ${res.status}; field Core Web Vitals not checked.`);
   else {
-    const metrics = (await res.json()).record?.metrics ?? {};
-    for (const [id, [limit, name, unit]] of Object.entries(LIMITS)) {
+    let metrics = null;
+    try { metrics = (await res.json()).record?.metrics ?? {}; }
+    catch (e) { console.log(`::warning::Chrome UX Report sent an unreadable answer (${e.message}); field Core Web Vitals not checked.`); }
+    for (const [id, [limit, name, unit]] of Object.entries(metrics ? LIMITS : {})) {
       const p75 = Number(metrics[id]?.percentiles?.p75);
       if (!Number.isFinite(p75)) { console.log(`Field ${name}: no data.`); continue; }
       const line = `Field ${name} p75 on phones: ${p75}${unit} (good ≤ ${limit}${unit})`;

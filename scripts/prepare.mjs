@@ -14,7 +14,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, appendFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { staticRoot, indexablePages } from './site-files.mjs';
+import { staticRoot, indexablePages, escapeRe } from './site-files.mjs';
 import { RULES as DISCOVERY_RULES, LEVELS as DISCOVERY_LEVELS, SEARCH_CRAWLERS, CRAWLER_TOKEN } from './discovery.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -58,8 +58,13 @@ const LEVEL_RANK = { warn: 1, error: 2 };
 const BLOCKED_URLS = ['*posthog*', '*hubspot*', '*hsforms*', '*hs-scripts*', '*hs-analytics*', '*clarity.ms*',
   '*googletagmanager*', '*google-analytics*', '*doubleclick.net*', '*connect.facebook.net*', '*hotjar*',
   '*snap.licdn.com*', '*analytics.tiktok.com*', '*/cdn-cgi/*', '*challenges.cloudflare.com*'];
-// The tracking vendors in that list: under consent-before-tracking, none may load before consent.
-const TRACKER_PATTERNS = BLOCKED_URLS.filter((p) => !['*/cdn-cgi/*', '*challenges.cloudflare.com*'].includes(p));
+// The tracking vendors' hosts: under consent-before-tracking, none may load before consent.
+// Matched on the request's hostname (the host or a subdomain), so a site's own file named
+// after a vendor is not a tracker. HubSpot form embeds (hsforms.net, hsforms.com) are forms,
+// not tags, as in guards.sh; HubSpot tracking is still caught.
+const TRACKER_HOSTS = ['posthog.com', 'hubspot.com', 'hs-scripts.com', 'hs-analytics.net', 'clarity.ms',
+  'googletagmanager.com', 'google-analytics.com', 'doubleclick.net', 'connect.facebook.net', 'hotjar.com',
+  'hotjar.io', 'snap.licdn.com', 'analytics.tiktok.com'];
 
 // Stack policies: opinions about which vendors a site uses and how. Off by default, so
 // the core gate fits any Astro site; a site (or a portfolio) opts in by name.
@@ -314,16 +319,24 @@ for (const s of required) if (!scripts[s]) err(`package.json is missing the "${s
 const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
 for (const d of REQUIRED_DEV_DEPS) if (!allDeps[d]) err(`Missing dev dependency ${d} (npm run check needs it). Run: npm i -D ${d}`);
 
-// What a script really runs: its own text, every npm script it calls, and the
-// Node files it starts. Returns the offending fragment, or null.
+// What a script really runs: its own text, the pre/post scripts npm runs around it,
+// every package script it calls (npm, pnpm, yarn, run-s, run-p, npm-run-all), and
+// the Node and shell files it starts. Returns the offending fragment, or null.
+const scriptNames = (pattern) => pattern.includes('*')
+  ? Object.keys(scripts).filter((n) => globRe(pattern).test(n)) : [pattern];
+function globRe(glob) { return new RegExp('^' + glob.split('*').map(escapeRe).join('[^:]*') + '$'); }
 function productionWrite(name, seen = new Set()) {
   if (seen.has(name) || scripts[name] === undefined) return null;
   seen.add(name);
   const body = scripts[name];
   const direct = body.match(PRODUCTION_WRITES);
   if (direct) return `"${name}": ${direct[0]}`;
-  for (const m of body.matchAll(/\bnpm\s+(?:run(?:-script)?\s+)?([A-Za-z0-9:_.-]+)/g)) {
-    const inner = productionWrite(m[1], seen);
+  const called = [`pre${name}`, `post${name}`];
+  for (const m of body.matchAll(/\b(?:npm|pnpm|yarn)\s+(?:run(?:-script)?\s+)?(?:(?:-[\w-]+)\s+)*([A-Za-z0-9:_.-]+)/g)) called.push(m[1]);
+  for (const m of body.matchAll(/\b(?:run-s|run-p|npm-run-all)\b((?:\s+(?!&&|\|\||;)[^\s;&|]+)+)/g))
+    for (const arg of m[1].trim().split(/\s+/)) if (!arg.startsWith('-')) called.push(...scriptNames(arg));
+  for (const c of called) {
+    const inner = productionWrite(c, seen);
     if (inner) return inner;
   }
   for (const m of body.matchAll(/\b(?:node|tsx)\s+(?:--[\w-]+(?:=\S+)?\s+)*([\w./-]+\.(?:m?js|cjs|ts|mts))/g)) {
@@ -331,9 +344,16 @@ function productionWrite(name, seen = new Set()) {
     const hit = readFileSync(m[1], 'utf8').match(PRODUCTION_WRITES_IN_CODE);
     if (hit) return `"${name}" runs ${m[1]}, which contains ${hit[0].slice(0, 60)}`;
   }
+  for (const m of body.matchAll(/(?:\b(?:bash|sh|zsh)\s+(?:-\w+\s+)*|(?:^|[\s;&|(])(?=\.{0,2}\/))([\w./-]+\.(?:sh|bash))\b/g)) {
+    if (!existsSync(m[1])) continue;
+    const hit = readFileSync(m[1], 'utf8').match(PRODUCTION_WRITES) ?? readFileSync(m[1], 'utf8').match(PRODUCTION_WRITES_IN_CODE);
+    if (hit) return `"${name}" runs ${m[1]}, which contains ${hit[0].slice(0, 60)}`;
+  }
   return null;
 }
-for (const s of ['build', 'check', 'lint', ...(server === 'preview' ? ['preview'] : [])]) {
+// Everything CI runs: the scripts it calls by name, and the lifecycle scripts npm ci runs.
+for (const s of ['preinstall', 'install', 'postinstall', 'prepare', 'build', 'check', 'lint', 'test',
+  ...(server === 'preview' ? ['preview'] : [])]) {
   const w = productionWrite(s);
   if (w) err(`The "${s}" script writes to production (${w}). CI runs it on every PR; move deploys, remote migrations and submissions out of it.`);
 }
@@ -441,7 +461,7 @@ if (mode === 'after-build') {
     policies,
     keyboard,
     consentEssentialCookies,
-    trackerPatterns: TRACKER_PATTERNS,
+    trackerHosts: TRACKER_HOSTS,
     discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [], searchCrawlers },
   }, null, 2));
   console.log(`Ship Gate after build: ${all.length} indexable page(s) in ${root}; Lighthouse ${lhUrls.length} URL(s) × ${runs} run(s).`);

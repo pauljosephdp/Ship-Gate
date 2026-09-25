@@ -564,11 +564,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.0.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.0.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.0.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.0.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -594,11 +594,19 @@ crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
 ring removed, a tracking cookie before consent. The conforming
 run, and one that shows a site file named after a tracking vendor, must pass;
 each broken run must fail on the check that owns the fault (`test/expect-gate.sh`).
-Variants run five to a job, `fixture (1)` to `fixture (4)`, to save Actions
-minutes; a new variant goes in a free `vN` slot or a new group, and `self-test`
-fails until it has an expectation and a slot. Pull requests skip the fixture
-jobs while in draft and when they change only Markdown outside `test/`; pushes
-to `main` always run them.
+Each variant stops at the stage that owns its fault (`expect-gate.sh --stage`):
+`scans` variants stop after the post-build scans, `browser` variants skip
+Lighthouse, and only the conforming run does everything. Skipped checks read
+"➖ not run" in the summary, and `expect-gate.sh` asserts that too. Sites never
+skip anything: the stage is honoured only when the action runs from this
+repo's own checkout (`uses: ./`). Two jobs share the variants,
+`fixture (browser)` and `fixture (scans)`; a new variant goes in a free `vN`
+slot, and `self-test` fails until it has an expectation, a stage and a slot.
+Pull requests skip the fixture jobs while in draft and when they change only
+Markdown outside `test/`. A push to `main` skips them when its pull request
+already passed both fixture jobs on the exact same tree (each passing job
+uploads a `fixtures-passed-<tree>-<group>` artifact); if `main` moved in
+between, or on a manual run, everything runs.
 
 **README.md stays current.** `scripts/check-readme.sh` runs in `self-test` and
 fails when:
@@ -611,8 +619,8 @@ Changes to tests, `CLAUDE.md`, `CHANGELOG.md` and `docs/` alone need no README
 change.
 
 Every PR that should ship adds a section at the top of `CHANGELOG.md`, headed
-`## vX.Y.Z — YYYY-MM-DD`. When the PR merges and every `self-test` and
-`fixture` job passes on `main`, the `release` job (`scripts/release.sh`)
+`## vX.Y.Z — YYYY-MM-DD`. When the PR merges and `self-test` passes on
+`main`, with every `fixture` job passed there or on the same tree in the PR, the `release` job (`scripts/release.sh`)
 creates the tag and a GitHub release with that section as its notes. A version
 already released, or a heading marked `(not released)`, publishes nothing, so
 a PR that changes only docs or CI can leave the changelog alone. A red `main`

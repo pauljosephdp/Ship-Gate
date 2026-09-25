@@ -23,7 +23,7 @@ jobs:
         # Full history, only if a site check needs git dates (e.g. sitemap lastmod).
         # with:
         #   fetch-depth: 0
-      - uses: pauljosephdp/Ship-Gate@v3.0.0
+      - uses: pauljosephdp/Ship-Gate@v3.0.1
         # Only if the site is not at the repo root, e.g. "site".
         # with:
         #   working-directory: site

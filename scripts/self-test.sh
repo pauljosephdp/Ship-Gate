@@ -566,5 +566,32 @@ rel_case "no version heading fails"              "No \"## vX.Y.Z\" heading" '# C
 rel_case "version without notes fails"           "has no notes"          '# Changelog\n\n## v1.2.0 — 2026-10-01\n\n## v1.1.0\n\n- old\n'
 rel_case "this repo's CHANGELOG has a release"   "version=v"             "$(sed 's/\\/\\\\/g' "$HERE/../CHANGELOG.md")"
 echo
+echo "README currency (check-readme.sh)"
+# readme_case NAME EXPECT SETUP [DIFF] — a repo at v1.2.0 with README pins current;
+# SETUP runs as a commit on top of the base; DIFF=1 also checks the change against it.
+readme_case() {
+  local name=$1 expect=$2 setup=$3 d out code; d="$(mktemp -d)"; cd "$d" || return
+  git init -q; git config user.email t@t; git config user.name t
+  mkdir -p scripts templates/caller/.github/workflows
+  printf '# Changelog\n\n## v1.2.0 — 2026-10-01\n\n- new\n' > CHANGELOG.md
+  printf 'Use `pauljosephdp/Ship-Gate@v1.2.0`.\n' > README.md
+  printf '      - uses: pauljosephdp/Ship-Gate/post-deploy@v1.2.0\n' > templates/caller/.github/workflows/post-deploy.yml
+  echo 'echo hi' > scripts/guards.sh
+  git add -A && git commit -qm base
+  eval "$setup"; git add -A && git commit -qm change --allow-empty
+  out="$(REPO_ROOT="$d" bash "$HERE/check-readme.sh" ${4:+HEAD~1} 2>&1)"; code=$?
+  check "$name" "$expect" "$code" "$out"
+  cd /; rm -rf "$d"
+}
+readme_case "pins match the newest version"        pass                      ":"
+readme_case "README pin behind CHANGELOG"          "pins v1.1.0"             "sed -i 's/v1.2.0/v1.1.0/' README.md"
+readme_case "template pin behind CHANGELOG"        "post-deploy.yml"         "sed -i 's/v1.2.0/v1.1.0/' templates/caller/.github/workflows/post-deploy.yml"
+readme_case "unreleased heading skips pins"        pass                      "sed -i 's/^## v1.2.0 — 2026-10-01/## v1.3.0 — 2026-10-02 (not released)\n\n- next\n\n&/' CHANGELOG.md"
+readme_case "script change without README"         "but not README.md"       "echo 'echo bye' >> scripts/guards.sh" diff
+readme_case "workflow change without README"       "but not README.md"       "mkdir -p .github/workflows && echo 'on: push' > .github/workflows/x.yml" diff
+readme_case "script change with README"            pass                      "echo 'echo bye' >> scripts/guards.sh && echo 'More.' >> README.md" diff
+readme_case "test-only change needs no README"     pass                      "echo 'echo t' > scripts/self-test.sh && mkdir -p test && echo x > test/a" diff
+readme_case "CLAUDE.md and docs only change"      pass                      "echo x > CLAUDE.md && mkdir -p docs && echo y > docs/n.md" diff
+
 echo "Self-test: $pass passed, $failn failed."
 [ "$failn" -eq 0 ]

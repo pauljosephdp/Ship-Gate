@@ -70,6 +70,7 @@ const TRACKER_HOSTS = ['posthog.com', 'hubspot.com', 'hs-scripts.com', 'hs-analy
 // the core gate fits any Astro site; a site (or a portfolio) opts in by name.
 export const POLICIES = {
   'posthog-server-only': 'PostHog runs server-side only (posthog-node in server paths, EU host, no key in the client)',
+  'posthog-hybrid': 'PostHog runs in the browser on every page and on the server (posthog-js or the snippet, plus posthog-node, EU host)',
   'tags-via-zaraz': 'Every third-party tag, GTM included, loads through Cloudflare Zaraz',
   'turnstile-forms': 'Every public form carries Cloudflare Turnstile',
   'workers-builds-only': 'Cloudflare Workers Builds is the only deployer (no Pages config, no Cloudflare tokens in workflows)',
@@ -83,9 +84,12 @@ export const POLICIES = {
 // Never exemptible: committed secrets, and anything that skips the PR gate.
 export const GUARDS = {
   'posthog-client': { policy: 'posthog-server-only', what: 'PostHog in the browser (client SDK, snippet, direct use outside server paths, client bundle, browser calls)' },
-  'posthog-public-var': { policy: 'posthog-server-only', what: 'PostHog variable with a PUBLIC_ prefix' },
-  'posthog-us-host': { policy: 'posthog-server-only', what: 'PostHog US host' },
-  'posthog-env-tag': { policy: 'posthog-server-only', what: 'posthog-node events without __DEPLOY_ENV__' },
+  'posthog-public-var': { policy: ['posthog-server-only', 'posthog-hybrid'], what: 'PostHog variable with a PUBLIC_ prefix (with posthog-hybrid: a personal key or secret)' },
+  'posthog-us-host': { policy: ['posthog-server-only', 'posthog-hybrid'], what: 'PostHog US host' },
+  'posthog-env-tag': { policy: ['posthog-server-only', 'posthog-hybrid'], what: 'PostHog events without __DEPLOY_ENV__' },
+  'posthog-missing': { policy: 'posthog-hybrid', what: 'PostHog not initialised on every page' },
+  'posthog-server': { policy: 'posthog-hybrid', what: 'posthog-node missing, or used outside server paths' },
+  'posthog-csp': { policy: 'posthog-hybrid', what: 'a Content-Security-Policy that blocks PostHog' },
   'direct-tags': { policy: 'tags-via-zaraz', what: 'third-party tags loaded directly instead of through Zaraz' },
   turnstile: { policy: 'turnstile-forms', what: 'forms without Turnstile' },
   'pages-config': { policy: 'workers-builds-only', what: 'Pages config instead of Workers' },
@@ -112,6 +116,11 @@ const PRODUCTION_WRITES = new RegExp([
 ].join('|'), 'i');
 // The same, as it appears inside a Node script the npm script runs.
 const PRODUCTION_WRITES_IN_CODE = /api\.indexnow\.org|['"]wrangler['"][\s\S]{0,80}['"](deploy|secret|r2|kv|d1)['"]|wrangler\s+(deploy|secret|r2\s+object|kv\s+key|d1\s+execute)/;
+// posthog-hybrid builds with this project key, so the browser SDK renders in CI without a real
+// key in GitHub. Split so no key-shaped string sits in this file. Never valid at PostHog, and
+// every PostHog request is aborted in the browser tests anyway; post-deploy fails if it ships.
+const POSTHOG_TEST_KEY = 'ph' + 'c_ShipGateCiOnlyNotARealProjectKey0000000000';
+const POSTHOG_EU = { api: 'https://eu.i.posthog.com', assets: 'https://eu-assets.i.posthog.com' };
 const TURNSTILE_TEST_KEYS = { siteKey: '1x00000000000000000000AA', secretKey: '1x0000000000000000000000000000000AA' };
 const DEFAULT_SECURITY_HEADERS = ['x-content-type-options', 'referrer-policy', 'frame-protection'];
 const DEFAULT_REFLOW_WIDTHS = [320, 360, 390];
@@ -154,6 +163,28 @@ const policies = cfg.policies ?? [];
 if (!Array.isArray(policies) || policies.some((p) => !(p in POLICIES)))
   err(`policies must be a list drawn from: ${Object.keys(POLICIES).join(', ')}.`);
 const policyOn = (p) => Array.isArray(policies) && policies.includes(p);
+if (policyOn('posthog-server-only') && policyOn('posthog-hybrid'))
+  err('policies: posthog-server-only and posthog-hybrid contradict each other (no PostHog in the browser vs PostHog on every page). Keep one.');
+
+// ── PostHog in the browser and on the server (posthog-hybrid) ──
+const posthogCfg = cfg.posthog ?? {};
+const hybrid = policyOn('posthog-hybrid');
+if (typeof posthogCfg !== 'object' || Array.isArray(posthogCfg)) err('posthog must be an object, e.g. { "embed": "npm" }.');
+else for (const k of Object.keys(posthogCfg)) if (!['embed', 'cookieless', 'apiHost'].includes(k)) err(`posthog.${k} is not a setting. Use embed, cookieless, apiHost.`);
+if (cfg.posthog !== undefined && !hybrid) warn('posthog settings are only used by the posthog-hybrid policy. Add the policy or remove them.');
+const posthog = {
+  embed: posthogCfg.embed ?? 'snippet',
+  cookieless: posthogCfg.cookieless ?? 'on_reject',
+  apiHost: typeof posthogCfg.apiHost === 'string' ? posthogCfg.apiHost.replace(/\/+$/, '') : posthogCfg.apiHost ?? POSTHOG_EU.api,
+};
+if (!['snippet', 'npm'].includes(posthog.embed)) err('posthog.embed must be "snippet" (the Astro guide\'s inline loader) or "npm" (posthog-js bundled).');
+if (!['on_reject', 'always', 'off'].includes(posthog.cookieless)) err('posthog.cookieless must be "on_reject" (the default), "always" or "off".');
+// EU Cloud, or a same-origin path the site proxies to it.
+if (!(posthog.apiHost === POSTHOG_EU.api || (typeof posthog.apiHost === 'string' && /^\/[A-Za-z0-9._~\/-]+$/.test(posthog.apiHost))))
+  err(`posthog.apiHost must be "${POSTHOG_EU.api}" (EU Cloud) or a same-origin proxy path such as "/api/ingest".`);
+if (hybrid && posthog.cookieless === 'off' && policyOn('consent-before-tracking'))
+  err('posthog.cookieless "off" sets PostHog cookies before consent, which consent-before-tracking forbids. Use "on_reject" (cookieless until the visitor accepts) or "always".');
+const posthogHosts = typeof posthog.apiHost === 'string' && posthog.apiHost.startsWith('/') ? [] : ['posthog.com'];
 // Other search engines' crawlers the site must admit, on top of Googlebot and Bingbot.
 const searchCrawlers = cfg.discovery?.searchCrawlers ?? [];
 if (!isNameList(searchCrawlers, CRAWLER_TOKEN))
@@ -196,6 +227,10 @@ if (mode === 'post-deploy') {
   exportEnv('SHIP_GATE_DISCOVERY_LEVELS', JSON.stringify(discoveryLevels));
   exportEnv('SHIP_GATE_SEARCH_CRAWLERS', searchCrawlers.join(' '));
   exportEnv('SHIP_GATE_AI_TRAINING', aiTraining);
+  if (hybrid) {
+    exportEnv('SHIP_GATE_POSTHOG_API_HOST', posthog.apiHost);
+    exportEnv('SHIP_GATE_POSTHOG_TEST_KEY', POSTHOG_TEST_KEY);
+  }
   console.log('Post-deploy config loaded.');
   process.exit(0);
 }
@@ -218,7 +253,9 @@ const e2ePages = cfg.e2ePages ?? cfg.pages;
 if (!pagesList(e2ePages)) err('e2ePages must be "all" (every indexable page the build emits) or a non-empty list of paths starting with "/".');
 const extraBlocked = cfg.lighthouseBlockedUrls ?? [];
 if (!isNameList(extraBlocked, /^\S+$/)) err('lighthouseBlockedUrls must be a list of URL patterns such as "*/relay/*".');
-const blocked = [...BLOCKED_URLS, ...(Array.isArray(extraBlocked) ? extraBlocked.filter((s) => typeof s === 'string') : [])];
+const blocked = [...BLOCKED_URLS, ...(Array.isArray(extraBlocked) ? extraBlocked.filter((s) => typeof s === 'string') : []),
+  // A same-origin PostHog proxy is still PostHog: keep it out of the measurement too.
+  ...(hybrid && typeof posthog.apiHost === 'string' && posthog.apiHost.startsWith('/') ? [`*${posthog.apiHost}/*`] : [])];
 
 // Structure bands and the other post-build inputs. Only stricter-or-equal choices exist here,
 // so none of them needs a reason.
@@ -308,8 +345,8 @@ for (const [i, x] of (Array.isArray(exemptions) ? exemptions : []).entries()) {
   const where = `guardExemptions[${i}] (${x?.guard ?? '?'})`;
   if (x?.guard in NEVER_EXEMPT) { err(`${where}: ${NEVER_EXEMPT[x.guard]} can never be exempted.`); continue; }
   if (!(x?.guard in GUARDS)) { err(`${where}: guard must be one of ${Object.keys(GUARDS).join(', ')}.`); continue; }
-  const pol = GUARDS[x.guard].policy;
-  if (pol && !policyOn(pol)) { err(`${where}: this guard belongs to the "${pol}" policy, which this site does not use, so the exemption changes nothing — remove it.`); continue; }
+  const pol = [GUARDS[x.guard].policy ?? []].flat();
+  if (pol.length && !pol.some(policyOn)) { err(`${where}: this guard belongs to the "${pol.join('" or "')}" policy, which this site does not use, so the exemption changes nothing — remove it.`); continue; }
   if (!checkLoosening(where, x)) continue;
   warn(`Guard "${x.guard}" (${GUARDS[x.guard].what}) exempted until ${x.restoreBy}: ${x.reason}`);
   exempt.push(x.guard);
@@ -508,7 +545,10 @@ if (mode === 'after-build') {
     policies,
     keyboard,
     consentEssentialCookies,
-    trackerHosts: TRACKER_HOSTS,
+    // Cookieless PostHog may load before consent (posthog-hybrid); the consent test then
+    // checks that it writes no cookie or storage until the visitor accepts.
+    trackerHosts: hybrid && posthog.cookieless !== 'off' ? TRACKER_HOSTS.filter((h) => h !== 'posthog.com') : TRACKER_HOSTS,
+    posthog: hybrid ? { ...posthog, hosts: posthogHosts, testKey: POSTHOG_TEST_KEY, assetsHost: POSTHOG_EU.assets } : null,
     discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [], searchCrawlers, aiTraining },
   }, null, 2));
   console.log(`Ship Gate after build: ${all.length} indexable page(s) in ${root}; Lighthouse ${lhUrls.length} URL(s) × ${runs} run(s).`);
@@ -557,6 +597,10 @@ exportEnv('SHIP_GATE_PYTHON', py?.version ?? '');
 exportEnv('SHIP_GATE_PIP', (py?.packages ?? []).join(' '));
 exportEnv('SHIP_GATE_EXEMPT', exempt.join(' '));
 exportEnv('SHIP_GATE_POLICIES', policies.join(' '));
+if (hybrid) {
+  exportEnv('PUBLIC_POSTHOG_KEY', POSTHOG_TEST_KEY);
+  exportEnv('SHIP_GATE_POSTHOG_EMBED', posthog.embed);
+}
 if (turnstile) {
   exportEnv(turnstileEnv.siteKey, TURNSTILE_TEST_KEYS.siteKey);
   exportEnv(turnstileEnv.secretKey, TURNSTILE_TEST_KEYS.secretKey);

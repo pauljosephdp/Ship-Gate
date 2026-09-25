@@ -11,6 +11,8 @@ if [ "$1" = --stage ]; then variant=$2; else variant=$1 outcome=$2; fi
 case "$variant" in
   conforming) stage=full fails="" ;;
   vendor-named-asset) stage=browser fails="" ;;
+  posthog-hybrid) stage=browser fails="" ;;
+  posthog-hybrid-missing|posthog-hybrid-csp) stage=scans fails="PostHog on every page" ;;
   missing-alt|wide-element|csp-violation|bad-redirect|no-focus-ring|tracker-cookie) stage=browser fails="Smoke, axe, reflow, CSP, edge" ;;
   two-h1) stage=scans fails="Structure scan" ;;
   direct-tag) stage=scans fails="Stack guards" ;;

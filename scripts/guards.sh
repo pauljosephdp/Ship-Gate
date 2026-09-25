@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stack guards — fail CI when code breaks the standard.
-# Guards 1–3 and 5 are stack policies, run only when the site's config opts into them
+# Guards 1, 1b, 2, 3 and 5 are stack policies, run only when the site's config opts into them
 # (policies, passed in SHIP_GATE_POLICIES by prepare.mjs). The rest apply to every site.
 set -uo pipefail
 
@@ -54,6 +54,45 @@ done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
 grep -q '"posthog-node"' package.json || echo "::warning::posthog-node not installed — this repo sends no server-side events yet."
 # Every PostHog event must carry the deploy environment, so preview traffic stays out of production data.
 while IFS= read -r f; do
+  grep -q '__DEPLOY_ENV__' "$f" \
+    || err posthog-env-tag "$f uses posthog-node without tagging events with __DEPLOY_ENV__ — preview traffic would pollute production analytics."
+done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
+fi
+
+if policy posthog-hybrid; then
+
+# 1b. [posthog-hybrid] PostHog in the browser on every page and on the server, EU Cloud.
+#     The browser init (snippet or posthog-js) lives in a component the base layout renders;
+#     posthog-node stays in server paths. The project key comes from PUBLIC_POSTHOG_KEY, never code.
+#     Templates: templates/caller/posthog/ in the Ship Gate repo.
+SERVER_PATHS='^src/(lib/server|pages/api|actions|middleware)'
+EMBED="${SHIP_GATE_POSTHOG_EMBED:-snippet}"
+grep -q '"posthog-node"' package.json \
+  || err posthog-server "posthog-node is not a dependency — posthog-hybrid sends server-side events too. Copy src/lib/server/analytics.ts from templates/caller/posthog."
+if [ "$EMBED" = npm ]; then
+  grep -q '"posthog-js"' package.json \
+    || err posthog-missing "posthog.embed is \"npm\" but posthog-js is not a dependency."
+fi
+# Every browser init tags its events with the deploy environment, like the server's.
+inits="$(grep -rlE 'posthog\.init\(' src 2>/dev/null | grep -vE "$SERVER_PATHS" || true)"
+[ -n "$inits" ] \
+  || err posthog-missing "No posthog.init( in src — add the PostHog component (templates/caller/posthog) to the base layout's <head>."
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  grep -q '__DEPLOY_ENV__' "$f" \
+    || err posthog-env-tag "$f initialises PostHog without registering environment: __DEPLOY_ENV__ — preview traffic would pollute production analytics."
+done <<<"$inits"
+scan 'PUBLIC_POSTHOG[A-Z_]*(PERSONAL|SECRET|PHX)' src astro.config.* .env.example wrangler.* \
+  && err posthog-public-var "A PostHog personal key or secret uses the PUBLIC_ prefix — it would ship to the browser. Only PUBLIC_POSTHOG_KEY (the project key) is public."
+scan '(us|us-assets|app)\.(i\.)?posthog\.com' src astro.config.* wrangler.* \
+  && err posthog-us-host "PostHog US host found — standard is EU Cloud (eu.i.posthog.com)."
+scan 'ph[cx]_[A-Za-z0-9]{20,}' src public astro.config.* wrangler.* \
+  && err posthog-key "Hard-coded PostHog key (phc_ project or phx_ personal) — the project key comes from PUBLIC_POSTHOG_KEY, personal keys never leave PostHog."
+while IFS= read -r f; do
+  echo "$f" | grep -qE "$SERVER_PATHS" \
+    || err posthog-server "$f imports posthog-node outside server paths (src/lib/server, src/pages/api, src/actions, src/middleware)."
+  grep -qE '\.(shutdown|flush)\(' "$f" \
+    || echo "::warning::$f imports posthog-node without flush()/shutdown() — events can be dropped on Workers."
   grep -q '__DEPLOY_ENV__' "$f" \
     || err posthog-env-tag "$f uses posthog-node without tagging events with __DEPLOY_ENV__ — preview traffic would pollute production analytics."
 done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)

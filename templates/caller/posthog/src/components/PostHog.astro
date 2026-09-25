@@ -1,0 +1,20 @@
+---
+// PostHog in the browser, bundled from posthog-js (ship-gate.config.json → posthog.embed "npm").
+// Put <PostHog /> in the base layout's <head>, so every page loads it. The bundle is a
+// same-origin /_astro/ script, so CSP needs no inline-script allowance.
+// Initialises nothing when PUBLIC_POSTHOG_KEY is unset.
+---
+<script>
+  import posthog from 'posthog-js';
+  import { posthogOptions } from '../lib/posthog-options';
+
+  const key = import.meta.env.PUBLIC_POSTHOG_KEY;
+  // <ClientRouter> re-runs scripts on navigation; initialise once.
+  if (key && !window.__posthog_initialized) {
+    window.__posthog_initialized = true;
+    posthog.init(key, { ...posthogOptions, tracing_headers: [location.hostname] });
+    // Preview and local traffic stay out of production analytics.
+    posthog.register({ environment: __DEPLOY_ENV__ });
+    window.posthog = posthog;
+  }
+</script>

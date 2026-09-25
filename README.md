@@ -30,7 +30,8 @@ and the post-deploy check.
 | `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version |
 | `.github/pull_request_template.md` | The review checklist |
 
-Templates for all five are in `templates/caller/`.
+Templates for all five are in `templates/caller/`. Sites on the `posthog-hybrid`
+policy also copy `templates/caller/posthog/` (see PostHog in the browser and on the server).
 
 ## The gate
 
@@ -41,7 +42,7 @@ Templates for all five are in `templates/caller/`.
 3. Site checks before the build, then the build
 4. On the built output: structure scan, discovery scan (SEO, AEO, GEO, AIO),
    placeholder scan, the client-bundle PostHog scan (`posthog-server-only`
-   policy), the market scan (`market-cn` and `rtl-logical-css` policies), site
+   policy) or the PostHog scan (`posthog-hybrid` policy), the market scan (`market-cn` and `rtl-logical-css` policies), site
    checks after the build
 5. Against the served build: site browser checks, then the Playwright suite
    (smoke + axe on desktop 1440 and Pixel 7, keyboard, reflow, CSP, consent,
@@ -101,8 +102,11 @@ and takes the median.
 On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page):
 
 - **Smoke:** 200, one `h1`, a title and one meta description, no JS errors.
-  With `posthog-server-only`, no browser calls to PostHog; with
-  `turnstile-forms`, a Turnstile widget on every `formPages` page.
+  With `posthog-server-only`, no browser calls to PostHog. With
+  `posthog-hybrid` (desktop), every page tries to reach PostHog and defines
+  `window.posthog`; with the npm embed the real SDK must also be loaded,
+  capturing before any consent choice, and in the configured cookieless mode.
+  With `turnstile-forms`, a Turnstile widget on every `formPages` page.
 - **axe, WCAG 2.2 AA** (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`),
   desktop and mobile, after scrolling the page and letting fade-in animations
   finish, so a card mid-fade is not scanned.
@@ -122,7 +126,12 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   (PostHog, HubSpot tracking, Clarity, Google Analytics/Tag Manager,
   DoubleClick, Meta, Hotjar, LinkedIn, TikTok) is requested or present in the
   markup. Matching is by hostname, so the site's own files named after a
-  vendor pass, and HubSpot form embeds (`hsforms.net`) are allowed.
+  vendor pass, and HubSpot form embeds (`hsforms.net`) are allowed. With
+  `posthog-hybrid` in a cookieless mode, PostHog may load before consent, but
+  must write no `ph_` cookie and no `ph_`/`__ph` localStorage or
+  sessionStorage key. With the npm embed and `"cookieless": "on_reject"`, a
+  second test accepts (`posthog.opt_in_capturing()`) and expects PostHog to
+  start storing its identity.
 
 Other origins are blocked in the browser, so a vendor outage never fails a PR.
 CSP still reports a disallowed URL before any request is made.
@@ -148,6 +157,19 @@ assets are `immutable`; an unknown path answers 404 with the site's 404 page;
   like `[1]` and labels like `[PDF]` pass; `copyAllowlist` takes exact strings.
 - **Client bundle** (`posthog-server-only` policy): no PostHog code or key in
   anything the browser downloads.
+- **PostHog** (`posthog-hybrid` policy, "PostHog on every page" in the
+  summary): the build runs with Ship Gate's CI-only project key in
+  `PUBLIC_POSTHOG_KEY`, and every indexable page must carry it, inline (the
+  snippet) or in a same-origin script the page loads, following its imports
+  (the npm embed). Any other project key or a personal key (`phx_`) in client
+  output fails. Every Content-Security-Policy that applies to a page, from
+  `_headers` or a `<meta>` tag, must allow PostHog's assets host in
+  `script-src`, its API and assets hosts in `connect-src`, `blob:` workers
+  (session replay), and for the snippet `'unsafe-inline'` with no hashes. The
+  snippet holds the key, so no one hash fits CI and production. A same-origin
+  proxy (`posthog.apiHost` a path) needs only `'self'`. The browser tests
+  abort PostHog's requests, so lazily loaded replay and survey code would
+  otherwise never meet the CSP before production.
 
 ### Discovery scan: SEO, AEO, GEO and AIO readiness
 
@@ -355,7 +377,11 @@ crawlers use to refetch only what changed. It never spoofs a crawler's user
 agent: a correctly configured WAF blocks spoofed bots, so that test would fail
 good sites. With `posthog-server-only` it fails when production's home page
 carries PostHog client code or a project key, and when that page can't be
-fetched at all.
+fetched at all. With `posthog-hybrid` it fails when production's home page (or
+a same-origin script it loads) carries no PostHog project key, carries Ship
+Gate's CI key or a personal key, or carries a key PostHog doesn't know: one
+read-only GET of the project's remote config (`/array/<key>/config.js`), which
+answers 404 for an unknown key.
 
 With a `crux-api-key` input (a Google API key with the Chrome UX Report API
 enabled, passed as a secret), it also reports **field Core Web Vitals** for
@@ -382,6 +408,7 @@ checks:
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
 | `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: Google (Fonts, Maps, reCAPTCHA, tags), YouTube, Facebook, Instagram, X/Twitter, Vimeo, Gravatar. A blocked font or script stalls the page until it times out. Links and JSON-LD `sameAs` load nothing and pass. jsDelivr and unpkg warn; non-ASCII URLs warn |
 | `rtl-logical-css` | Warns with a count of physical `left`/`right` declarations in the built CSS (`margin-left`, `padding-right`, `left:`, `text-align: left`, `float: right`, `border-left`), which don't mirror under `dir="rtl"`. Use logical properties (`margin-inline-start`, `inset-inline-start`, `text-align: start`). Never fails: some physical values are right |
+| `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
 | `consent-before-tracking` | The browser consent check: no non-essential cookie and no tracker before the visitor chooses. Strictly necessary cookies go in `consentEssentialCookies` |
 
 ```json
@@ -393,6 +420,49 @@ also needs an ICP licence and mainland hosting or CDN, which are outside any
 build check.
 
 A portfolio that shares a stack puts the same list in every site's config.
+
+### PostHog in the browser and on the server (`posthog-hybrid`)
+
+PostHog loads on every page, with or without consent, and the server sends its
+own events into the same visitor's session. The files to copy are in
+`templates/caller/posthog/`; the fixture's `posthog-hybrid` variant builds from
+these same files, so CI proves them on every Ship Gate change.
+
+| Template | Put it at | What it does |
+|---|---|---|
+| `src/lib/posthog-options.ts` | same path | Every browser feature on: `defaults: '2026-08-30'`, `person_profiles: 'always'`, autocapture, `capture_pageview: 'history_change'`, page leave, heatmaps, dead clicks, exceptions, web vitals and network timing, session replay (cross-origin iframes, console logs), surveys and feature flags, `cross_subdomain_cookie`, and `cookieless_mode: 'on_reject'` with `opt_out_capturing_by_default` |
+| `src/components/PostHog.astro` | same path, in the base layout's `<head>` | The npm embed: bundles `posthog-js` into a same-origin `/_astro/` script, initialises once (`<ClientRouter>`-safe), adds `tracing_headers` for the site's own host, registers `environment: __DEPLOY_ENV__` |
+| `src/components/PostHogSnippet.astro` | instead of `PostHog.astro` | The snippet from PostHog's Astro guide, EU host, same options, no npm dependency; needs `'unsafe-inline'` under a CSP |
+| `src/lib/server/analytics.ts` | same path | `posthog-node` for Workers: `track`, `trackError` (error tracking) and `flag` (feature flags), each joined to the browser's visitor through the `X-POSTHOG-DISTINCT-ID`/`X-POSTHOG-SESSION-ID` tracing headers or the PostHog cookie, flushed with `waitUntil`, tagged with `environment` |
+| `src/env.d.ts` | merge | Declares `__BUILD_SHA__`, `__DEPLOY_ENV__`, `PUBLIC_POSTHOG_KEY` and `window.posthog` |
+| `csp.txt` | merge into `public/_headers` | The CSP sources PostHog needs |
+| `optional/src/pages/api/ingest/[...path].ts` | same path | A same-origin reverse proxy (needs on-demand rendering), so ad blockers don't drop events; then set `apiHost` to `/api/ingest` in both the options file and the config. The fixture doesn't build it (it is a static site), so test it on the site |
+
+```json
+"policies": ["posthog-hybrid", "consent-before-tracking"],
+"posthog": { "embed": "npm", "cookieless": "on_reject", "apiHost": "https://eu.i.posthog.com" }
+```
+
+Consent. With `"cookieless": "on_reject"` (the default), PostHog loads and
+captures on every page before any choice, counting visitors with PostHog's
+daily-salted server hash, and writes no cookie or storage until the visitor
+accepts (`posthog.opt_in_capturing()` from the site's banner). Then it uses
+cookies as usual. `"always"` never stores anything and needs no banner. `"off"`
+(remove both consent lines from the options file) sets cookies from the first
+page view without asking. That is not lawful in the EU without consent, so it is
+refused together with `consent-before-tracking`. Cookieless events need
+*Cookieless server hash mode* in the PostHog project; without consent, visitors
+count as new people each day, and GeoIP and bot enrichment are lost. Keep
+`posthog.cookieless` and `posthog.apiHost` in step with the options file: with
+the npm embed the smoke test compares them.
+
+In the site's PostHog project, turn on session replay (with console logs and
+network), heatmaps, autocapture, web vitals, exception autocapture, surveys and
+*Cookieless server hash mode*. Add *`environment` is not `production`* to the
+internal and test account filter. In Workers Builds, set `PUBLIC_POSTHOG_KEY`
+(the `phc_` project key) as a build variable and `POSTHOG_API_KEY` (the same key)
+as a secret. CI never needs a real key: Ship Gate builds with its own
+CI-only key, and post-deploy fails if that one reaches production.
 
 ### Guards
 
@@ -444,6 +514,9 @@ guards, exemptible only when the site uses the policy:
 - `posthog-server-only`: `posthog-client` (SDK, snippet, direct use outside
   server paths, client bundle, browser calls), `posthog-public-var`,
   `posthog-us-host` and `posthog-env-tag`
+- `posthog-hybrid`: `posthog-missing` (no browser init, or a page without it),
+  `posthog-server` (`posthog-node` missing or outside server paths),
+  `posthog-csp`, `posthog-public-var`, `posthog-us-host` and `posthog-env-tag`
 - `tags-via-zaraz`: `direct-tags`
 - `turnstile-forms`: `turnstile`
 - `workers-builds-only`: `pages-config` and `cloudflare-in-workflows`
@@ -451,7 +524,7 @@ guards, exemptible only when the site uses the policy:
 - `consent-before-tracking`: `consent`
 
 Never exemptible: a committed env file, a workflow pushing to `main`, and (with
-`posthog-server-only`) a hard-coded PostHog key.
+`posthog-server-only` or `posthog-hybrid`) a hard-coded PostHog key.
 
 ## Site configuration
 
@@ -485,6 +558,9 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `discovery.aiTraining` | `"block"` | `"block"`: AI training crawlers must be disallowed. `"reserve"`: they may fetch, but the group governing each must say `Content-Signal: ai-train=no`. `"allow"`: they must not be disallowed. See Discovery scan |
 | `discovery.searchCrawlers` | `[]` | Crawler tokens that must reach every indexable page besides Googlebot and Bingbot, e.g. `"Baiduspider"`, `"Yeti"` |
 | `python` | none | `{ "version": "3.11", "packages": ["fonttools"] }` for Python checks |
+| `posthog.embed` | `"snippet"` | With `posthog-hybrid`: `"snippet"` (the inline loader from PostHog's Astro guide) or `"npm"` (`posthog-js` bundled) |
+| `posthog.cookieless` | `"on_reject"` | With `posthog-hybrid`: `"on_reject"`, `"always"` or `"off"`; must match `cookieless_mode` in the options file |
+| `posthog.apiHost` | `"https://eu.i.posthog.com"` | With `posthog-hybrid`: EU Cloud, or a same-origin proxy path such as `"/api/ingest"` |
 | `turnstileEnv` | `PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | With `turnstile-forms`: env names that receive Cloudflare's always-pass test keys |
 | `thresholdOverrides` | `[]` | See below |
 
@@ -588,7 +664,9 @@ belong in `post-deploy.yml` or a scheduled workflow.
    `<head>`. With `posthog-server-only`, also add `environment: __DEPLOY_ENV__`
    to every event in `src/lib/server/analytics.ts`; the wrapper must send
    nothing when `POSTHOG_API_KEY` is absent.
-10. With `posthog-server-only`, in the site's PostHog project, add *`environment` is not `production`* to
+   With `posthog-hybrid`, copy `templates/caller/posthog/` and follow PostHog in
+   the browser and on the server.
+10. With `posthog-server-only` or `posthog-hybrid`, in the site's PostHog project, add *`environment` is not `production`* to
    the internal and test account filter, applied by default.
 11. Ruleset on the site's `main`: require a pull request, require the `verify`
     check, require the branch to be up to date, block force pushes and
@@ -599,11 +677,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.1.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.2.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.1.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.2.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -626,8 +704,12 @@ by `test/break-fixture.sh`: missing alt text, a too-wide element, a CSP
 violation, a dead redirect, two `h1`s, a directly loaded tag, an AI search
 crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
 `dir="rtl"`, a Google Fonts stylesheet (`market-cn`), a link with its focus
-ring removed, a tracking cookie before consent. The conforming
-run, and one that shows a site file named after a tracking vendor, must pass;
+ring removed, a tracking cookie before consent, PostHog missing from some pages
+or blocked by the CSP (`posthog-hybrid`). The conforming
+run, one that shows a site file named after a tracking vendor, and
+`posthog-hybrid` (the fixture switched to `posthog-hybrid`, built from
+`templates/caller/posthog/` with `posthog-js` and `posthog-node` installed at
+the versions `break-fixture.sh` pins) must pass;
 each broken run must fail on the check that owns the fault (`test/expect-gate.sh`).
 Each variant stops at the stage that owns its fault (`expect-gate.sh --stage`):
 `scans` variants stop after the post-build scans, `browser` variants skip

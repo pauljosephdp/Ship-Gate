@@ -1,0 +1,13 @@
+# Content-Security-Policy directives PostHog needs (posthog-hybrid), EU Cloud.
+# Merge them into the site's CSP in public/_headers; Ship Gate's PostHog scan checks them.
+#
+# script-src   'self' https://eu-assets.i.posthog.com
+#              (snippet embed: add 'unsafe-inline', with no hashes beside it. The inline
+#               script holds the project key, so no hash fits both CI and production.
+#               A strict CSP wants the npm embed instead.)
+# connect-src  'self' https://eu.i.posthog.com https://eu-assets.i.posthog.com
+# worker-src   'self' blob:        (session replay compresses in a worker)
+# img-src      'self' data: https://eu.i.posthog.com
+# style-src    'self' 'unsafe-inline'   (surveys and the toolbar inject styles)
+#
+# With the optional /api/ingest proxy, 'self' covers script-src and connect-src.

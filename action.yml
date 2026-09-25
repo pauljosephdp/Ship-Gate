@@ -151,6 +151,14 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: bash "$GITHUB_ACTION_PATH/scripts/check-dist.sh"
 
+    - name: PostHog on every page (posthog-hybrid)
+      id: posthog
+      if: steps.afterbuild.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-hybrid ')
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: node "$GITHUB_ACTION_PATH/scripts/check-posthog.mjs"
+
     - name: Structure scan
       id: structure
       if: steps.afterbuild.outcome == 'success'
@@ -285,6 +293,7 @@ runs:
           |Build=${{ steps.build.outcome }}
           |Page resolution=${{ steps.afterbuild.outcome }}
           |Client bundle PostHog-free=${{ steps.dist.outcome }}
+          |PostHog on every page=${{ steps.posthog.outcome }}
           |Structure scan=${{ steps.structure.outcome }}
           |Discovery (SEO, AEO, GEO, AIO)=${{ steps.discovery.outcome }}
           |Placeholder copy=${{ steps.copy.outcome }}

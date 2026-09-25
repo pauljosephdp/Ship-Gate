@@ -1,5 +1,44 @@
 # Changelog
 
+## v3.2.0 — 2026-09-25
+
+A new opt-in stack policy, `posthog-hybrid`: PostHog in the browser on every
+page and on the server, every feature on. No site needs to change anything;
+bump the pin.
+
+**Added**
+- `posthog-hybrid` policy. Guards: `posthog-node` is a dependency and stays in
+  server paths; a component in `src` calls `posthog.init(` and registers
+  `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a
+  dependency; only `PUBLIC_POSTHOG_KEY` is public (no `PUBLIC_POSTHOG_*PERSONAL*`
+  or `*SECRET*`); EU host; no hard-coded `phc_`/`phx_` key (never exempt).
+- `posthog` config: `embed` (`"snippet"` or `"npm"`), `cookieless`
+  (`"on_reject"`, `"always"` or `"off"`) and `apiHost` (EU Cloud or a
+  same-origin proxy path). `"off"` together with `consent-before-tracking` is
+  refused. `posthog-hybrid` and `posthog-server-only` can't be combined.
+- The build gets Ship Gate's CI-only PostHog key in `PUBLIC_POSTHOG_KEY`, so no
+  real key is needed in GitHub.
+- PostHog scan (`scripts/check-posthog.mjs`, "PostHog on every page"): the key
+  on every indexable page, inline or in a script the page loads; no other key
+  and no personal key in client output; every CSP allows PostHog's hosts,
+  `blob:` workers and, for the snippet, `'unsafe-inline'`.
+- Browser checks: every page reaches PostHog and defines `window.posthog`; with
+  the npm embed, the SDK is loaded, capturing before consent, in the configured
+  cookieless mode. Under `consent-before-tracking`, cookieless PostHog may load
+  before consent but stores nothing, and (npm, `on_reject`) starts storing once
+  the visitor opts in.
+- Post-deploy (`scripts/check-posthog-live.mjs`): production's home page starts
+  PostHog with a key PostHog knows, never the CI key or a personal key.
+- `templates/caller/posthog/`: the options file, the npm and snippet
+  components, the `posthog-node` wrapper (events, error tracking, feature flags,
+  joined to the browser session), `env.d.ts`, the CSP sources, and an optional
+  `/api/ingest` reverse proxy.
+- Fixture variants `posthog-hybrid` (must pass), `posthog-hybrid-missing` and
+  `posthog-hybrid-csp` (must fail the PostHog scan), built from the templates.
+- New exemptible guards `posthog-missing`, `posthog-server` and `posthog-csp`;
+  `posthog-public-var`, `posthog-us-host` and `posthog-env-tag` now belong to
+  both PostHog policies.
+
 ## v3.1.0 — 2026-09-25
 
 A third AI-training policy, and two false positives fixed. No site needs to

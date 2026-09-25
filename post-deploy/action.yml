@@ -5,7 +5,8 @@ description: >
   sitemaps, Link headers and Markdown negotiation production serves to
   crawlers and agents and that no WAF refuses plain requests, reports
   freshness headers and (optional) field Core Web Vitals, and
-  (posthog-server-only policy) that production HTML is PostHog-free.
+  (posthog-server-only policy) that production HTML is PostHog-free, or
+  (posthog-hybrid policy) that production starts PostHog with a live key.
   On failure: roll back, then fix forward.
 author: Ship Gate
 inputs:
@@ -82,3 +83,8 @@ runs:
           echo "::error::PostHog client code or key found in production HTML."; exit 1
         fi
         echo "Production HTML is PostHog-free."
+
+    - name: Production starts PostHog (posthog-hybrid)
+      if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-hybrid ')
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../scripts/check-posthog-live.mjs"

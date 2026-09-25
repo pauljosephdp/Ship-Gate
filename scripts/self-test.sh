@@ -426,6 +426,27 @@ disco_case "llms.txt malformed"                  "must start with"              
 disco_case "rule lowered with a reason"          "warn:0 canonical links"         "sed -i 's#<link rel=\"canonical\"[^>]*>##' dist/client/about/index.html" "\"discoveryOverrides\":[{\"rule\":\"canonical\",\"level\":\"warn\",\"reason\":\"Canonicals ship with the new layout\",\"restoreBy\":\"$FUTURE\"}]"
 disco_case "warning raised to error"             "llms.txt: not in the build"     "rm dist/client/llms.txt" '"discoveryOverrides":[{"rule":"llms-txt","level":"error"}]'
 disco_case "rule turned off (warns it is lowered)" "warn:lowered to off"          "rm dist/client/llms.txt" "\"discoveryOverrides\":[{\"rule\":\"llms-txt\",\"level\":\"off\",\"reason\":\"llms.txt waits on the content audit\",\"restoreBy\":\"$FUTURE\"}]"
+
+echo "Release (release.sh)"
+# rel_case NAME EXPECT(pass|substring) CHANGELOG-TEXT — a dry run, so nothing is published
+rel_case() {
+  local name=$1 expect=$2 d out code; d="$(mktemp -d)"
+  printf '%b' "$3" > "$d/CHANGELOG.md"
+  out="$(CHANGELOG="$d/CHANGELOG.md" DRY_RUN=1 bash "$HERE/release.sh" 2>&1)"; code=$?
+  if [ "$expect" = pass ] || [ "$code" -ne 0 ]; then check "$name" "$expect" "$code" "$out"
+  elif [[ "$expect" == !* ]]; then
+    if grep -qF -- "${expect#!}" <<<"$out"; then bad "$name" "output must not contain: ${expect#!}" "$out"; else ok "$name"; fi
+  elif grep -qF -- "$expect" <<<"$out"; then ok "$name"; else bad "$name" "expected output containing: $expect" "$out"; fi
+  rm -rf "$d"
+}
+REL_TWO='# Changelog\n\n## v1.2.0 — 2026-10-01\n\n- new\n\n## v1.1.0 — 2026-09-01\n\n- old\n'
+rel_case "newest version is the one released"    "version=v1.2.0"        "$REL_TWO"
+rel_case "its notes are included"                "- new"                 "$REL_TWO"
+rel_case "older versions' notes are not"         "!- old"                "$REL_TWO"
+rel_case "not-released heading publishes nothing" "marked not released"   '# Changelog\n\n## v1.0.0 — 2026-09-24 (not released)\n\n- draft\n'
+rel_case "no version heading fails"              "No \"## vX.Y.Z\" heading" '# Changelog\n\n## Unreleased\n\n- next\n'
+rel_case "version without notes fails"           "has no notes"          '# Changelog\n\n## v1.2.0 — 2026-10-01\n\n## v1.1.0\n\n- old\n'
+rel_case "this repo's CHANGELOG has a release"   "version=v"             "$(sed 's/\\/\\\\/g' "$HERE/../CHANGELOG.md")"
 echo
 echo "Self-test: $pass passed, $failn failed."
 [ "$failn" -eq 0 ]

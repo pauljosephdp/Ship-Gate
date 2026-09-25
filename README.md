@@ -190,7 +190,7 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content) |
 | AEO | `breadcrumbs` | warn | a page two or more levels deep has no BreadcrumbList |
 | GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, Applebot, DuckAssistBot |
-| GEO | `ai-training` | error | an AI training token (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent, Bytespider) can fetch `/`, or a `Content-Signal` says `ai-train=yes`; with `"aiTraining": "allow"`, the reverse. Build and after deploy |
+| GEO | `ai-training` | error | an AI training token (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent, Bytespider) can fetch `/`, or a `Content-Signal` says `ai-train=yes`; with `"aiTraining": "reserve"`, a training token that can fetch `/` is governed by a group with no `ai-train=no` signal; with `"aiTraining": "allow"`, the reverse of the default. Build and after deploy |
 | GEO | `ai-uses-allowed` | error | a `Content-Signal` sets `search=no` or `ai-input=no`. Build and after deploy |
 | GEO | `ai-crawler-rules` | warn | no `User-agent` group names an AI crawler (GPTBot, OAI-SearchBot, ClaudeBot, Claude-SearchBot, Google-Extended, …) |
 | GEO | `content-signals` | warn | `robots.txt` has no `Content-Signal` line, or one that doesn't declare all of `search`, `ai-input` and `ai-train` ([contentsignals.org](https://contentsignals.org)) |
@@ -235,6 +235,31 @@ says `ai-train=no`:
 
 ```json
 "discovery": { "aiTraining": "allow" }
+```
+
+A site that lets training crawlers fetch but reserves training in its terms
+sets `"reserve"`. Fetching is then allowed; `ai-training` fails unless every
+training token that can fetch `/` is governed by a group whose
+`Content-Signal` says `ai-train=no`: its own named group if it has one (a bot
+with its own group ignores the `*` group), otherwise the `*` group. A governing
+group with no `ai-train` signal fails, and any `ai-train=yes` fails. A token
+that is disallowed from `/` also passes: stricter is allowed. Cocoon and
+Playway do this, with `Content-Signal: search=yes, ai-input=yes, ai-train=no`
+in every group, backed by their terms:
+
+```json
+"discovery": { "aiTraining": "reserve" }
+```
+
+```
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
+
+User-agent: GPTBot
+User-agent: ClaudeBot
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
 ```
 
 **Other search engines.** `robots-blocks-page` always checks Googlebot and
@@ -351,7 +376,7 @@ checks:
 
 | Policy | What it enforces |
 |---|---|
-| `posthog-server-only` | `posthog-node` only inside `src/lib/server`, `src/pages/api`, `src/actions` or `src/middleware`; EU host; the key is never `PUBLIC_` and never hard-coded; every event tagged with `__DEPLOY_ENV__`; no PostHog in the client bundle, in browser requests, or in production HTML |
+| `posthog-server-only` | `posthog-node` only inside `src/lib/server`, `src/pages/api`, `src/actions` or `src/middleware`; EU host; the key is never `PUBLIC_` and never hard-coded; every event tagged with `__DEPLOY_ENV__`; no PostHog in the client bundle, in browser requests, or in production HTML. Markdown content (`src/content/**/*.md`, `*.mdx`) may name `posthog.com` in prose, as a privacy policy's disclosure does ("PostHog Privacy Policy: posthog.com/privacy"); `posthog-node`, `POSTHOG_`, `new PostHog(`, `posthog.init` and ingestion hosts (`i.posthog.com`, `eu.i.posthog.com`, `us-assets.i.posthog.com`) still fail there. The client-bundle and production-HTML checks look for `posthog-js`, `posthog.init`, ingestion hosts and keys, so the disclosure passes them too |
 | `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot tracking (`hs-scripts`, `hs-analytics`) go through Cloudflare Zaraz. HubSpot form embeds (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until HubSpot's forms API is available. They render their own form, so list only Turnstile forms in `formPages` |
 | `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys |
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
@@ -391,8 +416,13 @@ writes are `wrangler deploy`/`secret`/`versions deploy`, R2 or KV writes,
 `--remote`, remote migrations, `git push` and IndexNow submissions. It follows
 the `pre`/`post` scripts npm runs around each one, calls through `npm`, `pnpm`,
 `yarn`, `run-s`, `run-p` and `npm-run-all` (globs included), and reads the Node
-and shell files a script starts. So `"verify": "npm run deploy"` and
-`"postbuild": "node scripts/ping-indexnow.mjs"` are caught too. CI builds every PR; a
+and shell files a script starts, with their comments stripped first: a JSDoc
+line or `# …` comment that names `wrangler deploy` is prose, not a command
+(`/* … */` and `//` comments in Node files, but never the `//` of a URL or
+anything inside a string; whole-line and trailing ` #` comments in shell
+files). So `"verify": "npm run deploy"`,
+`"postbuild": "node scripts/ping-indexnow.mjs"` and `execSync('wrangler deploy')`
+in a Node file are caught too. CI builds every PR; a
 merge gate must be read-only.
 
 ### Guard exemptions
@@ -452,7 +482,7 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `discoveryOverrides` | `[]` | Raise or lower a discovery rule; see Discovery scan |
 | `discovery.sitemap` | from `robots.txt`, else `/sitemap-index.xml` or `/sitemap.xml` | The sitemap's path |
 | `discovery.ignoreLinks` | `[]` | Path prefixes the Worker serves rather than the static build, e.g. `"/api/"`; the link check skips them |
-| `discovery.aiTraining` | `"block"` | `"block"`: AI training crawlers must be disallowed. `"allow"`: they must not be. See Discovery scan |
+| `discovery.aiTraining` | `"block"` | `"block"`: AI training crawlers must be disallowed. `"reserve"`: they may fetch, but the group governing each must say `Content-Signal: ai-train=no`. `"allow"`: they must not be disallowed. See Discovery scan |
 | `discovery.searchCrawlers` | `[]` | Crawler tokens that must reach every indexable page besides Googlebot and Bingbot, e.g. `"Baiduspider"`, `"Yeti"` |
 | `python` | none | `{ "version": "3.11", "packages": ["fonttools"] }` for Python checks |
 | `turnstileEnv` | `PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | With `turnstile-forms`: env names that receive Cloudflare's always-pass test keys |
@@ -569,11 +599,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.0.3 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.1.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.0.3". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.1.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

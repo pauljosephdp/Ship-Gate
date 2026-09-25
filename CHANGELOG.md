@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.1.0 — 2026-09-25
+
+A third AI-training policy, and two false positives fixed. No site needs to
+change anything; bump the pin.
+
+**Added**
+- `discovery.aiTraining: "reserve"`: training crawlers may fetch, and training
+  is reserved by signal instead. `ai-training` fails unless every training
+  token (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot,
+  meta-externalagent, Bytespider) that can fetch `/` is governed by a group
+  whose `Content-Signal` says `ai-train=no`: its own named group, or `*` when it
+  has none. A governing group with no `ai-train` signal fails, and any
+  `ai-train=yes` fails. A token disallowed from `/` passes (stricter is
+  allowed). Applies in the build discovery scan and the post-deploy robots.txt
+  check. For sites such as Cocoon and Playway that let training crawlers fetch
+  with `Content-Signal: search=yes, ai-input=yes, ai-train=no` on every group,
+  backed by their terms.
+
+**Fixed**
+- The contract check no longer flags a production write named only in a
+  comment. Node files a script starts lose their `/* … */` and `//` comments
+  (never a URL's `//` or anything in a string), and shell files their
+  whole-line and trailing ` #` comments, before matching. Found on Cocoon, whose
+  `scripts/install-markdown-negotiation.mjs` mentions `wrangler deploy` in a
+  JSDoc line. `execSync('wrangler deploy')` and IndexNow calls in code are still
+  caught.
+- `posthog-server-only` no longer flags a privacy policy that names PostHog.
+  Markdown content under `src/content` (`*.md`, `*.mdx`) may say
+  `posthog.com/privacy`; `posthog-node`, `POSTHOG_`, `new PostHog(`,
+  `posthog.init` and ingestion hosts (`i.posthog.com`, `eu.i.posthog.com`,
+  `us-assets.i.posthog.com`) still fail there. `self-test` now proves the
+  disclosure also passes the client-bundle and production-HTML checks, and that
+  an ingestion host or `posthog-js` still fails them. Found on Cocoon's
+  `src/content/pages/privacy-policy.mdx`.
+
 ## v3.0.3 — 2026-09-25
 
 Ship Gate's own CI spends fewer Actions minutes again. No site needs to change

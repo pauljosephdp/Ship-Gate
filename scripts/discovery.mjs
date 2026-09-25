@@ -36,7 +36,7 @@ export const RULES = {
   'faq-visible':        { category: 'AEO', level: 'error', title: 'FAQ markup matches questions visible on the page' },
   breadcrumbs:          { category: 'AEO', level: 'warn',  title: 'Nested pages carry BreadcrumbList markup' },
   'ai-search-crawlers': { category: 'GEO', level: 'error', title: 'AI search and user-fetch crawlers are not blocked' },
-  'ai-training':        { category: 'GEO', level: 'error', where: 'both', title: 'AI training follows the site\'s policy (blocked unless discovery.aiTraining is "allow")' },
+  'ai-training':        { category: 'GEO', level: 'error', where: 'both', title: 'AI training follows the site\'s policy (blocked by default; discovery.aiTraining "reserve" or "allow")' },
   'ai-uses-allowed':    { category: 'GEO', level: 'error', where: 'both', title: 'Content-Signal keeps search and AI input enabled' },
   'ai-crawler-rules':   { category: 'GEO', level: 'warn',  title: 'robots.txt states an explicit policy for AI crawlers' },
   'content-signals':    { category: 'GEO', level: 'warn',  title: 'robots.txt declares Content-Signal preferences' },
@@ -133,14 +133,17 @@ const ruleRe = (p) => {
   const anchored = p.endsWith('$');
   return new RegExp('^' + (anchored ? p.slice(0, -1) : p).split('*').map(escapeRe).join('.*') + (anchored ? '$' : ''));
 };
-// May this crawler fetch this path? The crawler's own groups, else the * groups;
-// the longest matching rule wins, and Allow wins a tie.
+// The indexes of the groups that govern a crawler: its own named groups, else the * groups.
+export function governingGroups(robots, agent) {
+  const ids = (ua) => robots.groups.flatMap((g, i) => (g.agents.includes(ua) ? [i] : []));
+  const own = ids(agent.toLowerCase());
+  return own.length ? own : ids('*');
+}
+// May this crawler fetch this path? Its governing groups decide; the longest
+// matching rule wins, and Allow wins a tie.
 export function robotsAllows(robots, agent, path) {
-  const ua = agent.toLowerCase();
-  let groups = robots.groups.filter((g) => g.agents.includes(ua));
-  if (groups.length === 0) groups = robots.groups.filter((g) => g.agents.includes('*'));
   let best = null;
-  for (const r of groups.flatMap((g) => g.rules)) {
+  for (const r of governingGroups(robots, agent).flatMap((i) => robots.groups[i].rules)) {
     if (!ruleRe(r.path).test(path)) continue;
     if (!best || r.path.length > best.path.length || (r.path.length === best.path.length && r.allow)) best = r;
   }
@@ -165,19 +168,31 @@ export function parseContentSignal(value) {
 }
 
 // The default AI policy: model training off, every other use on. discovery.aiTraining
-// "allow" flips training on. Returns [{ rule, msg }] for ai-training and ai-uses-allowed,
-// for the build scan and the post-deploy check alike.
-export const AI_TRAINING_MODES = ['block', 'allow'];
+// "allow" flips training on; "reserve" lets training crawlers fetch but requires the
+// group governing each of them to declare Content-Signal ai-train=no (a Disallow: / is
+// also fine: stricter is allowed). Returns [{ rule, msg }] for ai-training and
+// ai-uses-allowed, for the build scan and the post-deploy check alike.
+export const AI_TRAINING_MODES = ['block', 'allow', 'reserve'];
 export function trainingPolicy(robots, mode = 'block') {
   const out = [];
   const blocked = AI_TRAINING_TOKENS.filter((t) => !robotsAllows(robots, t, '/'));
   if (mode === 'block') {
     const open = AI_TRAINING_TOKENS.filter((t) => !blocked.includes(t));
-    if (open.length) out.push({ rule: 'ai-training', msg: `lets ${open.join(', ')} train on the site. AI training is off by default: add a group with ${open.map((t) => `"User-agent: ${t}"`).join(', ')} and "Disallow: /". Set discovery.aiTraining to "allow" to opt in to training instead.` });
-  } else if (blocked.length) {
+    if (open.length) out.push({ rule: 'ai-training', msg: `lets ${open.join(', ')} train on the site. AI training is off by default: add a group with ${open.map((t) => `"User-agent: ${t}"`).join(', ')} and "Disallow: /". Set discovery.aiTraining to "reserve" to let them fetch with "Content-Signal: ai-train=no", or "allow" to opt in to training.` });
+  } else if (mode === 'allow' && blocked.length) {
     out.push({ rule: 'ai-training', msg: `blocks ${blocked.join(', ')}, but discovery.aiTraining is "allow". Remove those Disallow lines, or set aiTraining to "block".` });
+  } else if (mode === 'reserve') {
+    const unsignalled = [];
+    for (const t of AI_TRAINING_TOKENS.filter((x) => !blocked.includes(x))) { // Disallow: / is stricter, so fine
+      const groups = governingGroups(robots, t);
+      const train = robots.fields.filter((f) => f.field === 'content-signal' && groups.includes(f.group))
+        .map((f) => parseContentSignal(f.value).entries['ai-train']).filter(Boolean);
+      // ai-train=yes is reported per line below; here, a group that never says ai-train=no.
+      if (!train.includes('no') && !train.includes('yes')) unsignalled.push(t);
+    }
+    if (unsignalled.length) out.push({ rule: 'ai-training', msg: `the group governing ${unsignalled.join(', ')} declares no "Content-Signal: ai-train=no", but discovery.aiTraining is "reserve". Add "Content-Signal: search=yes, ai-input=yes, ai-train=no" to every group they fall under (a bot with its own group ignores the * group), or disallow them.` });
   }
-  const want = mode === 'block' ? 'no' : 'yes';
+  const want = mode === 'allow' ? 'yes' : 'no';
   for (const f of robots.fields.filter((x) => x.field === 'content-signal')) {
     const { entries } = parseContentSignal(f.value);
     if (entries['ai-train'] && entries['ai-train'] !== want)

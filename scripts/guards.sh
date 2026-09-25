@@ -27,6 +27,7 @@ if policy posthog-server-only; then
 
 # 1. [posthog-server-only] PostHog: server-side only, EU Cloud, key never public.
 #    Direct PostHog use (SDK, host, key) is allowed only in server paths; everything else calls a wrapper there.
+#    Markdown content under src/content may name posthog.com in prose (a privacy disclosure).
 SERVER_PATHS='^src/(lib/server|pages/api|actions|middleware)'
 grep -qE '"(posthog-js|posthog-react-native|@posthog/react)"' package.json \
   && err posthog-client "Client PostHog SDK in package.json — use posthog-node, server-side only."
@@ -40,7 +41,11 @@ scan 'ph[cx]_[A-Za-z0-9]{20,}' src public astro.config.* wrangler.* \
 while IFS= read -r f; do
   echo "$f" | grep -qE "$SERVER_PATHS" \
     || err posthog-client "$f uses PostHog directly outside server paths (src/lib/server, src/pages/api, src/actions, src/middleware)."
-done < <(grep -rlE "posthog-node|posthog\.com|POSTHOG_|new PostHog\(" src 2>/dev/null)
+done < <({ grep -rlE "posthog-node|posthog\.com|POSTHOG_|new PostHog\(" src 2>/dev/null | grep -vE '^src/content/.*\.mdx?$'
+  # Content files (a privacy policy's disclosure names posthog.com) are prose: only code-shaped
+  # PostHog use counts there, ingestion hosts included (i.posthog.com, eu.i., us-assets.).
+  grep -rlE "posthog-node|i\.posthog\.com|-assets\.(i\.)?posthog\.com|POSTHOG_|new PostHog\(" src/content \
+    --include='*.md' --include='*.mdx' 2>/dev/null; } | sort -u)
 # posthog-node on Workers must flush before the request ends, or events are silently dropped.
 while IFS= read -r f; do
   grep -qE '\.(shutdown|flush)\(' "$f" \

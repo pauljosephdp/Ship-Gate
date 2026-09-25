@@ -179,9 +179,10 @@ for (const [i, o] of (Array.isArray(dOverrides) ? dOverrides : []).entries()) {
 }
 const discovery = cfg.discovery ?? {};
 for (const k of Object.keys(discovery)) if (!['sitemap', 'ignoreLinks', 'searchCrawlers', 'aiTraining'].includes(k)) err(`discovery.${k} is not a setting. Use sitemap, ignoreLinks, searchCrawlers, aiTraining.`);
-// AI training is off by default; a site opts in with "allow". Every other crawler is always allowed.
+// AI training is off by default: "block" disallows the training crawlers, "reserve" lets
+// them fetch under Content-Signal ai-train=no, "allow" opts in. Every other crawler is always allowed.
 const aiTraining = discovery.aiTraining ?? 'block';
-if (!AI_TRAINING_MODES.includes(aiTraining)) err(`discovery.aiTraining must be ${AI_TRAINING_MODES.map((m) => `"${m}"`).join(' or ')} (default "block").`);
+if (!AI_TRAINING_MODES.includes(aiTraining)) err(`discovery.aiTraining must be ${AI_TRAINING_MODES.map((m) => `"${m}"`).join(', ').replace(/, ([^,]*)$/, ' or $1')} (default "block").`);
 if (discovery.sitemap !== undefined && !(typeof discovery.sitemap === 'string' && /^\/\S+\.xml$/.test(discovery.sitemap)))
   err('discovery.sitemap must be the sitemap\'s path, e.g. "/sitemap-index.xml".');
 if (discovery.ignoreLinks !== undefined && !isPathList(discovery.ignoreLinks))
@@ -345,16 +346,58 @@ function productionWrite(name, seen = new Set()) {
   }
   for (const m of body.matchAll(/\b(?:node|tsx)\s+(?:--[\w-]+(?:=\S+)?\s+)*([\w./-]+\.(?:m?js|cjs|ts|mts))/g)) {
     if (!existsSync(m[1])) continue;
-    const hit = readFileSync(m[1], 'utf8').match(PRODUCTION_WRITES_IN_CODE);
+    const hit = jsCode(readFileSync(m[1], 'utf8')).match(PRODUCTION_WRITES_IN_CODE);
     if (hit) return `"${name}" runs ${m[1]}, which contains ${hit[0].slice(0, 60)}`;
   }
   for (const m of body.matchAll(/(?:\b(?:bash|sh|zsh)\s+(?:-\w+\s+)*|(?:^|[\s;&|(])(?=\.{0,2}\/))([\w./-]+\.(?:sh|bash))\b/g)) {
     if (!existsSync(m[1])) continue;
-    const hit = readFileSync(m[1], 'utf8').match(PRODUCTION_WRITES) ?? readFileSync(m[1], 'utf8').match(PRODUCTION_WRITES_IN_CODE);
+    const code = shellCode(readFileSync(m[1], 'utf8'));
+    const hit = code.match(PRODUCTION_WRITES) ?? code.match(PRODUCTION_WRITES_IN_CODE);
     if (hit) return `"${name}" runs ${m[1]}, which contains ${hit[0].slice(0, 60)}`;
   }
   return null;
 }
+// A file's code without its comments, so prose that names a command ("`wrangler deploy`
+// reads this") never reads as the command. Conservative: strings, template literals and
+// regex literals are kept whole, and "//" after ":" (a URL) is never a comment.
+function jsCode(src) {
+  let out = '', i = 0, prev = '';
+  while (i < src.length) {
+    const c = src[i], n = src[i + 1];
+    if (c === '/' && n === '*') { const end = src.indexOf('*/', i + 2); const skip = end < 0 ? src.slice(i) : src.slice(i, end + 2);
+      out += skip.replace(/[^\n]/g, ''); i += skip.length; continue; }
+    if (c === '/' && n === '/' && src[i - 1] !== ':') { while (i < src.length && src[i] !== '\n') i++; continue; }
+    if (c === '"' || c === "'" || c === '`' || (c === '/' && /^$|[(,=:[!&|?{};+\-*%<>~^]$/.test(prev))) {
+      // A string or regex runs to its closing quote; ' and " strings and regexes end at a newline.
+      let j = i + 1, inClass = false;
+      while (j < src.length) {
+        const d = src[j];
+        if (d === '\\') { j += 2; continue; }
+        if (d === '\n' && c !== '`') break;
+        if (c === '/' && d === '[') inClass = true;
+        else if (c === '/' && d === ']') inClass = false;
+        else if (d === c && !inClass) { j++; break; }
+        j++;
+      }
+      out += src.slice(i, j); prev = c === '/' ? 'x' : c; i = j; continue;
+    }
+    out += c; if (!/\s/.test(c)) prev = c; i++;
+  }
+  return out;
+}
+// Shell: whole-line comments, and trailing " # …" comments outside quotes.
+const shellCode = (src) => src.split('\n').map((line) => {
+  if (/^\s*#/.test(line)) return '';
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === '\\' && q === '"') i++; else if (c === q) q = null; continue; }
+    if (c === '\\') { i++; continue; }
+    if (c === '"' || c === "'") q = c;
+    else if (c === '#' && /\s/.test(line[i - 1] ?? '')) return line.slice(0, i);
+  }
+  return line;
+}).join('\n');
 // Everything CI runs: the scripts it calls by name, and the lifecycle scripts npm ci runs.
 for (const s of ['preinstall', 'install', 'postinstall', 'prepare', 'build', 'check', 'lint', 'test',
   ...(server === 'preview' ? ['preview'] : [])]) {

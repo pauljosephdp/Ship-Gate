@@ -141,6 +141,16 @@ expect_guard "no policies: push to main still fails" "pushes to main"         "w
 POLICIES="tags-via-zaraz" \
 expect_guard "one policy on: only its guard runs" "Third-party tag"           "echo '<form method=\"post\"></form>' > src/pages/signup.astro && echo '<script src=\"https://www.clarity.ms/tag/abc\"></script>' > src/pages/c.astro"
 expect_guard "Renovate and Dependabot both (warn)" pass                       "echo '{}' > renovate.json && mkdir -p .github && echo 'version: 2' > .github/dependabot.yml"
+PRIVACY="mkdir -p src/content/pages && printf 'PostHog Privacy Policy: posthog.com/privacy\\n' > src/content/pages/privacy-policy.mdx"
+expect_guard "privacy policy names posthog.com"   pass                        "$PRIVACY"
+expect_guard "content file: ingestion host"       "outside server paths"      "$PRIVACY && echo \"<script>fetch('https://eu.i.posthog.com/e')</script>\" >> src/content/pages/privacy-policy.mdx"
+expect_guard "content file: i.posthog.com"        "outside server paths"      "mkdir -p src/content/blog && echo 'host: https://i.posthog.com' > src/content/blog/a.md"
+expect_guard "content file: us-assets host"       "outside server paths"      "mkdir -p src/content/blog && echo 'https://us-assets.i.posthog.com/static/x.js' > src/content/blog/a.md"
+expect_guard "content file: posthog-node import"  "outside server paths"      "mkdir -p src/content/blog && echo \"import { PostHog } from 'posthog-node'\" > src/content/blog/a.mdx"
+expect_guard "content file: POSTHOG_ variable"    "outside server paths"      "mkdir -p src/content/blog && echo 'key: {import.meta.env.POSTHOG_API_KEY}' > src/content/blog/a.mdx"
+expect_guard "content file: new PostHog("         "outside server paths"      "mkdir -p src/content/blog && echo 'export const p = new PostHog(k)' > src/content/blog/a.mdx"
+expect_guard "content file: posthog.init"         "Client-side PostHog snippet" "mkdir -p src/content/blog && echo '<script>posthog.init(1)</script>' > src/content/blog/a.mdx"
+expect_guard "posthog.com in a component fails"   "outside server paths"      "mkdir -p src/components && echo '<a href=\"https://posthog.com/privacy\">x</a>' > src/components/Footer.astro"
 
 echo "Config and contract (prepare.mjs)"
 expect_prepare "conforming site passes"           pass ":"
@@ -212,6 +222,16 @@ expect_prepare "pnpm run reaches a deploy"        "writes to production"      "s
 expect_prepare "build runs a shell file that deploys" "writes to production"  "mkdir -p scripts && printf '#!/bin/sh\nnpx wrangler deploy\n' > scripts/ship.sh && sed -i 's/\"build\": \"astro build\"/\"build\": \"astro build \&\& bash scripts\/ship.sh\"/' package.json"
 expect_prepare "bare shell file that deploys"     "writes to production"      "mkdir -p scripts && printf '#!/bin/sh\nnpx wrangler deploy\n' > scripts/ship.sh && sed -i 's/\"build\": \"astro build\"/\"build\": \"astro build \&\& .\/scripts\/ship.sh\"/' package.json"
 expect_prepare "harmless postbuild passes"        pass                        "mkdir -p scripts && echo 'console.log(1)' > scripts/post.mjs && sed -i 's/\"test\": \"vitest run\"/\"test\": \"vitest run\", \"postbuild\": \"node scripts\/post.mjs \&\& run-s check:*\"/' package.json"
+# jsdoc_file PATH [CODE] — a file whose JSDoc comment names a deploy (Cocoon's
+# install-markdown-negotiation.mjs), then CODE; postbuild runs it.
+jsdoc_file() { mkdir -p scripts; { printf '/**\n * Writes the setting as a comment at the top of wrangler.toml, `wrangler deploy` reads\n * it; see https://developers.cloudflare.com/ (not a git push either).\n */\n'
+  printf '// Never calls wrangler deploy or api.indexnow.org itself.\nconst url = "https://example.com/*"; /* wrangler deploy */ const glob = "*/";\n%s\n' "${2:-console.log(url, glob);}"; } > "$1"
+  sed -i "s#\"test\": \"vitest run\"#\"test\": \"vitest run\", \"postbuild\": \"node $1\"#" package.json; }
+expect_prepare "comment naming a deploy passes"   pass                        "jsdoc_file scripts/install-markdown-negotiation.mjs"
+expect_prepare "deploy in code after a comment"   "writes to production"      "jsdoc_file scripts/ship.mjs \"execSync('wrangler deploy');\""
+expect_prepare "IndexNow URL after a comment"     "writes to production"      "jsdoc_file scripts/ping-indexnow.mjs \"fetch('https://api.indexnow.org/IndexNow'); // submit\""
+expect_prepare "shell comments naming a deploy"   pass                        "mkdir -p scripts && printf '#!/bin/sh\n  # wrangler deploy runs in Workers Builds, not here\necho \"built\" # then wrangler deploy\n' > scripts/post.sh && sed -i 's/\"build\": \"astro build\"/\"build\": \"astro build \&\& bash scripts\/post.sh\"/' package.json"
+expect_prepare "shell deploy with a trailing comment" "writes to production"  "mkdir -p scripts && printf '#!/bin/sh\nnpx wrangler deploy # ship it\n' > scripts/ship.sh && sed -i 's/\"build\": \"astro build\"/\"build\": \"astro build \&\& bash scripts\/ship.sh\"/' package.json"
 expect_prepare "blocked URLs must be patterns"    "lighthouseBlockedUrls must be" "cfg '\"lighthouseBlockedUrls\":[42]'"
 expect_prepare "distDir with trailing slash"      pass                        "cfg '\"distDir\":\"dist/\"'"
 expect_prepare "distDir outside the site"         "distDir must be"           "cfg '\"distDir\":\"../dist\"'"
@@ -369,6 +389,19 @@ EXEMPT=posthog-client \
 dist_case "posthog-js under exemption warns"        pass                  "echo 'import \"posthog-js\"' > dist/client/_astro/b.js"
 EXEMPT=posthog-client \
 dist_case "key in client output never exempt"       "PostHog key found"   "echo \"k='${PH}abcdefghijklmnopqrstuvwxyz0123'\" > dist/client/_astro/b.js"
+DISCLOSURE='<p>PostHog Privacy Policy: <a href="https://posthog.com/privacy">posthog.com/privacy</a></p>'
+dist_case "privacy page naming posthog.com passes"  pass                  "mkdir -p dist/client/privacy-policy && echo '$DISCLOSURE' > dist/client/privacy-policy/index.html"
+dist_case "EU ingestion host in client HTML"        "PostHog found"       "mkdir -p dist/client/privacy-policy && echo '$DISCLOSURE<script>fetch(\"https://eu.i.posthog.com/e\")</script>' > dist/client/privacy-policy/index.html"
+# post-deploy's "Production HTML is PostHog-free" pattern, read from the action itself.
+PROD_PH="$(sed -n "s/.*grep -qE '\([^']*posthog-js[^']*\)'.*/\1/p" "$HERE/../post-deploy/action.yml")"
+prod_ph_case() {
+  if [ -z "$PROD_PH" ]; then bad "$1" "PostHog pattern not found in post-deploy/action.yml" ""
+  elif grep -qE "$PROD_PH" <<<"$3"; then [ "$2" = fail ] && ok "$1" || bad "$1" "production HTML check flags it" "$3"
+  else [ "$2" = pass ] && ok "$1" || bad "$1" "production HTML check misses it" "$3"; fi
+}
+prod_ph_case "production HTML: disclosure passes"   pass "<html><body>$DISCLOSURE</body></html>"
+prod_ph_case "production HTML: EU ingestion host"   fail "<html><body>$DISCLOSURE<script>fetch('https://eu.i.posthog.com/e')</script></body></html>"
+prod_ph_case "production HTML: posthog-js"          fail "<html><script src=\"/_astro/posthog-js.abc.js\"></script></html>"
 
 echo "Discovery scan (check-discovery.mjs): SEO, AEO, GEO, AIO"
 WORDS="This page exists so the discovery scan has real text to read: enough words that a crawler which does not run JavaScript still finds the substance of the page in its HTML, which is what search engines, answer engines and AI assistants index, quote and cite when they send people here."
@@ -421,10 +454,19 @@ disco_case "no training block at all"            "AI training is off by default"
 disco_case "aiTraining allow, training allowed"  pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\n\nUser-agent: GPTBot\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt" '"discovery":{"aiTraining":"allow"}'
 disco_case "aiTraining allow, GPTBot blocked"    "but discovery.aiTraining is \"allow\"" ":" '"discovery":{"aiTraining":"allow"}'
 disco_case "ai-train=yes under the default"      "ai-train=yes, but the site's policy is ai-train=no" "sed -i 's#ai-train=no#ai-train=yes#' dist/client/robots.txt"
+RESERVE='"discovery":{"aiTraining":"reserve"}'
+ROBOTS_RESERVE="printf 'User-agent: *\\nContent-Signal: search=yes, ai-input=yes, ai-train=no\\nAllow: /\\n\\nUser-agent: GPTBot\\nUser-agent: ClaudeBot\\nContent-Signal: search=yes, ai-input=yes, ai-train=no\\nAllow: /\\n\\nSitemap: https://example.com/sitemap.xml\\n' > dist/client/robots.txt"
+disco_case "reserve: fetch allowed, ai-train=no"  pass                             "$ROBOTS_RESERVE" "$RESERVE"
+disco_case "reserve: training tokens disallowed"  pass                             ":" "$RESERVE"
+disco_case "reserve: named group lacks signal"    "the group governing GPTBot, ClaudeBot declares no" "$ROBOTS_RESERVE && sed -i '0,/^Allow: \\/\$/!{/^Content-Signal/d}' dist/client/robots.txt" "$RESERVE"
+disco_case "reserve: * group lacks ai-train"      "the group governing Google-Extended" "$ROBOTS_RESERVE && sed -i '1,3s#, ai-train=no##' dist/client/robots.txt" "$RESERVE"
+disco_case "reserve: ai-train=yes"                "ai-train=yes, but the site's policy is ai-train=no" "$ROBOTS_RESERVE && sed -i 's#ai-train=no#ai-train=yes#' dist/client/robots.txt" "$RESERVE"
+disco_case "reserve: no Content-Signal at all"    "declares no \"Content-Signal: ai-train=no\"" "$ROBOTS_RESERVE && sed -i '/Content-Signal/d' dist/client/robots.txt" "$RESERVE"
 disco_case "search=no"                           "Content-Signal search=no"       "sed -i 's#search=yes#search=no#' dist/client/robots.txt"
 disco_case "ai-input=no"                         "Content-Signal ai-input=no"     "sed -i 's#ai-input=yes#ai-input=no#' dist/client/robots.txt"
 disco_case "signal missing ai-input (warn)"      "warn:does not declare ai-input" "sed -i 's#ai-input=yes, ##' dist/client/robots.txt"
 expect_prepare "discovery: bad aiTraining"       "discovery.aiTraining must be"   "cfg '\"discovery\":{\"aiTraining\":\"maybe\"}'"
+expect_prepare "discovery: aiTraining reserve"    pass                           "cfg '\"discovery\":{\"aiTraining\":\"reserve\"}'"
 disco_case "robots.txt without User-agent"        "has no \"User-agent:\" line"   "printf 'Content-Signal: search=yes, ai-input=yes, ai-train=no\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "no AI crawler group (warn)"          "warn:names no AI crawler"       "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt" '"discovery":{"aiTraining":"allow"}'
 disco_case "no Content-Signal (warn)"            "warn:no \"Content-Signal:\" line" "sed -i '/Content-Signal/d' dist/client/robots.txt"
@@ -550,6 +592,9 @@ live_case "Markdown raised to error"             "got \"text/html\""            
 live_case "production lets GPTBot train"         "lets GPTBot train"            '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: SITE/sitemap.xml\n"}}'
 live_case "production search=no"                 "Content-Signal search=no"     '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=no, ai-input=yes, ai-train=yes\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' allow
 live_case "production allows training (allow)"   pass                           '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\n\nUser-agent: GPTBot\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' allow
+live_case "production reserves training (reserve)" pass                         '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: CCBot\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' reserve
+live_case "production reserve, group unsignalled" "the group governing GPTBot, CCBot declares no" '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: CCBot\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' reserve
+live_case "production reserve, ai-train=yes"      "ai-train=yes, but the site's policy is ai-train=no" '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' reserve
 d="$(baseline)"; cd "$d" && cfg '"discoveryOverrides":[{"rule":"markdown-negotiation","level":"error"}]' && : > "$d/env"
 out="$(GITHUB_ENV="$d/env" node "$PREPARE" post-deploy 2>&1)"; code=$?
 check "post-deploy exports discovery levels" pass "$code" "$out"

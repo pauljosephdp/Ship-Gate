@@ -25,9 +25,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: README is current
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: bash scripts/check-readme.sh $BASE
       - name: ShellCheck
         run: shellcheck -S error scripts/*.sh test/*.sh
       - name: Guards and config rules

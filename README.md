@@ -473,7 +473,10 @@ The v1 form `{ "category": "performance", ... }` is still accepted.
 3. **Releases are automatic.** The `release` job in `self-test.yml` publishes
    the tag and GitHub release for the newest `CHANGELOG.md` version on the first
    green push to `main` that carries it (see Changing Ship Gate). Nothing to do
-   by hand; site templates pin these tags.
+   by hand; site templates pin these tags. If a push run was cancelled before
+   it released, run the Self-test workflow on `main` by hand (Actions → Self-test
+   → Run workflow). It re-runs every check, then publishes the missing release.
+   Never create a release tag by hand: only green commits are tagged.
 
 ## What stays in the site repo
 
@@ -569,7 +572,18 @@ violation, a dead redirect, two `h1`s, a directly loaded tag, an AI search
 crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
 `dir="rtl"`, a Google Fonts stylesheet (`market-cn`), a link with its focus
 ring removed, a tracking cookie before consent. The conforming
-run must pass; each broken run must fail on the check that owns the fault.
+run, and one that shows a site file named after a tracking vendor, must pass;
+each broken run must fail on the check that owns the fault.
+
+**README.md stays current.** `scripts/check-readme.sh` runs in `self-test` and
+fails when:
+- a PR changes what Ship Gate does (`action.yml`, `post-deploy/`, `scripts/`,
+  `e2e/`, `templates/`, `tools/`, workflows) without changing this README;
+- a version this README or the caller templates tell sites to pin is not the
+  newest `CHANGELOG.md` version.
+
+Changes to tests, `CLAUDE.md`, `CHANGELOG.md` and `docs/` alone need no README
+change.
 
 Every PR that should ship adds a section at the top of `CHANGELOG.md`, headed
 `## vX.Y.Z — YYYY-MM-DD`. When the PR merges and every `self-test` and

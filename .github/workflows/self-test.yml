@@ -75,3 +75,24 @@ jobs:
               || { echo "::error::Variant ${{ matrix.variant }} must fail \"$FAILS\"."; exit 1; }
           fi
           echo "Gate behaved as expected for ${{ matrix.variant }}."
+
+  # Every push to main that passes every check above publishes the version named by
+  # the newest CHANGELOG.md heading, once. Sites pin these tags, so a release never
+  # tags a red commit. Pull requests and other branches never release.
+  release:
+    name: release
+    needs: [self-test, fixture]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the release named in CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release.sh

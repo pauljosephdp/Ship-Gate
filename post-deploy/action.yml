@@ -37,8 +37,12 @@ runs:
         WAIT_MINUTES: ${{ inputs.wait-minutes }}
       run: |
         tries=$(( WAIT_MINUTES * 3 ))
+        # Fetch first, then search. Piping curl into `grep -q` breaks under the
+        # runner's pipefail: grep exits on the first match, curl fails writing
+        # the rest of the page (exit 23), and the match reads as a miss.
         for i in $(seq 1 "$tries"); do
-          if curl -fsS "$SHIP_GATE_SITE_URL/?cb=$(date +%s)" | grep -q "name=\"build-sha\" content=\"$GITHUB_SHA\""; then
+          page=$(curl -fsS "$SHIP_GATE_SITE_URL/?cb=$(date +%s)") || page=""
+          if grep -qF "name=\"build-sha\" content=\"$GITHUB_SHA\"" <<<"$page"; then
             echo "Production is serving $GITHUB_SHA"; exit 0
           fi
           sleep 20
@@ -71,7 +75,10 @@ runs:
       if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only ')
       shell: bash
       run: |
-        if curl -fsS "$SHIP_GATE_SITE_URL/" | grep -qE 'posthog-js|posthog\.init|i\.posthog\.com|ph[cx]_[A-Za-z0-9]{20,}'; then
+        # Fetch first, then search: `curl | grep -q` under pipefail turns a
+        # match into a pass (see the wait step). An unreachable page fails too.
+        page=$(curl -fsS "$SHIP_GATE_SITE_URL/") || { echo "::error::Could not fetch production HTML to check it."; exit 1; }
+        if grep -qE 'posthog-js|posthog\.init|i\.posthog\.com|ph[cx]_[A-Za-z0-9]{20,}' <<<"$page"; then
           echo "::error::PostHog client code or key found in production HTML."; exit 1
         fi
         echo "Production HTML is PostHog-free."

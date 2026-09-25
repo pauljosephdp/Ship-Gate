@@ -309,8 +309,11 @@ With `@astrojs/sitemap`, add `/sitemap.xml /sitemap-index.xml 301` to
   Link: </llms.txt>; rel="describedby"; type="text/markdown"
 ```
 
-After deploy, the post-deploy action checks what production **actually
-serves**, at the site's discovery levels: `robots.txt` is 200, `text/plain`,
+After deploy, the post-deploy action first waits (up to `wait-minutes`) until
+production's home page carries the merged commit in its `build-sha` meta tag,
+and fails if it never does. Every page it inspects is fetched in full before
+it is searched, so a match can't be lost to a closed pipe. It then checks what
+production **actually serves**, at the site's discovery levels: `robots.txt` is 200, `text/plain`,
 has a `User-agent` group, blocks AI training (per `discovery.aiTraining`), keeps
 search and AI input on in its `Content-Signal`, and doesn't block Googlebot,
 Bingbot, a `discovery.searchCrawlers` crawler or an AI search crawler from a
@@ -325,7 +328,9 @@ ordinary traffic refuses crawlers too, and AI platforms treat the site as
 unreachable. It warns when a page has neither `ETag` nor `Last-Modified`, which
 crawlers use to refetch only what changed. It never spoofs a crawler's user
 agent: a correctly configured WAF blocks spoofed bots, so that test would fail
-good sites.
+good sites. With `posthog-server-only` it fails when production's home page
+carries PostHog client code or a project key, and when that page can't be
+fetched at all.
 
 With a `crux-api-key` input (a Google API key with the Chrome UX Report API
 enabled, passed as a secret), it also reports **field Core Web Vitals** for
@@ -564,11 +569,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.0.1 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.0.2 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.0.1". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.0.2". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

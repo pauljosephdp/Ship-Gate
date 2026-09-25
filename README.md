@@ -564,11 +564,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.0.1 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.0.3 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.0.1". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.0.3". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -607,6 +607,17 @@ Markdown outside `test/`. A push to `main` skips them when its pull request
 already passed both fixture jobs on the exact same tree (each passing job
 uploads a `fixtures-passed-<tree>-<group>` artifact); if `main` moved in
 between, or on a manual run, everything runs.
+Within a fixture job, only the first variant installs. `break-fixture.sh` keeps
+the fixture's and the test tools' `node_modules`, and the action, again only
+from this repo's own checkout, reuses them: no `npm ci`, no npm or Playwright
+cache restore. Sites always install from scratch.
+
+Open a PR as a draft and push to it freely: only `self-test` runs (about a
+minute). Mark it ready for review once the work is final; the fixture jobs
+then run once. Ship Gate's own `.github/dependabot.yml` groups each ecosystem's
+updates into one PR and does not rebase open PRs when `main` moves, since each
+push to a Dependabot PR runs the whole suite. Comment `@dependabot rebase` on
+one that conflicts.
 
 **README.md stays current.** `scripts/check-readme.sh` runs in `self-test` and
 fails when:
@@ -622,7 +633,8 @@ Every PR that should ship adds a section at the top of `CHANGELOG.md`, headed
 `## vX.Y.Z — YYYY-MM-DD`. When the PR merges and `self-test` passes on
 `main`, with every `fixture` job passed there or on the same tree in the PR, the `release` job (`scripts/release.sh`)
 creates the tag and a GitHub release with that section as its notes. A version
-already released, or a heading marked `(not released)`, publishes nothing, so
+already released, or a heading marked `(not released)`, publishes nothing (the
+`release` job does not even start a runner), so
 a PR that changes only docs or CI can leave the changelog alone. A red `main`
 never releases. Choose the version by its effect on site repos:
 

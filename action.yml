@@ -23,15 +23,19 @@ runs:
       run: |
         # Ship Gate's own fixture tests (uses: ./ in this repo) may stop a broken variant
         # at the stage that owns its fault. A site calling the published action always runs everything.
-        stage=full
+        stage=full reuse=false
         # Compare resolved paths: for uses: ./ the runner sets GITHUB_ACTION_PATH to "<workspace>/./".
         if [ -n "${SHIP_GATE_FIXTURE_STAGE:-}" ] \
           && [ "$(cd "$GITHUB_ACTION_PATH" && pwd -P)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)" ]; then
           stage=$SHIP_GATE_FIXTURE_STAGE
+          # A later variant in the same job reuses the installs of the first
+          # (test/break-fixture.sh keeps node_modules; the lockfiles never change).
+          if [ -d node_modules ]; then reuse=true; fi
         fi
         case "$stage" in full|browser|scans) ;; *) echo "::error::Unknown fixture stage \"$stage\"."; exit 1 ;; esac
-        echo "Ship Gate stage: $stage"
+        echo "Ship Gate stage: $stage (reuse installs: $reuse)"
         echo "stage=$stage" >> "$GITHUB_OUTPUT"
+        echo "reuse=$reuse" >> "$GITHUB_OUTPUT"
         for f in .nvmrc .node-version; do
           if [ -f "$f" ]; then echo "node-version-file=${{ inputs.working-directory }}/$f" >> "$GITHUB_OUTPUT"; exit 0; fi
         done
@@ -41,7 +45,7 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version-file: ${{ steps.site.outputs.node-version-file }}
-        cache: npm
+        cache: ${{ steps.site.outputs.reuse != 'true' && 'npm' || '' }}
         cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
 
     # From here on every check runs even after one fails (continue-on-error), so a PR
@@ -86,7 +90,11 @@ runs:
       id: install
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: npm ci
+      env:
+        REUSE: ${{ steps.site.outputs.reuse }}
+      run: |
+        if [ "$REUSE" = true ]; then echo "Fixture mode: reusing node_modules from the previous variant."; exit 0; fi
+        npm ci
 
     - name: astro check
       id: check
@@ -191,7 +199,7 @@ runs:
       run: echo "version=$(node -p "require(process.argv[1]).packages['node_modules/playwright-core']?.version ?? ''" "$SHIP_GATE_DIR/package-lock.json")" >> "$GITHUB_OUTPUT"
 
     - uses: actions/cache@v4
-      if: steps.pw.outcome == 'success' && steps.pw.outputs.version != ''
+      if: steps.pw.outcome == 'success' && steps.pw.outputs.version != '' && steps.site.outputs.reuse != 'true'
       with:
         path: ~/.cache/ms-playwright
         key: ship-gate-playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
@@ -200,9 +208,15 @@ runs:
       id: tools
       if: steps.afterbuild.outcome == 'success' && steps.site.outputs.stage != 'scans'
       shell: bash
+      env:
+        REUSE: ${{ steps.site.outputs.reuse }}
       run: |
         cd "$SHIP_GATE_DIR"
-        npm ci --no-audit --no-fund --loglevel=error
+        if [ "$REUSE" = true ] && [ -x node_modules/.bin/playwright ]; then
+          echo "Fixture mode: reusing the test tools from the previous variant."
+        else
+          npm ci --no-audit --no-fund --loglevel=error
+        fi
         # System packages once per runner: apt-get is slow and a second run in one job gains nothing.
         if [ -f "$RUNNER_TEMP/.ship-gate-pw-deps" ]; then
           npx --no-install playwright install chromium

@@ -54,6 +54,18 @@ runs:
       with:
         python-version: ${{ env.SHIP_GATE_PYTHON }}
 
+    - name: Python package cache key
+      id: pip
+      if: env.SHIP_GATE_PIP != ''
+      shell: bash
+      run: echo "key=$(python -c 'import sys; print(sys.version.split()[0])')-$(printf '%s' "$SHIP_GATE_PIP" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v4
+      if: env.SHIP_GATE_PIP != ''
+      with:
+        path: ~/.cache/pip
+        key: ship-gate-pip-${{ runner.os }}-${{ runner.arch }}-${{ steps.pip.outputs.key }}
+
     - name: Python packages for site checks
       if: env.SHIP_GATE_PIP != ''
       shell: bash
@@ -159,6 +171,19 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: bash "$GITHUB_ACTION_PATH/scripts/run-checks.sh" $SHIP_GATE_CHECKS_POSTBUILD
+
+    # The Playwright browser download is the slowest install; cache it per Playwright version.
+    - name: Playwright version
+      id: pw
+      if: steps.afterbuild.outcome == 'success'
+      shell: bash
+      run: echo "version=$(node -p "require(process.argv[1]).packages['node_modules/playwright-core']?.version ?? ''" "$SHIP_GATE_DIR/package-lock.json")" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v4
+      if: steps.afterbuild.outcome == 'success' && steps.pw.outputs.version != ''
+      with:
+        path: ~/.cache/ms-playwright
+        key: ship-gate-playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
 
     - name: Install Ship Gate test tools
       id: tools

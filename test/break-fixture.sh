@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Breaks the fixture site one way, so self-test.yml can prove the gate turns red for it.
 #   break-fixture.sh VARIANT   (run from the repo root)
+# Restores the committed fixture first, so one job can run several variants in turn.
 set -euo pipefail
 cd "$(dirname "$0")/fixture-site"
+git checkout -q -- .
+git clean -ffdxq .
+if [ -n "${SHIP_GATE_DIR:-}" ]; then rm -rf "$SHIP_GATE_DIR"; fi
 index=src/pages/index.astro
 add() { sed -i "s#<h2>What this is</h2>#<h2>What this is</h2>$1#" "$index"; }
 case "$1" in

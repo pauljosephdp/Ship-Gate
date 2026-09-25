@@ -30,6 +30,7 @@ jobs:
     outputs:
       fixtures: ${{ steps.scope.outputs.fixtures }}
       proven: ${{ steps.scope.outputs.proven }}
+      release: ${{ steps.release.outputs.needed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,6 +82,27 @@ jobs:
           fi
           echo "fixtures=$run" >> "$GITHUB_OUTPUT"
           echo "proven=$proven" >> "$GITHUB_OUTPUT"
+      # The release job starts a runner only when CHANGELOG.md names a version that
+      # has no GitHub release yet. If the check itself cannot tell, the release job
+      # runs and reports why.
+      - name: Decide whether the release job runs
+        id: release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          needed=true
+          if out="$(DRY_RUN=1 bash scripts/release.sh)"; then
+            version="$(sed -n 's/^version=//p' <<<"$out" | head -1)"
+            if [ -z "$version" ]; then
+              needed=false; echo "$out"
+            elif gh release view "$version" >/dev/null 2>&1; then
+              needed=false; echo "$version is already released: release job skipped."
+            else
+              echo "$version has no release yet: the release job publishes it."
+            fi
+          fi
+          echo "needed=$needed" >> "$GITHUB_OUTPUT"
 
   # The whole action, end to end, against a tiny conforming site, then against
   # copies broken one way each (test/break-fixture.sh). The conforming run must pass;
@@ -241,7 +263,8 @@ jobs:
   # Every push to main that passes every check above publishes the version named by
   # the newest CHANGELOG.md heading, once. Sites pin these tags, so a release never
   # tags a red commit. A manual run on main re-runs every check, then releases.
-  # Pull requests and other branches never release. The fixture jobs count as passed
+  # Pull requests and other branches never release, and neither does a push whose
+  # newest CHANGELOG.md version is already released. The fixture jobs count as passed
   # when self-test proved this exact tree passed them on its pull request.
   release:
     name: release
@@ -251,6 +274,7 @@ jobs:
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && github.ref == 'refs/heads/main'
       && needs.self-test.result == 'success'
+      && needs.self-test.outputs.release == 'true'
       && (needs.fixture.result == 'success'
           || (needs.fixture.result == 'skipped' && needs.self-test.outputs.proven == 'true'))
     runs-on: ubuntu-latest

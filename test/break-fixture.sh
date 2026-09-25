@@ -2,11 +2,15 @@
 # Breaks the fixture site one way, so self-test.yml can prove the gate turns red for it.
 #   break-fixture.sh VARIANT   (run from the repo root)
 # Restores the committed fixture first, so one job can run several variants in turn.
+# The site's and the test tools' node_modules survive: the lockfiles never change
+# between variants, and the action reuses them in fixture mode instead of reinstalling.
 set -euo pipefail
 cd "$(dirname "$0")/fixture-site"
 git checkout -q -- .
-git clean -ffdxq .
-if [ -n "${SHIP_GATE_DIR:-}" ]; then rm -rf "$SHIP_GATE_DIR"; fi
+git clean -ffdxq -e node_modules .
+if [ -n "${SHIP_GATE_DIR:-}" ] && [ -d "$SHIP_GATE_DIR" ]; then
+  find "$SHIP_GATE_DIR" -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +
+fi
 index=src/pages/index.astro
 add() { sed -i "s#<h2>What this is</h2>#<h2>What this is</h2>$1#" "$index"; }
 case "$1" in

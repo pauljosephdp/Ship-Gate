@@ -1,16 +1,25 @@
 version: 2
+# Every Dependabot PR runs Ship Gate's full fixture suite, so:
+# - updates come grouped, one PR per ecosystem, never one per action or directory;
+# - open PRs are not rebased each time main moves (that re-ran the suite every
+#   time). Comment "@dependabot rebase" on one that conflicts.
 updates:
   # Workflows, plus the actions used inside the two composite actions.
   - package-ecosystem: github-actions
     directories: ["/", "/post-deploy", "/.github/workflows"]
     schedule:
       interval: monthly
+    rebase-strategy: disabled
+    groups:
+      actions:
+        patterns: ["*"]
   # Ship Gate's own test tooling (Playwright, axe, Lighthouse CI) and the fixture site.
   # A bump here is a Ship Gate release: the fixture jobs prove it before merge.
   - package-ecosystem: npm
     directories: ["/tools", "/test/fixture-site"]
     schedule:
       interval: monthly
+    rebase-strategy: disabled
     groups:
       tooling:
         patterns: ["*"]

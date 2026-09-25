@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.0.3 — 2026-09-25
+
+Ship Gate's own CI spends fewer Actions minutes again. No site needs to change
+anything; a site calling the action installs and checks exactly as before.
+
+**Ship Gate's own CI**
+- Within a fixture job only the first variant installs. Later variants reuse
+  the fixture's and the test tools' `node_modules` and skip the npm and
+  Playwright cache restores. This is honoured only when the action runs from
+  this repo's own checkout.
+- The `release` job starts a runner only when `CHANGELOG.md` names a version
+  that has no GitHub release yet.
+- Dependabot groups each ecosystem's updates into one PR and no longer rebases
+  open PRs whenever `main` moves.
+- Pull requests are opened as drafts and marked ready once, so the fixture jobs
+  run once per finished change.
+
 ## v3.0.2 — 2026-09-25
 
 The post-deploy check could fail on a healthy deploy and pass on a bad one. No

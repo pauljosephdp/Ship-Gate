@@ -36,6 +36,8 @@ export const RULES = {
   'faq-visible':        { category: 'AEO', level: 'error', title: 'FAQ markup matches questions visible on the page' },
   breadcrumbs:          { category: 'AEO', level: 'warn',  title: 'Nested pages carry BreadcrumbList markup' },
   'ai-search-crawlers': { category: 'GEO', level: 'error', title: 'AI search and user-fetch crawlers are not blocked' },
+  'ai-training':        { category: 'GEO', level: 'error', where: 'both', title: 'AI training follows the site\'s policy (blocked unless discovery.aiTraining is "allow")' },
+  'ai-uses-allowed':    { category: 'GEO', level: 'error', where: 'both', title: 'Content-Signal keeps search and AI input enabled' },
   'ai-crawler-rules':   { category: 'GEO', level: 'warn',  title: 'robots.txt states an explicit policy for AI crawlers' },
   'content-signals':    { category: 'GEO', level: 'warn',  title: 'robots.txt declares Content-Signal preferences' },
   'content-signals-format': { category: 'GEO', level: 'error', title: 'Content-Signal lines follow contentsignals.org' },
@@ -160,6 +162,30 @@ export function parseContentSignal(value) {
   }
   if (!Object.keys(entries).length && !problems.length) problems.push('is empty');
   return { entries, problems };
+}
+
+// The default AI policy: model training off, every other use on. discovery.aiTraining
+// "allow" flips training on. Returns [{ rule, msg }] for ai-training and ai-uses-allowed,
+// for the build scan and the post-deploy check alike.
+export const AI_TRAINING_MODES = ['block', 'allow'];
+export function trainingPolicy(robots, mode = 'block') {
+  const out = [];
+  const blocked = AI_TRAINING_TOKENS.filter((t) => !robotsAllows(robots, t, '/'));
+  if (mode === 'block') {
+    const open = AI_TRAINING_TOKENS.filter((t) => !blocked.includes(t));
+    if (open.length) out.push({ rule: 'ai-training', msg: `lets ${open.join(', ')} train on the site. AI training is off by default: add a group with ${open.map((t) => `"User-agent: ${t}"`).join(', ')} and "Disallow: /". Set discovery.aiTraining to "allow" to opt in to training instead.` });
+  } else if (blocked.length) {
+    out.push({ rule: 'ai-training', msg: `blocks ${blocked.join(', ')}, but discovery.aiTraining is "allow". Remove those Disallow lines, or set aiTraining to "block".` });
+  }
+  const want = mode === 'block' ? 'no' : 'yes';
+  for (const f of robots.fields.filter((x) => x.field === 'content-signal')) {
+    const { entries } = parseContentSignal(f.value);
+    if (entries['ai-train'] && entries['ai-train'] !== want)
+      out.push({ rule: 'ai-training', msg: `line ${f.line}: Content-Signal ai-train=${entries['ai-train']}, but the site's policy is ai-train=${want} (discovery.aiTraining "${mode}").` });
+    for (const k of ['search', 'ai-input']) if (entries[k] === 'no')
+      out.push({ rule: 'ai-uses-allowed', msg: `line ${f.line}: Content-Signal ${k}=no. Only training is off by default; search and AI input stay on. Use ${k}=yes.` });
+  }
+  return out;
 }
 
 // ── Link header (RFC 8288) ──

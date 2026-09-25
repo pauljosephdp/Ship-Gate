@@ -14,6 +14,7 @@ case "$1" in
   two-h1) add '<h1>A second top-level heading</h1>' ;;
   blocks-ai-search) printf '\nUser-agent: PerplexityBot\nDisallow: /\n' >> public/robots.txt ;;
   robots-no-agents) printf 'Sitemap: https://example.com/sitemap.xml\n' > public/robots.txt ;;
+  allows-training) sed -i '/^User-agent: GPTBot$/,/^Disallow: \/$/d' public/robots.txt ;;
   bad-jsonld) add '<script type="application/ld+json" set:html="{not json" />' ;;
   rtl-no-dir) sed -i 's# dir={dir}##' src/layouts/Base.astro ;;
   google-font) add '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">' ;;

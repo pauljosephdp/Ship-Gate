@@ -15,7 +15,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, appen
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { staticRoot, indexablePages, escapeRe } from './site-files.mjs';
-import { RULES as DISCOVERY_RULES, LEVELS as DISCOVERY_LEVELS, SEARCH_CRAWLERS, CRAWLER_TOKEN } from './discovery.mjs';
+import { RULES as DISCOVERY_RULES, LEVELS as DISCOVERY_LEVELS, SEARCH_CRAWLERS, CRAWLER_TOKEN, AI_TRAINING_MODES } from './discovery.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const [modeArg = 'verify', configPath = 'ship-gate.config.json'] = process.argv.slice(2);
@@ -178,7 +178,10 @@ for (const [i, o] of (Array.isArray(dOverrides) ? dOverrides : []).entries()) {
   discoveryLevels[o.rule] = o.level;
 }
 const discovery = cfg.discovery ?? {};
-for (const k of Object.keys(discovery)) if (!['sitemap', 'ignoreLinks', 'searchCrawlers'].includes(k)) err(`discovery.${k} is not a setting. Use sitemap, ignoreLinks, searchCrawlers.`);
+for (const k of Object.keys(discovery)) if (!['sitemap', 'ignoreLinks', 'searchCrawlers', 'aiTraining'].includes(k)) err(`discovery.${k} is not a setting. Use sitemap, ignoreLinks, searchCrawlers, aiTraining.`);
+// AI training is off by default; a site opts in with "allow". Every other crawler is always allowed.
+const aiTraining = discovery.aiTraining ?? 'block';
+if (!AI_TRAINING_MODES.includes(aiTraining)) err(`discovery.aiTraining must be ${AI_TRAINING_MODES.map((m) => `"${m}"`).join(' or ')} (default "block").`);
 if (discovery.sitemap !== undefined && !(typeof discovery.sitemap === 'string' && /^\/\S+\.xml$/.test(discovery.sitemap)))
   err('discovery.sitemap must be the sitemap\'s path, e.g. "/sitemap-index.xml".');
 if (discovery.ignoreLinks !== undefined && !isPathList(discovery.ignoreLinks))
@@ -191,6 +194,7 @@ if (mode === 'post-deploy') {
   exportEnv('SHIP_GATE_POLICIES', policies.join(' '));
   exportEnv('SHIP_GATE_DISCOVERY_LEVELS', JSON.stringify(discoveryLevels));
   exportEnv('SHIP_GATE_SEARCH_CRAWLERS', searchCrawlers.join(' '));
+  exportEnv('SHIP_GATE_AI_TRAINING', aiTraining);
   console.log('Post-deploy config loaded.');
   process.exit(0);
 }
@@ -462,7 +466,7 @@ if (mode === 'after-build') {
     keyboard,
     consentEssentialCookies,
     trackerHosts: TRACKER_HOSTS,
-    discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [], searchCrawlers },
+    discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [], searchCrawlers, aiTraining },
   }, null, 2));
   console.log(`Ship Gate after build: ${all.length} indexable page(s) in ${root}; Lighthouse ${lhUrls.length} URL(s) × ${runs} run(s).`);
   process.exit(0);

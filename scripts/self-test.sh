@@ -388,7 +388,7 @@ discovered() {
   dpage /index.html "Home"; dpage /about/index.html "About"
   inject dist/client/index.html '</head>' "$ORG"
   echo png > dist/client/og.png
-  printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt
+  printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt
   printf '/\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n' > dist/client/_headers
   sitemap / /about/
   printf '# Example\n\n> The example site.\n\n- [About](/about/)\n' > dist/client/llms.txt
@@ -412,12 +412,21 @@ disco_case "robots.txt without Sitemap"          "no \"Sitemap:\" line"         
 disco_case "robots.txt Sitemap off-site"         "is not an absolute URL on"      "printf 'User-agent: *\nAllow: /\nSitemap: https://cdn.example.net/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "robots.txt blocks everything"        "blocks Googlebot"               "printf 'User-agent: *\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "robots.txt blocks one page for Bing" "blocks Bingbot"                 "printf 'User-agent: bingbot\nDisallow: /about/\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "longest match: Allow beats Disallow" pass                             "printf 'User-agent: *\nContent-Signal: search=yes\nDisallow: /\nAllow: /$\nAllow: /about/\n\nUser-agent: GPTBot\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "longest match: Allow beats Disallow" pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nDisallow: /\nAllow: /$\nAllow: /about/\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "AI search crawler blocked"           "blocks OAI-SearchBot"           "printf 'User-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "AI user-fetch crawler blocked"       "blocks Claude-User"             "printf 'User-agent: Claude-User\nUser-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "only training crawlers blocked"      pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "robots.txt without User-agent"        "has no \"User-agent:\" line"   "printf 'Content-Signal: search=yes\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "no AI crawler group (warn)"          "warn:names no AI crawler"       "printf 'User-agent: *\nContent-Signal: search=yes\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "AI user-fetch crawler blocked"       "blocks Claude-User"             "printf 'User-agent: Claude-User\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "only training crawlers blocked"      pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "one training token unblocked"        "lets Bytespider train"          "sed -i '/^User-agent: Bytespider\$/d' dist/client/robots.txt"
+disco_case "no training block at all"            "AI training is off by default"  "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: OAI-SearchBot\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "aiTraining allow, training allowed"  pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\n\nUser-agent: GPTBot\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt" '"discovery":{"aiTraining":"allow"}'
+disco_case "aiTraining allow, GPTBot blocked"    "but discovery.aiTraining is \"allow\"" ":" '"discovery":{"aiTraining":"allow"}'
+disco_case "ai-train=yes under the default"      "ai-train=yes, but the site's policy is ai-train=no" "sed -i 's#ai-train=no#ai-train=yes#' dist/client/robots.txt"
+disco_case "search=no"                           "Content-Signal search=no"       "sed -i 's#search=yes#search=no#' dist/client/robots.txt"
+disco_case "ai-input=no"                         "Content-Signal ai-input=no"     "sed -i 's#ai-input=yes#ai-input=no#' dist/client/robots.txt"
+disco_case "signal missing ai-input (warn)"      "warn:does not declare ai-input" "sed -i 's#ai-input=yes, ##' dist/client/robots.txt"
+expect_prepare "discovery: bad aiTraining"       "discovery.aiTraining must be"   "cfg '\"discovery\":{\"aiTraining\":\"maybe\"}'"
+disco_case "robots.txt without User-agent"        "has no \"User-agent:\" line"   "printf 'Content-Signal: search=yes, ai-input=yes, ai-train=no\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "no AI crawler group (warn)"          "warn:names no AI crawler"       "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt" '"discovery":{"aiTraining":"allow"}'
 disco_case "no Content-Signal (warn)"            "warn:no \"Content-Signal:\" line" "sed -i '/Content-Signal/d' dist/client/robots.txt"
 disco_case "Content-Signal unknown key"          "\"ai_train\" is not"            "sed -i 's#ai-train=no#ai_train=no#' dist/client/robots.txt"
 disco_case "Content-Signal bad value"            "\"ai-train=maybe\" is not"      "sed -i 's#ai-train=no#ai-train=maybe#' dist/client/robots.txt"
@@ -472,7 +481,7 @@ disco_case "nosnippet (warn)"                    "warn:stops Google quoting"    
 disco_case "max-image-preview:none (warn)"       "warn:hides the page"            "inject dist/client/about/index.html '</head>' '<meta name=\"googlebot\" content=\"max-image-preview:none\">'"
 disco_case "no llms.txt (warn)"                  "warn:llms.txt: not in the build" "rm dist/client/llms.txt"
 disco_case "llms.txt malformed"                  "must start with"                "printf 'Example site\n- [About](/about/)\n' > dist/client/llms.txt"
-ROBOTS_BAIDU="printf 'User-agent: Baiduspider\nDisallow: /\n\nUser-agent: *\nContent-Signal: search=yes\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+ROBOTS_BAIDU="printf 'User-agent: Baiduspider\nDisallow: /\n\nUser-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "extra crawler blocked when listed"   "blocks Baiduspider"             "$ROBOTS_BAIDU" '"discovery":{"searchCrawlers":["Baiduspider"]}'
 disco_case "extra crawler not listed: unchecked" pass                             "$ROBOTS_BAIDU"
 disco_case "302 redirect (warn)"                 "warn:a temporary move"          "printf '/old /about/ 302\n' > dist/client/_redirects"
@@ -494,13 +503,13 @@ disco_case "warning raised to error"             "llms.txt: not in the build"   
 disco_case "rule turned off (warns it is lowered)" "warn:lowered to off"          "rm dist/client/llms.txt" "\"discoveryOverrides\":[{\"rule\":\"llms-txt\",\"level\":\"off\",\"reason\":\"llms.txt waits on the content audit\",\"restoreBy\":\"$FUTURE\"}]"
 
 echo "Post-deploy live checks (check-live.mjs)"
-# live_case NAME EXPECT(pass|warn:substring|substring) OVERRIDES-JSON [LEVELS-JSON]
+# live_case NAME EXPECT(pass|warn:substring|substring) OVERRIDES-JSON [LEVELS-JSON] [AI-TRAINING]
 # A stand-in production: a conforming site unless OVERRIDES replaces a path's
 # { status, type, body, link } (the "md" key answers Accept: text/markdown on /).
 LIVE_SERVER='
 const http = require("http");
 const good = {
-  "/robots.txt": { type: "text/plain", body: "User-agent: *\nContent-Signal: search=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /\n\nSitemap: SITE/sitemap.xml\n" },
+  "/robots.txt": { type: "text/plain", body: "User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: SITE/sitemap.xml\n" },
   "/sitemap.xml": { type: "application/xml", body: "<urlset><url><loc>SITE/</loc></url></urlset>" },
   "/": { type: "text/html; charset=utf-8", body: "<!doctype html><h1>Home</h1>", link: "</llms.txt>; rel=\"describedby\"" },
   md: { type: "text/markdown; charset=utf-8", body: "# Home\n" },
@@ -521,7 +530,7 @@ live_case() {
   local name=$1 expect=$2 port pid out code
   exec 3< <(OVERRIDES="$3" node -e "$LIVE_SERVER")
   pid=$!; read -r port <&3
-  out="$(SHIP_GATE_SITE_URL="http://127.0.0.1:$port" SHIP_GATE_SMOKE_PATHS="/ /robots.txt" SHIP_GATE_DISCOVERY_LEVELS="${4:-}" \
+  out="$(SHIP_GATE_SITE_URL="http://127.0.0.1:$port" SHIP_GATE_SMOKE_PATHS="/ /robots.txt" SHIP_GATE_DISCOVERY_LEVELS="${4:-}" SHIP_GATE_AI_TRAINING="${5:-}" \
     node "$HERE/check-live.mjs" 2>&1)"; code=$?
   kill "$pid" 2>/dev/null; exec 3<&-
   if [ "$expect" = pass ] && grep -q '::warning::' <<<"$out"; then bad "$name" "expected a clean pass, got warnings" "$out"
@@ -538,6 +547,9 @@ live_case "no Link header (warn)"                "warn:sends no Link header"    
 live_case "no Markdown negotiation (warn)"       "warn:got \"text/html\""       '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}'
 live_case "Markdown turned off by override"      pass                           '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}' '{"markdown-negotiation":"off"}'
 live_case "Markdown raised to error"             "got \"text/html\""            '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}' '{"markdown-negotiation":"error"}'
+live_case "production lets GPTBot train"         "lets GPTBot train"            '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: SITE/sitemap.xml\n"}}'
+live_case "production search=no"                 "Content-Signal search=no"     '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=no, ai-input=yes, ai-train=yes\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' allow
+live_case "production allows training (allow)"   pass                           '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\n\nUser-agent: GPTBot\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' allow
 d="$(baseline)"; cd "$d" && cfg '"discoveryOverrides":[{"rule":"markdown-negotiation","level":"error"}]' && : > "$d/env"
 out="$(GITHUB_ENV="$d/env" node "$PREPARE" post-deploy 2>&1)"; code=$?
 check "post-deploy exports discovery levels" pass "$code" "$out"

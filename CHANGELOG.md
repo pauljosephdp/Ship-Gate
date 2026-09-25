@@ -1,5 +1,47 @@
 # Changelog
 
+## v3.0.0 — 2026-09-25
+
+AI training is off by default; every other crawler and use stays on. This is a
+major release: a site whose `robots.txt` doesn't block the training crawlers
+fails until it does, or until it opts in to training.
+
+**To stay green**, add to `public/robots.txt`:
+
+```
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: CCBot
+User-agent: meta-externalagent
+User-agent: Bytespider
+Disallow: /
+```
+
+and, in the `User-agent: *` group, `Content-Signal: search=yes, ai-input=yes,
+ai-train=no`. Or, to allow training, set `"discovery": { "aiTraining": "allow" }`.
+
+**Can fail**
+- `ai-training` (error, build and post-deploy): with the default
+  `aiTraining: "block"`, every training token must be disallowed at `/` and a
+  `Content-Signal` must not say `ai-train=yes`. With `"allow"`, none may be
+  blocked and the signal must not say `ai-train=no`. Replaces the old
+  "AI training crawlers blocked" note.
+- `ai-uses-allowed` (error, build and post-deploy): a `Content-Signal` with
+  `search=no` or `ai-input=no`.
+
+**Warn**
+- `content-signals` also warns when a signal leaves out `search`, `ai-input`
+  or `ai-train`.
+
+**Config**: new `discovery.aiTraining` (`"block"` default, or `"allow"`), in
+the caller template too. Post-deploy receives it as `SHIP_GATE_AI_TRAINING`.
+
+**Self-test**: new cases for both modes, each training token, the signal and
+production robots.txt. New fixture variant `allows-training` must fail the
+discovery scan.
+
 ## v2.3.0 — 2026-09-25
 
 Fixes from a review of the gate. Two rules now catch what they always claimed

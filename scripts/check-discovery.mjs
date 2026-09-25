@@ -13,7 +13,7 @@ import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, appendFil
 import { join } from 'node:path';
 import { htmlFiles, pageKind, attr, metaContent, assetsIgnore, parseRedirects, parseHeaders, compilePattern } from './site-files.mjs';
 import {
-  RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, RETIRED_TOKENS, parseContentSignal,
+  RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, trainingPolicy, CONTENT_SIGNALS, RETIRED_TOKENS, parseContentSignal,
   AGENT_LINK_RELS, parseLinkHeader, visibleText, normalise, ogContent, robotsDirectives,
   parseRobots, robotsAllows, parseSitemap, W3C_DATE, jsonLd, typesOf, missingProps, isEntity, isArticle, RTL_LANGS,
 } from './discovery.mjs';
@@ -70,10 +70,9 @@ for (const p of pages) {
 }
 for (const bot of AI_SEARCH_CRAWLERS) {
   const blocked = pages.filter((p) => !robotsAllows(robots, bot, p.path)).map((p) => p.path);
-  if (blocked.length) add('ai-search-crawlers', 'robots.txt', `blocks ${bot} from ${blocked.length} indexable page(s) (${blocked.slice(0, 3).join(', ')}${blocked.length > 3 ? ', …' : ''}). It fetches pages to answer and cite; blocking it removes the site from that product's answers. To opt out of model training only, block the training tokens (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot) instead.`);
+  if (blocked.length) add('ai-search-crawlers', 'robots.txt', `blocks ${bot} from ${blocked.length} indexable page(s) (${blocked.slice(0, 3).join(', ')}${blocked.length > 3 ? ', …' : ''}). It fetches pages to answer and cite; blocking it removes the site from that product's answers. To opt out of model training only, block the training tokens (${AI_TRAINING_TOKENS.join(', ')}) instead.`);
 }
-const training = AI_TRAINING_TOKENS.filter((t) => !robotsAllows(robots, t, '/'));
-notes.push(`AI training crawlers blocked at "/": ${training.length ? training.join(', ') : 'none'}.`);
+if (robotsText !== null) for (const f of trainingPolicy(robots, cfg.aiTraining ?? 'block')) add(f.rule, 'robots.txt', f.msg);
 if (robotsText !== null && robots.groups.length) {
   const named = new Set(robots.groups.flatMap((g) => g.agents));
   const explicit = AI_AGENT_TOKENS.filter((t) => named.has(t.toLowerCase()));
@@ -84,7 +83,10 @@ const signals = robots.fields.filter((f) => f.field === 'content-signal');
 if (robotsText !== null && signals.length === 0) add('content-signals', 'robots.txt', 'no "Content-Signal:" line. Declare how content may be used, inside the "User-agent: *" group, e.g. "Content-Signal: search=yes, ai-input=yes, ai-train=no" (contentsignals.org).');
 for (const s of signals) {
   if (s.group === null) add('content-signals-format', 'robots.txt', `line ${s.line}: Content-Signal before any User-agent line; it applies to the group it sits in.`);
-  for (const p of parseContentSignal(s.value).problems) add('content-signals-format', 'robots.txt', `line ${s.line}: Content-Signal ${p}.`);
+  const parsed = parseContentSignal(s.value);
+  for (const p of parsed.problems) add('content-signals-format', 'robots.txt', `line ${s.line}: Content-Signal ${p}.`);
+  const missing = CONTENT_SIGNALS.filter((k) => !(k in parsed.entries));
+  if (missing.length && !parsed.problems.length) add('content-signals', 'robots.txt', `line ${s.line}: Content-Signal does not declare ${missing.join(', ')}. State all three, e.g. "search=yes, ai-input=yes, ai-train=no".`);
   notes.push(`Content-Signal: ${s.value}`);
 }
 

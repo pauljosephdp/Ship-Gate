@@ -11,7 +11,7 @@
   "structure": { "titleMax": 75 },
   "copyAllowlist": [],
   "keyboard": "warn",
-  "discovery": { "ignoreLinks": [], "searchCrawlers": [] },
+  "discovery": { "ignoreLinks": [], "searchCrawlers": [], "aiTraining": "block" },
   "checks": {
     "preBuild": [],
     "postBuild": [],

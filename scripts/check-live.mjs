@@ -8,6 +8,8 @@
 // robots-txt: 200, text/plain, at least one User-agent group, and no Googlebot,
 //   Bingbot, crawler in discovery.searchCrawlers (SHIP_GATE_SEARCH_CRAWLERS) or AI
 //   search crawler blocked from a smoke path (ai-search-crawlers).
+// ai-training, ai-uses-allowed: training off unless SHIP_GATE_AI_TRAINING is "allow";
+//   search and AI input never signalled off.
 // sitemap-live: every on-site Sitemap in robots.txt answers 200 with a sitemap.
 // link-headers: the home page sends a Link header with an agent-discovery rel.
 // markdown-negotiation: Accept: text/markdown gets Markdown; browsers still get HTML.
@@ -15,7 +17,7 @@
 // No dependencies: Node built-ins only.
 
 import {
-  RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AGENT_LINK_RELS,
+  RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AGENT_LINK_RELS, trainingPolicy,
   parseRobots, robotsAllows, parseSitemap, parseLinkHeader,
 } from './discovery.mjs';
 
@@ -48,8 +50,7 @@ else {
     if (blocked.length) add(AI_SEARCH_CRAWLERS.includes(bot) ? 'ai-search-crawlers' : 'robots-blocks-page',
       `Production robots.txt blocks ${bot} from ${blocked.join(', ')}. Check the CDN's managed robots.txt and AI-crawler settings.`);
   }
-  const training = AI_TRAINING_TOKENS.filter((t) => !robotsAllows(robots, t, '/'));
-  console.log(`AI training crawlers blocked in production: ${training.length ? training.join(', ') : 'none'}.`);
+  for (const f of trainingPolicy(robots, process.env.SHIP_GATE_AI_TRAINING || 'block')) add(f.rule, `Production robots.txt ${f.msg} Check the CDN's managed robots.txt.`);
 }
 
 // ── Sitemaps named in robots.txt ──

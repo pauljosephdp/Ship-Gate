@@ -190,8 +190,10 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content) |
 | AEO | `breadcrumbs` | warn | a page two or more levels deep has no BreadcrumbList |
 | GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, Applebot, DuckAssistBot |
+| GEO | `ai-training` | error | an AI training token (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent, Bytespider) can fetch `/`, or a `Content-Signal` says `ai-train=yes`; with `"aiTraining": "allow"`, the reverse. Build and after deploy |
+| GEO | `ai-uses-allowed` | error | a `Content-Signal` sets `search=no` or `ai-input=no`. Build and after deploy |
 | GEO | `ai-crawler-rules` | warn | no `User-agent` group names an AI crawler (GPTBot, OAI-SearchBot, ClaudeBot, Claude-SearchBot, Google-Extended, …) |
-| GEO | `content-signals` | warn | `robots.txt` has no `Content-Signal` line ([contentsignals.org](https://contentsignals.org)) |
+| GEO | `content-signals` | warn | `robots.txt` has no `Content-Signal` line, or one that doesn't declare all of `search`, `ai-input` and `ai-train` ([contentsignals.org](https://contentsignals.org)) |
 | GEO | `content-signals-format` | error | a `Content-Signal` entry isn't `search`, `ai-input` or `ai-train` `=yes`/`=no`, or sits before any `User-agent` line |
 | GEO | `link-headers` | warn | `_headers` gives `/` no `Link` header with rel `api-catalog`, `service-desc`, `service-doc` or `describedby` (RFC 8288, RFC 9727), a value doesn't parse, or an on-site target isn't built; after deploy, the real header |
 | GEO | `markdown-negotiation` | warn | after deploy: `Accept: text/markdown` on `/` doesn't return `text/markdown`, or a browser request no longer gets HTML |
@@ -217,12 +219,23 @@ Recipe and VideoObject get Google's required properties. Where Google defines
 required properties, these match them; otherwise they are the minimum that
 identifies the thing.
 
-**Training is a separate choice.** Blocking model-training tokens (GPTBot,
-ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent,
-Bytespider) never fails the gate; the scan only reports which ones are blocked.
-Google-Extended does not affect Google Search or AI Overviews. Blocking a
-*search* crawler such as OAI-SearchBot or PerplexityBot removes the site from
-that product's answers, so it fails.
+**AI training is off by default; everything else is on.** `ai-training` fails
+unless `robots.txt` disallows `/` for every model-training token: GPTBot,
+ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent and
+Bytespider. Every other crawler stays allowed: blocking a search crawler fails
+`robots-blocks-page`, and blocking an AI search or user-fetch crawler such as
+OAI-SearchBot or PerplexityBot fails `ai-search-crawlers`, because it removes the
+site from that product's answers. `ai-uses-allowed` fails a `Content-Signal` that
+turns off `search` or `ai-input`. Google-Extended controls Gemini training and
+grounding only; blocking it does not affect Google Search or AI Overviews.
+
+A site that wants its content used for training says so once, with no expiry
+date; `ai-training` then fails if any training token is blocked or the signal
+says `ai-train=no`:
+
+```json
+"discovery": { "aiTraining": "allow" }
+```
 
 **Other search engines.** `robots-blocks-page` always checks Googlebot and
 Bingbot. A site that serves China, Korea or Russia adds their crawlers, in the
@@ -279,6 +292,10 @@ Allow: /
 User-agent: GPTBot
 User-agent: ClaudeBot
 User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: CCBot
+User-agent: meta-externalagent
+User-agent: Bytespider
 Disallow: /
 
 Sitemap: https://example.com/sitemap-index.xml
@@ -294,8 +311,10 @@ With `@astrojs/sitemap`, add `/sitemap.xml /sitemap-index.xml 301` to
 
 After deploy, the post-deploy action checks what production **actually
 serves**, at the site's discovery levels: `robots.txt` is 200, `text/plain`,
-has a `User-agent` group and doesn't block Googlebot, Bingbot, a
-`discovery.searchCrawlers` crawler or an AI search crawler from a smoke path;
+has a `User-agent` group, blocks AI training (per `discovery.aiTraining`), keeps
+search and AI input on in its `Content-Signal`, and doesn't block Googlebot,
+Bingbot, a `discovery.searchCrawlers` crawler or an AI search crawler from a
+smoke path;
 every sitemap it names answers with XML; the home page sends its `Link` header;
 and `Accept: text/markdown` gets Markdown (Cloudflare's Markdown for Agents
 does this at the edge, so the build can't test it). A CDN's managed robots.txt,
@@ -428,6 +447,7 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `discoveryOverrides` | `[]` | Raise or lower a discovery rule; see Discovery scan |
 | `discovery.sitemap` | from `robots.txt`, else `/sitemap-index.xml` or `/sitemap.xml` | The sitemap's path |
 | `discovery.ignoreLinks` | `[]` | Path prefixes the Worker serves rather than the static build, e.g. `"/api/"`; the link check skips them |
+| `discovery.aiTraining` | `"block"` | `"block"`: AI training crawlers must be disallowed. `"allow"`: they must not be. See Discovery scan |
 | `discovery.searchCrawlers` | `[]` | Crawler tokens that must reach every indexable page besides Googlebot and Bingbot, e.g. `"Baiduspider"`, `"Yeti"` |
 | `python` | none | `{ "version": "3.11", "packages": ["fonttools"] }` for Python checks |
 | `turnstileEnv` | `PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | With `turnstile-forms`: env names that receive Cloudflare's always-pass test keys |
@@ -544,11 +564,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v2.3.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.0.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v2.3.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.0.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

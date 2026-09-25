@@ -544,11 +544,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v2.3.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v2.3.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v2.3.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v2.3.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -573,7 +573,12 @@ crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
 `dir="rtl"`, a Google Fonts stylesheet (`market-cn`), a link with its focus
 ring removed, a tracking cookie before consent. The conforming
 run, and one that shows a site file named after a tracking vendor, must pass;
-each broken run must fail on the check that owns the fault.
+each broken run must fail on the check that owns the fault (`test/expect-gate.sh`).
+Variants run five to a job, `fixture (1)` to `fixture (3)`, to save Actions
+minutes; a new variant goes in a free `vN` slot or a new group, and `self-test`
+fails until it has an expectation and a slot. Pull requests skip the fixture
+jobs while in draft and when they change only Markdown outside `test/`; pushes
+to `main` always run them.
 
 **README.md stays current.** `scripts/check-readme.sh` runs in `self-test` and
 fails when:

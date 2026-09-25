@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.3.1 — 2026-09-25
+
+Faster, cheaper runs. No site needs to change anything.
+
+**Fixed**
+- The Playwright browser download is cached per Playwright version, and Python
+  packages for site checks (`python.packages`) are cached too, so repeat runs
+  skip both downloads.
+
+**Ship Gate's own CI**
+- The 15 fixture variants run five to a job (`fixture (1)`–`fixture (3)`)
+  instead of one job each, and only after `self-test` passes.
+- Pull requests skip the fixture jobs while in draft and when they change only
+  Markdown outside `test/`. Pushes to `main` always run everything.
+
 ## v2.3.0 — 2026-09-25
 
 Fixes from a review of the gate. Two rules now catch what they always claimed

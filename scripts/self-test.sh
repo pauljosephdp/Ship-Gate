@@ -593,5 +593,15 @@ readme_case "script change with README"            pass                      "ec
 readme_case "test-only change needs no README"     pass                      "echo 'echo t' > scripts/self-test.sh && mkdir -p test && echo x > test/a" diff
 readme_case "CLAUDE.md and docs only change"      pass                      "echo x > CLAUDE.md && mkdir -p docs && echo y > docs/n.md" diff
 
+echo "Fixture variants (break-fixture.sh, expect-gate.sh, self-test.yml)"
+variants="$(sed -n 's/^  \([a-z0-9-]*\)) .*/\1/p' "$HERE/../test/break-fixture.sh")"
+for v in $variants; do
+  if ! grep -qE "^  ([a-z0-9|-]*\|)?$v(\|[a-z0-9|-]*)?\) " "$HERE/../test/expect-gate.sh"; then bad "$v has an expectation" "missing from test/expect-gate.sh" ""
+  elif ! grep -qE "v[0-9]+: ${v}[ ,}]" "$HERE/../.github/workflows/self-test.yml"; then bad "$v runs in a fixture job" "missing from .github/workflows/self-test.yml" ""
+  else ok "$v is expected and runs"; fi
+done
+[ -n "$variants" ] || bad "fixture variants found" "no cases read from test/break-fixture.sh" ""
+
+echo
 echo "Self-test: $pass passed, $failn failed."
 [ "$failn" -eq 0 ]

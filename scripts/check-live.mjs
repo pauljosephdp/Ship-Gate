@@ -8,8 +8,9 @@
 // robots-txt: 200, text/plain, at least one User-agent group, and no Googlebot,
 //   Bingbot, crawler in discovery.searchCrawlers (SHIP_GATE_SEARCH_CRAWLERS) or AI
 //   search crawler blocked from a smoke path (ai-search-crawlers).
-// ai-training, ai-uses-allowed: training off unless SHIP_GATE_AI_TRAINING is "allow";
-//   search and AI input never signalled off.
+// ai-training, ai-uses-allowed: training per SHIP_GATE_AI_TRAINING ("block" by default:
+//   training crawlers disallowed; "reserve": they may fetch, but the group governing each
+//   says Content-Signal ai-train=no; "allow"); search and AI input never signalled off.
 // sitemap-live: every on-site Sitemap in robots.txt answers 200 with a sitemap.
 // link-headers: the home page sends a Link header with an agent-discovery rel.
 // markdown-negotiation: Accept: text/markdown gets Markdown; browsers still get HTML.

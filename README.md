@@ -227,7 +227,7 @@ checks:
 | Policy | What it enforces |
 |---|---|
 | `posthog-server-only` | `posthog-node` only inside `src/lib/server`, `src/pages/api`, `src/actions` or `src/middleware`; EU host; the key is never `PUBLIC_` and never hard-coded; every event tagged with `__DEPLOY_ENV__`; no PostHog in the client bundle, in browser requests, or in production HTML |
-| `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot scripts go through Cloudflare Zaraz |
+| `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot tracking (`hs-scripts`, `hs-analytics`) go through Cloudflare Zaraz. HubSpot form embeds (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until HubSpot's forms API is available. They render their own form, so list only Turnstile forms in `formPages` |
 | `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys |
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
 

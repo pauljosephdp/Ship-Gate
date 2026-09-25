@@ -127,8 +127,8 @@ EXEMPT=posthog-key \
 expect_guard "hard-coded key is never exempt"     "Hard-coded PostHog key"    "echo \"const k = '${PH}abcdefghijklmnopqrstuvwxyz0123'\" > src/lib/server/key.ts"
 EXEMPT="posthog-client direct-tags" \
 expect_guard "client PostHog + GTM under exemption" pass                     "sed -i 's/\"dependencies\": {/\"dependencies\": { \"posthog-js\": \"1\",/' package.json && echo '<script src=\"https://www.googletagmanager.com/gtm.js?id=GTM-X\"></script>' > src/pages/gtm.astro"
-expect_guard "HubSpot form embed loaded directly" "Third-party tag"           "echo '<script src=\"https://js-eu1.hsforms.net/forms/embed/1.js\"></script>' > src/pages/f.astro"
-expect_guard "HubSpot embed with region variable" "Third-party tag"           "echo 'const s = \\\`https://js-\${region}.hsforms.net/forms/embed/1.js\\\`' > src/pages/f.ts"
+expect_guard "HubSpot form embed allowed"        pass                          "echo '<script src=\"https://js-eu1.hsforms.net/forms/embed/1.js\"></script>' > src/pages/f.astro"
+expect_guard "HubSpot embed, region variable"    pass                          "echo 'const s = \\\`https://js-\${region}.hsforms.net/forms/embed/1.js\\\`' > src/pages/f.ts"
 expect_guard "inline GTM container id"            "Third-party tag"           "echo \"export const gtm = 'GTM-M7WZHXT7';\" > src/pages/site.ts"
 expect_guard "public Lighthouse storage"          "public storage"            "wf lh.yml '          temporaryPublicStorage: true'"
 POLICIES="" \

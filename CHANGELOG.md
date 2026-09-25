@@ -12,6 +12,9 @@ discoverable.
 - New `policies` config. `posthog-server-only`, `tags-via-zaraz`,
   `turnstile-forms` and `workers-builds-only` are off by default; each turns on
   its guards, scans and browser checks.
+- `tags-via-zaraz` allows HubSpot form embeds (`js-*.hsforms.net`): they are
+  the portfolio's form standard until HubSpot's forms API is available. HubSpot
+  tracking (`hs-scripts`, `hs-analytics`) stays blocked.
 - To keep the v1.1 behaviour, a site sets `"policies": ["posthog-server-only",
   "tags-via-zaraz", "turnstile-forms", "workers-builds-only"]`.
 - Every site still gets the core guards: no committed env files, no workflow
@@ -107,8 +110,9 @@ the sites already enforce. See `docs/portfolio-ci-audit-2026-09-24.md`.
 - No workflow pushes to `main`. No exemption.
 - No Cloudflare API token or `wrangler` write command in a workflow.
 - No public Lighthouse report storage.
-- Microsoft Clarity, HubSpot tracking and HubSpot form embeds, and inline GTM
-  container ids, must go through Zaraz.
+- Microsoft Clarity, HubSpot tracking and inline GTM container ids must go
+  through Zaraz. HubSpot form embeds stay allowed: they are the portfolio's form
+  standard until HubSpot's forms API is available.
 - `guardExemptions`: any guard except a hard-coded key, a committed env file or
   a push to `main` can be exempted with a reason and a restore date. It warns
   on every run and fails again after the date.

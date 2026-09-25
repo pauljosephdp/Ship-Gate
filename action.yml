@@ -42,7 +42,7 @@ runs:
         echo "::error::No .nvmrc or .node-version in ${{ inputs.working-directory }} — pin Node 22.12.0 or later."
         exit 1
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v7
       with:
         node-version-file: ${{ steps.site.outputs.node-version-file }}
         cache: ${{ steps.site.outputs.reuse != 'true' && 'npm' || '' }}
@@ -64,7 +64,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: bash "$GITHUB_ACTION_PATH/scripts/guards.sh"
 
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       if: env.SHIP_GATE_PYTHON != ''
       with:
         python-version: ${{ env.SHIP_GATE_PYTHON }}
@@ -75,7 +75,7 @@ runs:
       shell: bash
       run: echo "key=$(python -c 'import sys; print(sys.version.split()[0])')-$(printf '%s' "$SHIP_GATE_PIP" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       if: env.SHIP_GATE_PIP != ''
       with:
         path: ~/.cache/pip
@@ -198,7 +198,7 @@ runs:
       shell: bash
       run: echo "version=$(node -p "require(process.argv[1]).packages['node_modules/playwright-core']?.version ?? ''" "$SHIP_GATE_DIR/package-lock.json")" >> "$GITHUB_OUTPUT"
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       if: steps.pw.outcome == 'success' && steps.pw.outputs.version != '' && steps.site.outputs.reuse != 'true'
       with:
         path: ~/.cache/ms-playwright
@@ -262,7 +262,7 @@ runs:
     - name: Upload reports
       if: always() && env.SHIP_GATE_DIR != ''
       continue-on-error: true
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ steps.reports.outputs.name }}
         path: ${{ env.SHIP_GATE_DIR }}/reports/

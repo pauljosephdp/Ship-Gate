@@ -32,10 +32,10 @@ jobs:
       proven: ${{ steps.scope.outputs.proven }}
       release: ${{ steps.release.outputs.needed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: README is current
@@ -124,7 +124,7 @@ jobs:
           - { group: browser, v1: conforming, v2: vendor-named-asset, v3: missing-alt, v4: wide-element, v5: csp-violation, v6: bad-redirect, v7: no-focus-ring, v8: tracker-cookie }
           - { group: scans, v1: two-h1, v2: direct-tag, v3: blocks-ai-search, v4: bad-jsonld, v5: robots-no-agents, v6: rtl-no-dir, v7: google-font, v8: allows-training }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Break the fixture (1)
         if: ${{ !cancelled() && matrix.v1 }}
         run: |
@@ -253,7 +253,7 @@ jobs:
           tree="$(git rev-parse 'HEAD^{tree}')"
           echo "$tree" > "$RUNNER_TEMP/fixtures-passed.txt"
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: steps.passed.outcome == 'success'
         with:
           name: fixtures-passed-${{ steps.passed.outputs.tree }}-${{ matrix.group }}
@@ -282,7 +282,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Publish the release named in CHANGELOG.md
         env:
           GH_TOKEN: ${{ github.token }}

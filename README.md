@@ -309,8 +309,11 @@ With `@astrojs/sitemap`, add `/sitemap.xml /sitemap-index.xml 301` to
   Link: </llms.txt>; rel="describedby"; type="text/markdown"
 ```
 
-After deploy, the post-deploy action checks what production **actually
-serves**, at the site's discovery levels: `robots.txt` is 200, `text/plain`,
+After deploy, the post-deploy action first waits (up to `wait-minutes`) until
+production's home page carries the merged commit in its `build-sha` meta tag,
+and fails if it never does. Every page it inspects is fetched in full before
+it is searched, so a match can't be lost to a closed pipe. It then checks what
+production **actually serves**, at the site's discovery levels: `robots.txt` is 200, `text/plain`,
 has a `User-agent` group, blocks AI training (per `discovery.aiTraining`), keeps
 search and AI input on in its `Content-Signal`, and doesn't block Googlebot,
 Bingbot, a `discovery.searchCrawlers` crawler or an AI search crawler from a
@@ -325,7 +328,9 @@ ordinary traffic refuses crawlers too, and AI platforms treat the site as
 unreachable. It warns when a page has neither `ETag` nor `Last-Modified`, which
 crawlers use to refetch only what changed. It never spoofs a crawler's user
 agent: a correctly configured WAF blocks spoofed bots, so that test would fail
-good sites.
+good sites. With `posthog-server-only` it fails when production's home page
+carries PostHog client code or a project key, and when that page can't be
+fetched at all.
 
 With a `crux-api-key` input (a Google API key with the Chrome UX Report API
 enabled, passed as a secret), it also reports **field Core Web Vitals** for

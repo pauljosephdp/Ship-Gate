@@ -17,6 +17,27 @@ anything; a site calling the action installs and checks exactly as before.
 - Pull requests are opened as drafts and marked ready once, so the fixture jobs
   run once per finished change.
 
+## v3.0.2 — 2026-09-25
+
+The post-deploy check could fail on a healthy deploy and pass on a bad one. No
+site needs to change anything; bump the pin.
+
+**Fixed**
+- **Wait for production to serve this commit** never succeeded once production
+  did serve it. It piped `curl` into `grep -q` under the runner's `pipefail`:
+  `grep` exits on the first match, `curl` then fails writing the rest of the
+  page (exit 23), and the pipeline reads the match as a miss. Every post-deploy
+  run on a site with a large home page timed out and skipped every later step.
+  Found on Qualified Deals, whose home page is about 80 KB.
+- **Production HTML is PostHog-free** had the same pipeline the other way round:
+  a match could read as a pass. It now also fails when the page can't be
+  fetched, rather than reporting it PostHog-free.
+- Both steps now fetch the page into a variable and search that. `self-test`
+  fails if either action pipes `curl` into `grep -q` again.
+- The caller template's `post-deploy.yml` comment no longer names a `wrangler`
+  write command, which the `workers-builds-only` guard flagged in every site
+  that copied it.
+
 ## v3.0.1 — 2026-09-25
 
 Ship Gate's own CI costs about a quarter of the Actions minutes it did. No site

@@ -556,6 +556,13 @@ check "post-deploy exports discovery levels" pass "$code" "$out"
 if grep -q '^SHIP_GATE_DISCOVERY_LEVELS=.*"markdown-negotiation":"error"' "$d/env"; then ok "post-deploy levels carry the override"
 else bad "post-deploy levels carry the override" "SHIP_GATE_DISCOVERY_LEVELS missing or wrong" "$(cat "$d/env")"; fi
 cd / && rm -rf "$d"
+# `curl | grep -q` under the runner's pipefail reads a match as a miss: grep
+# exits early, curl fails writing (23), and the pipeline fails. The wait step
+# then never saw production serve the commit, and the PostHog check passed
+# whenever it matched. Fetch into a variable, then grep.
+piped="$(grep -hvE '^[[:space:]]*#' "$HERE/../post-deploy/action.yml" "$HERE/../action.yml" | grep -E 'curl[^#]*\|[[:space:]]*grep[[:space:]]+-[a-zA-Z]*q' || true)"
+if [ -z "$piped" ]; then ok "actions never pipe curl into grep -q"
+else bad "actions never pipe curl into grep -q" "fetch into a variable, then grep" "$piped"; fi
 
 echo "Release (release.sh)"
 # rel_case NAME EXPECT(pass|substring) CHANGELOG-TEXT — a dry run, so nothing is published

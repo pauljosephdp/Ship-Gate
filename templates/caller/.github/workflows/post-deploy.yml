@@ -1,5 +1,6 @@
 # Ship Gate post-deploy check. Your deploy pipeline deploys; this only verifies.
-# Never add `wrangler deploy` here, or every merge deploys twice.
+# Never add a deploy step here, or every merge deploys twice (and the
+# workers-builds-only guard reads a wrangler write command here as one).
 name: Post-deploy check
 
 on:

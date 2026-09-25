@@ -569,7 +569,12 @@ violation, a dead redirect, two `h1`s, a directly loaded tag, an AI search
 crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
 `dir="rtl"`, a Google Fonts stylesheet (`market-cn`), a link with its focus
 ring removed, a tracking cookie before consent. The conforming
-run must pass; each broken run must fail on the check that owns the fault.
+run must pass; each broken run must fail on the check that owns the fault
+(`test/expect-gate.sh`). Variants run five to a job, `fixture (1)` to
+`fixture (3)`, to save Actions minutes; a new variant goes in a free `vN` slot
+or a new group, and `self-test` fails until it has an expectation and a slot.
+Pull requests skip the fixture jobs while in draft and when they change only
+Markdown outside `test/`; pushes to `main` always run them.
 
 Every PR that should ship adds a section at the top of `CHANGELOG.md`, headed
 `## vX.Y.Z — YYYY-MM-DD`. When the PR merges and every `self-test` and

@@ -566,5 +566,15 @@ rel_case "no version heading fails"              "No \"## vX.Y.Z\" heading" '# C
 rel_case "version without notes fails"           "has no notes"          '# Changelog\n\n## v1.2.0 — 2026-10-01\n\n## v1.1.0\n\n- old\n'
 rel_case "this repo's CHANGELOG has a release"   "version=v"             "$(sed 's/\\/\\\\/g' "$HERE/../CHANGELOG.md")"
 echo
+echo "Fixture variants (break-fixture.sh, expect-gate.sh, self-test.yml)"
+variants="$(sed -n 's/^  \([a-z0-9-]*\)) .*/\1/p' "$HERE/../test/break-fixture.sh")"
+for v in $variants; do
+  if ! grep -qE "^  ([a-z0-9|-]*\|)?$v(\|[a-z0-9|-]*)?\) " "$HERE/../test/expect-gate.sh"; then bad "$v has an expectation" "missing from test/expect-gate.sh" ""
+  elif ! grep -qE "v[0-9]+: ${v}[ ,}]" "$HERE/../.github/workflows/self-test.yml"; then bad "$v runs in a fixture job" "missing from .github/workflows/self-test.yml" ""
+  else ok "$v is expected and runs"; fi
+done
+[ -n "$variants" ] || bad "fixture variants found" "no cases read from test/break-fixture.sh" ""
+
+echo
 echo "Self-test: $pass passed, $failn failed."
 [ "$failn" -eq 0 ]

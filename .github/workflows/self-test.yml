@@ -5,6 +5,7 @@ name: Self-test
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -23,8 +24,12 @@ jobs:
     name: self-test
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      fixtures: ${{ steps.scope.outputs.fixtures }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -32,57 +37,111 @@ jobs:
         run: shellcheck -S error scripts/*.sh test/*.sh
       - name: Guards and config rules
         run: bash scripts/self-test.sh
+      # The fixture jobs are the expensive part. Pull requests skip them while in draft
+      # and when they change only docs (Markdown outside test/). Pushes to main and
+      # manual runs always run them, so a release never skips a check.
+      - name: Decide whether the fixture jobs run
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          run=true
+          if [ "$EVENT" = pull_request ]; then
+            if [ "$DRAFT" = true ]; then
+              run=false; echo "Draft pull request: fixture jobs skipped until it is ready for review."
+            elif ! git diff --name-only "$BASE" HEAD | awk '!/\.md$/ || /^test\//' | grep -q .; then
+              run=false; echo "Docs-only change: fixture jobs skipped."
+            fi
+          fi
+          echo "fixtures=$run" >> "$GITHUB_OUTPUT"
 
   # The whole action, end to end, against a tiny conforming site, then against
-  # copies broken one way each. The conforming run must pass; every broken run
-  # must fail on the check that owns the fault.
+  # copies broken one way each (test/break-fixture.sh). The conforming runs must pass;
+  # every broken run must fail on the check that owns the fault (test/expect-gate.sh).
+  # Variants run five to a job: the runner setup, npm cache and Playwright browser are
+  # shared, which costs far fewer minutes than one job per variant.
   fixture:
-    name: fixture (${{ matrix.variant }})
+    name: fixture (${{ matrix.group }})
+    needs: self-test
+    if: needs.self-test.outputs.fixtures == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { variant: conforming, fails: "" }
-          - { variant: vendor-named-asset, fails: "" }
-          - { variant: missing-alt, fails: "Smoke, axe, reflow, CSP, edge" }
-          - { variant: wide-element, fails: "Smoke, axe, reflow, CSP, edge" }
-          - { variant: csp-violation, fails: "Smoke, axe, reflow, CSP, edge" }
-          - { variant: bad-redirect, fails: "Smoke, axe, reflow, CSP, edge" }
-          - { variant: two-h1, fails: "Structure scan" }
-          - { variant: direct-tag, fails: "Stack guards" }
-          - { variant: blocks-ai-search, fails: "Discovery (SEO, AEO, GEO, AIO)" }
-          - { variant: bad-jsonld, fails: "Discovery (SEO, AEO, GEO, AIO)" }
-          - { variant: robots-no-agents, fails: "Discovery (SEO, AEO, GEO, AIO)" }
-          - { variant: rtl-no-dir, fails: "Discovery (SEO, AEO, GEO, AIO)" }
-          - { variant: google-font, fails: "Market scan" }
-          - { variant: no-focus-ring, fails: "Smoke, axe, reflow, CSP, edge" }
-          - { variant: tracker-cookie, fails: "Smoke, axe, reflow, CSP, edge" }
+          - { group: 1, v1: conforming, v2: missing-alt, v3: two-h1, v4: blocks-ai-search, v5: google-font }
+          - { group: 2, v1: vendor-named-asset, v2: wide-element, v3: direct-tag, v4: bad-jsonld, v5: no-focus-ring }
+          - { group: 3, v1: csp-violation, v2: bad-redirect, v3: robots-no-agents, v4: rtl-no-dir, v5: tracker-cookie }
     steps:
       - uses: actions/checkout@v4
-      - name: Break the fixture
-        run: bash test/break-fixture.sh ${{ matrix.variant }}
-      - name: Ship Gate
-        id: gate
+      - name: Break the fixture (1)
+        if: ${{ !cancelled() && matrix.v1 }}
+        run: bash test/break-fixture.sh ${{ matrix.v1 }}
+      - name: Ship Gate (1)
+        id: gate1
+        if: ${{ !cancelled() && matrix.v1 }}
         continue-on-error: true
         uses: ./
         with:
           working-directory: test/fixture-site
-      - name: Expected result
-        env:
-          OUTCOME: ${{ steps.gate.outcome }}
-          FAILS: ${{ matrix.fails }}
-        run: |
-          cat "$SHIP_GATE_DIR/summary.md"
-          if [ -z "$FAILS" ]; then
-            [ "$OUTCOME" = success ] || { echo "::error::Variant ${{ matrix.variant }} must pass the gate."; exit 1; }
-          else
-            [ "$OUTCOME" = failure ] || { echo "::error::Variant ${{ matrix.variant }} must fail the gate, but it passed."; exit 1; }
-            grep -qF "| $FAILS | ❌ failed |" "$SHIP_GATE_DIR/summary.md" \
-              || { echo "::error::Variant ${{ matrix.variant }} must fail \"$FAILS\"."; exit 1; }
-          fi
-          echo "Gate behaved as expected for ${{ matrix.variant }}."
+      - name: Expected result (1)
+        if: ${{ !cancelled() && matrix.v1 }}
+        run: bash test/expect-gate.sh ${{ matrix.v1 }} ${{ steps.gate1.outcome }}
+      - name: Break the fixture (2)
+        if: ${{ !cancelled() && matrix.v2 }}
+        run: bash test/break-fixture.sh ${{ matrix.v2 }}
+      - name: Ship Gate (2)
+        id: gate2
+        if: ${{ !cancelled() && matrix.v2 }}
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: test/fixture-site
+      - name: Expected result (2)
+        if: ${{ !cancelled() && matrix.v2 }}
+        run: bash test/expect-gate.sh ${{ matrix.v2 }} ${{ steps.gate2.outcome }}
+      - name: Break the fixture (3)
+        if: ${{ !cancelled() && matrix.v3 }}
+        run: bash test/break-fixture.sh ${{ matrix.v3 }}
+      - name: Ship Gate (3)
+        id: gate3
+        if: ${{ !cancelled() && matrix.v3 }}
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: test/fixture-site
+      - name: Expected result (3)
+        if: ${{ !cancelled() && matrix.v3 }}
+        run: bash test/expect-gate.sh ${{ matrix.v3 }} ${{ steps.gate3.outcome }}
+      - name: Break the fixture (4)
+        if: ${{ !cancelled() && matrix.v4 }}
+        run: bash test/break-fixture.sh ${{ matrix.v4 }}
+      - name: Ship Gate (4)
+        id: gate4
+        if: ${{ !cancelled() && matrix.v4 }}
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: test/fixture-site
+      - name: Expected result (4)
+        if: ${{ !cancelled() && matrix.v4 }}
+        run: bash test/expect-gate.sh ${{ matrix.v4 }} ${{ steps.gate4.outcome }}
+      - name: Break the fixture (5)
+        if: ${{ !cancelled() && matrix.v5 }}
+        run: bash test/break-fixture.sh ${{ matrix.v5 }}
+      - name: Ship Gate (5)
+        id: gate5
+        if: ${{ !cancelled() && matrix.v5 }}
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: test/fixture-site
+      - name: Expected result (5)
+        if: ${{ !cancelled() && matrix.v5 }}
+        run: bash test/expect-gate.sh ${{ matrix.v5 }} ${{ steps.gate5.outcome }}
 
   # Every push to main that passes every check above publishes the version named by
   # the newest CHANGELOG.md heading, once. Sites pin these tags, so a release never

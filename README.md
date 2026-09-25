@@ -1,21 +1,21 @@
 # Ship Gate
 
-The single source for the merge gate on every Gallivant Ventures portfolio site:
-LowLightKing, Frame to Funnel, Playway Books, Cocoon, Qualified Deals, Portus
-Immigration and FullFrameGear.
+One merge gate for any Astro site: accessibility, performance, security
+headers, and whether search engines, answer engines and AI assistants can
+find, read and cite the site (SEO, AEO, GEO and AIO readiness).
 
 Site repos do not copy these files. They call this repo, pinned to a version.
 A rule or threshold changes here once, and reaches each site through that
 site's own reviewed Dependabot PR.
 
-The standard was set from what the sites already enforce. The audit behind it,
-and each site's gap to adopting it, is in
-[`docs/portfolio-ci-audit-2026-09-24.md`](docs/portfolio-ci-audit-2026-09-24.md).
+The core gate makes no vendor choices for a site. Opinions about which vendors
+a site uses (analytics, tag management, bot protection, deploy pipeline) are
+**stack policies**, off by default; a site or a portfolio opts in by name.
 
 ## What lives where
 
 **Here, identical for every site:** stack guards, the contract check, the
-client-bundle PostHog scan, the structure and placeholder scans, the Playwright
+structure, placeholder and discovery scans, the opt-in stack policies, the Playwright
 suite (axe, reflow, CSP, redirects and headers), Lighthouse standards, the
 static server, the test tooling and its versions (`tools/package-lock.json`),
 and the post-deploy check.
@@ -26,7 +26,7 @@ and the post-deploy check.
 |---|---|
 | `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify` |
 | `.github/workflows/post-deploy.yml` | Calls `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` |
-| `ship-gate.config.json` | Site URL, pages, forms, the site's own checks, stricter or temporarily looser thresholds |
+| `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
 | `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version |
 | `.github/pull_request_template.md` | The review checklist |
 
@@ -39,8 +39,9 @@ Templates for all five are in `templates/caller/`.
 1. Contract and config check, then stack guards
 2. `npm ci`, `astro check`, lint (if the site has `lint`), unit tests (if it has `test`)
 3. Site checks before the build, then the build
-4. On the built output: client-bundle PostHog scan, structure scan, placeholder
-   scan, site checks after the build
+4. On the built output: structure scan, discovery scan (SEO, AEO, GEO, AIO),
+   placeholder scan, the client-bundle PostHog scan (`posthog-server-only`
+   policy), site checks after the build
 5. Against the served build: site browser checks, then the Playwright suite
    (smoke + axe on desktop 1440 and Pixel 7, reflow, CSP, edge files)
 6. Lighthouse CI (mobile)
@@ -61,9 +62,9 @@ migration whenever wrangler starts.
 
 Deterministic lab signals fail the build. Throttled performance on a shared CI
 runner moves several points between identical runs, so performance warns: a
-gate that fails on runner noise is a gate that gets switched off. Playway's
-measured baseline of 24 September 2026 (performance 89–96 across 37 pages)
-would have failed a hard 0.90 floor on pages that are fine.
+gate that fails on runner noise is a gate that gets switched off. One measured
+baseline of 24 September 2026 (performance 89–96 across 37 identical-quality
+pages) would have failed a hard 0.90 floor on pages that are fine.
 
 | Audit | Standard | Enforcement |
 |---|---|---|
@@ -80,10 +81,10 @@ Content-Signal directive (a deliberate `ai-train=no`) and `is-crawlable` on
 deliberate noindex pages, so the category would fail correct sites. The SEO
 audits that matter are asserted one by one instead. `canonical` is not asserted
 either: served from localhost, every canonical points at another origin. The
-structure scan checks canonicals against `siteUrl` instead.
+discovery scan checks canonicals against `siteUrl` instead.
 
 Accessibility is 1.0 because axe already fails any WCAG 2.2 AA violation, and
-every measured Playway page scores 100. A site below it loosens it with a reason
+well-built pages score 100. A site below it loosens it with a reason
 and a date, like any other threshold.
 
 Third-party code is blocked during measurement (PostHog, HubSpot, Clarity,
@@ -97,8 +98,9 @@ and takes the median.
 
 On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page):
 
-- **Smoke:** 200, one `h1`, a title and one meta description, no JS errors, no
-  browser calls to PostHog.
+- **Smoke:** 200, one `h1`, a title and one meta description, no JS errors.
+  With `posthog-server-only`, no browser calls to PostHog; with
+  `turnstile-forms`, a Turnstile widget on every `formPages` page.
 - **axe, WCAG 2.2 AA** (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`),
   desktop and mobile, after scrolling the page and letting fade-in animations
   finish, so a card mid-fade is not scanned.
@@ -123,37 +125,128 @@ assets are `immutable`; an unknown path answers 404 with the site's 404 page;
 - **Structure** (every indexable page): exactly one `h1`; no skipped heading
   levels; `target="_blank"` carries `rel="noopener"`; a title (at most 75
   characters, or the site's `structure` band) and meta description, each unique
-  across the site; a canonical, when present, on `siteUrl`. Every file: no
+  across the site. Every file: no
   unrendered `{{token}}`. `_headers` and `_redirects` parse, with no
   merge-conflict markers. Every on-site link in `llms.txt` exists. Zero pages
   scanned is a failure.
 - **Placeholder copy** (every indexable page): no `[Client name]`-style
   brackets, `TODO:`, `TBD`, `FIXME` or lorem ipsum in visible text. Citations
   like `[1]` and labels like `[PDF]` pass; `copyAllowlist` takes exact strings.
-- **Client bundle:** no PostHog code or key in anything the browser downloads.
+- **Client bundle** (`posthog-server-only` policy): no PostHog code or key in
+  anything the browser downloads.
+
+### Discovery scan: SEO, AEO, GEO and AIO readiness
+
+Whether search engines, answer engines and AI assistants can crawl the site,
+understand it and quote it. It reads the built output (no browser, no network),
+so it runs in seconds on every page and gives the same answer every run.
+
+The four terms overlap, so each rule sits under the one it matters most to:
+
+- **SEO**: search engines can crawl and index every page.
+- **AEO** (answer engine optimisation): the page states its facts as
+  schema.org JSON-LD, which answer engines and rich results read.
+- **GEO** (generative engine optimisation): AI assistants such as ChatGPT,
+  Claude and Perplexity can reach the page, read it without running JavaScript,
+  and cite it with a title, summary and image.
+- **AIO** (AI Overviews): Google's AI Overviews and AI Mode draw on the normal
+  Search index, so a page qualifies by being indexed and snippet-eligible. Google
+  documents no extra markup for them.
+
+| Area | Rule | Default | Fails when |
+|---|---|---|---|
+| SEO | `robots-txt` | error | no `robots.txt` in the build, or a line that doesn't parse |
+| SEO | `robots-sitemap` | error | `robots.txt` has no `Sitemap:` line on `siteUrl` |
+| SEO | `robots-blocks-page` | error | an indexable page is disallowed for Googlebot or Bingbot |
+| SEO | `sitemap` | error | no sitemap, or it doesn't parse, lists another origin, or has a malformed `lastmod`; sitemap indexes are followed |
+| SEO | `sitemap-coverage` | error | an indexable, self-canonical page is missing, or the sitemap lists a noindex, redirecting, canonicalised or missing URL |
+| SEO | `sitemap-lastmod` | warn | a URL has no `lastmod`, or one in the future |
+| SEO | `canonical` | error | not exactly one canonical, not on `siteUrl`, or it names a URL that redirects or is not an indexable page |
+| SEO | `html-lang` | error | `<html>` has no valid `lang` |
+| SEO | `viewport` | error | no `width=device-width` viewport |
+| SEO | `internal-links` | error | an `<a href>` on the site resolves to no built file and no `_redirects` rule |
+| AEO | `structured-data` | error | JSON-LD doesn't parse, lacks a schema.org `@context` or `@type`, or lacks key properties (below) |
+| AEO | `site-entity` | error | the home page declares no Organization, LocalBusiness or Person, or its `url` is off-site |
+| AEO | `entity-sameas` | warn | that entity has no `sameAs` profile links |
+| AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content) |
+| AEO | `breadcrumbs` | warn | a page two or more levels deep has no BreadcrumbList |
+| GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, Applebot, DuckAssistBot |
+| GEO | `open-graph` | error | no `og:title`, `og:description` or absolute `og:image`, an `og:image` on the site that the build lacks, or an off-site `og:url` |
+| GEO | `article-dates` | warn | an Article has no `dateModified` |
+| GEO | `rendered-content` | warn | fewer than 50 words of text in the HTML (content rendered by JavaScript) |
+| GEO | `llms-txt` | warn | no `/llms.txt` |
+| GEO | `llms-txt-format` | error | `/llms.txt` lacks the `# Name` heading, `> summary` line or links ([llmstxt.org](https://llmstxt.org)) |
+| AIO | `snippet-controls` | warn | an indexable page sets `nosnippet` or `max-snippet:0` |
+| AIO | `image-preview` | warn | an indexable page sets `max-image-preview:none` |
+
+**Key properties** checked by `structured-data`: Article types need
+`headline`, `datePublished` and `author`. Organization and Person need `name`,
+and LocalBusiness types need `name` and `address`. WebSite needs `name` and
+`url`. Product needs `name` plus `offers`, `review` or `aggregateRating`. Event
+needs `name`, `startDate` and `location`. FAQPage needs Questions with
+`acceptedAnswer.text`, and BreadcrumbList needs `position`, `name` and `item`.
+Recipe and VideoObject get Google's required properties. Where Google defines
+required properties, these match them; otherwise they are the minimum that
+identifies the thing.
+
+**Training is a separate choice.** Blocking model-training tokens (GPTBot,
+ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent,
+Bytespider) never fails the gate; the scan only reports which ones are blocked.
+Google-Extended does not affect Google Search or AI Overviews. Blocking a
+*search* crawler such as OAI-SearchBot or PerplexityBot removes the site from
+that product's answers, so it fails.
+
+**What it does not claim.** `llms.txt` is a proposal: some AI tools read it,
+but Google Search does not use it, so it only warns. No markup guarantees a
+citation in an AI answer; these rules make sure nothing on the site prevents
+one.
+
+The result table goes to the job summary and `reports/discovery.md` in the
+build artifact. Error findings fail the step and warnings are annotated.
+`discoveryOverrides` raises or lowers a rule, the same way thresholds are
+overridden:
+
+```json
+"discoveryOverrides": [
+  { "rule": "llms-txt", "level": "error" },
+  { "rule": "open-graph", "level": "warn",
+    "reason": "Social images ship with the redesign", "restoreBy": "2026-12-31" }
+]
+```
+
+After deploy, the post-deploy action reads the `robots.txt` production
+**actually serves** and fails if it blocks Googlebot, Bingbot or an AI search
+crawler from a smoke path. A CDN's managed robots.txt or "block AI bots" setting
+can rewrite the file after the build passed.
+
+### Stack policies
+
+Off unless the site lists them in `policies`. Each one turns on its guards and
+checks:
+
+| Policy | What it enforces |
+|---|---|
+| `posthog-server-only` | `posthog-node` only inside `src/lib/server`, `src/pages/api`, `src/actions` or `src/middleware`; EU host; the key is never `PUBLIC_` and never hard-coded; every event tagged with `__DEPLOY_ENV__`; no PostHog in the client bundle, in browser requests, or in production HTML |
+| `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot scripts go through Cloudflare Zaraz |
+| `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys |
+| `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
+
+```json
+"policies": ["posthog-server-only", "tags-via-zaraz", "turnstile-forms", "workers-builds-only"]
+```
+
+A portfolio that shares a stack puts the same list in every site's config.
 
 ### Guards
 
-- **PostHog is server-side only.** `posthog-node` inside `src/lib/server`,
-  `src/pages/api`, `src/actions` or `src/middleware`; EU host; the key is never
-  `PUBLIC_` and never hard-coded; every event is tagged with `__DEPLOY_ENV__`.
-- **Every tag goes through Cloudflare Zaraz, GTM included.** No tag loads
-  directly: GTM (loader URLs and inline `GTM-XXXX` container ids), Google
-  Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity, HubSpot tracking
-  and HubSpot form embed scripts (`js-*.hsforms.net`) are blocked.
-- **Every `<form>` has Turnstile.** A non-public form opts out with
-  `<!-- turnstile-exempt: reason -->`.
+These apply to every site:
+
 - **No committed `.env` or `.dev.vars` files.** `.example` files are fine.
-- **Workers config, not Pages config.**
 - **Node pinned** in `.nvmrc` or `.node-version`, at 22.12.0 or later (Astro
   7's floor). A bare `22` warns: pin the exact version so CI and Workers Builds
   agree.
 - **No workflow pushes to `main`.** Pushing to `main` skips the PR and its
   checks. There is no exemption; a bot opens a PR like anyone else.
-- **No Cloudflare credentials in GitHub.** Workers Builds is the only deployer,
-  so no workflow may use `CLOUDFLARE_API_TOKEN`, `wrangler-action`, or a
-  `wrangler` write command. If one is unavoidable for now, it takes a dated
-  guard exemption (below).
 - **Lighthouse reports stay private.** Temporary public storage fails.
 - **One dependency bot.** Dependabot and Renovate together warn: every update
   would arrive twice.
@@ -172,19 +265,24 @@ deadline:
 
 ```json
 "guardExemptions": [
-  { "guard": "posthog-client", "reason": "Moving analytics server-side in the next PR",
+  { "guard": "node-pin", "reason": "Node upgrade lands with the Astro bump",
     "restoreBy": "2026-11-30" }
 ]
 ```
 
 The guard then warns on every run instead of failing, until `restoreBy`, when
-the build fails again. Guards: `posthog-client` (SDK, snippet, direct use
-outside server paths, client bundle, browser calls), `posthog-public-var`,
-`posthog-us-host`, `posthog-env-tag`, `direct-tags`, `turnstile`,
-`pages-config`, `node-pin`, `cloudflare-in-workflows`, `public-lighthouse`.
+the build fails again. Core guards: `node-pin`, `public-lighthouse`. Policy
+guards, exemptible only when the site uses the policy:
 
-Never exemptible: a hard-coded PostHog key, a committed env file, and a
-workflow pushing to `main`.
+- `posthog-server-only`: `posthog-client` (SDK, snippet, direct use outside
+  server paths, client bundle, browser calls), `posthog-public-var`,
+  `posthog-us-host` and `posthog-env-tag`
+- `tags-via-zaraz`: `direct-tags`
+- `turnstile-forms`: `turnstile`
+- `workers-builds-only`: `pages-config` and `cloudflare-in-workflows`
+
+Never exemptible: a committed env file, a workflow pushing to `main`, and (with
+`posthog-server-only`) a hard-coded PostHog key.
 
 ## Site configuration
 
@@ -192,9 +290,10 @@ workflow pushing to `main`.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `siteUrl` | required | Production origin, e.g. `https://liveincocoon.com` |
+| `siteUrl` | required | Production origin, e.g. `https://example.com` |
 | `pages` | required | One path per key template: home, service or product, contact, article |
-| `formPages` | `[]` | Every page with a public form (Turnstile is checked there) |
+| `policies` | `[]` | Stack policies this site follows; see Stack policies |
+| `formPages` | `[]` | Every page with a public form (the `turnstile-forms` policy checks the widget there) |
 | `smokePaths` | `/`, `/robots.txt`, `/sitemap-index.xml` | Checked on production after deploy |
 | `server` | `static` | `static` serves the built files (handles `dist/client` from the Cloudflare adapter); `preview` runs `npm run preview` |
 | `distDir` | `dist` | The build output folder |
@@ -209,8 +308,11 @@ workflow pushing to `main`.
 | `checks.postBuild` | `[]` | npm script names to run against the built output |
 | `checks.browser` | `[]` | npm script names run against the served build; they get `SHIP_GATE_BASE_URL` and `BASE_URL`, and use the site's own Playwright |
 | `guardExemptions` | `[]` | See Guard exemptions |
+| `discoveryOverrides` | `[]` | Raise or lower a discovery rule; see Discovery scan |
+| `discovery.sitemap` | from `robots.txt`, else `/sitemap-index.xml` or `/sitemap.xml` | The sitemap's path |
+| `discovery.ignoreLinks` | `[]` | Path prefixes the Worker serves rather than the static build, e.g. `"/api/"`; the link check skips them |
 | `python` | none | `{ "version": "3.11", "packages": ["fonttools"] }` for Python checks |
-| `turnstileEnv` | `PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Env names that receive Cloudflare's always-pass test keys |
+| `turnstileEnv` | `PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | With `turnstile-forms`: env names that receive Cloudflare's always-pass test keys |
 | `thresholdOverrides` | `[]` | See below |
 
 Site checks are npm script names only, never raw commands. A check that needs
@@ -244,20 +346,23 @@ The v1 form `{ "category": "performance", ... }` is still accepted.
 
 ## One-time setup of this repo
 
-1. **Allow the site repos to use it.** Settings → Actions → General → Access →
-   *Accessible from repositories owned by the user 'pauljosephdp'*. Without
-   this, every site's `verify` fails to download the action.
+1. **Allow the site repos to use it** (only while this repo is private).
+   Settings → Actions → General → Access → *Accessible from repositories
+   owned by* this account or organisation. Without this, every site's `verify`
+   fails to download the action.
 2. **Protect `main`.** Settings → Rules → Rulesets: require a pull request,
    require the `self-test` check, block force pushes and deletions.
-3. **Publish v1.1.0.** Releases → Draft a new release → tag `v1.1.0` on `main`.
-   Site templates pin this tag. v1.0.0 was never tagged or adopted.
+3. **Publish the release.** Releases → Draft a new release → tag `v2.0.0` on
+   `main`. Site templates pin this tag.
 
 ## What stays in the site repo
 
 Checks about one brand or one site's content stay in the site repo and run
 through `checks`: brand-token contrast, font glyph coverage, design-drift
 scans, copy canon, price wording, voice lint, image budgets, motion and
-navigation scripts. `docs/portfolio-ci-audit-2026-09-24.md` maps each one.
+navigation scripts. Ship Gate never learns a brand's name, colours or voice.
+(`docs/portfolio-ci-audit-2026-09-24.md` is the dated audit of the first
+portfolio that adopted the gate, kept as history.)
 
 Never in the gate, whatever the site: deploys, `wrangler` against production,
 remote D1 migrations, R2 or KV writes, Worker secrets, IndexNow submissions,
@@ -277,13 +382,19 @@ belong in `post-deploy.yml` or a scheduled workflow.
 4. Move the site's existing CI checks into `checks`, then delete the old
    workflow steps they replace. Keep scheduled operational workflows (IndexNow,
    content sync) as they are, unless a guard flags them.
-5. Fill in `pages` and `formPages`.
-6. Keep the standard script names `check` and `build`, and `preview` if
+5. Fill in `pages`, and `policies` if the site follows any stack policy
+   (`formPages` too with `turnstile-forms`).
+6. Make the site discoverable, or the discovery scan lists what is missing: a
+   `robots.txt` with a `Sitemap:` line, a sitemap (`@astrojs/sitemap`), one
+   canonical, Open Graph tags and `lang` in the base layout, and Organization or
+   Person JSON-LD on the home page. Run the scan locally (below) before the
+   first PR.
+7. Keep the standard script names `check` and `build`, and `preview` if
    `server` is `preview`. Ship Gate installs its own Playwright, axe and
    Lighthouse CI; the site needs none of them for the gate.
-7. Pin Node 22.12.0 or later in `.nvmrc` or `.node-version`, and set the same
+8. Pin Node 22.12.0 or later in `.nvmrc` or `.node-version`, and set the same
    `NODE_VERSION` build variable in Workers Builds.
-8. Add the two build-time markers to `astro.config.mjs`:
+9. Add the build-time markers to `astro.config.mjs`:
    ```js
    vite: {
      define: {
@@ -294,28 +405,35 @@ belong in `post-deploy.yml` or a scheduled workflow.
      },
    },
    ```
-   Declare both in `src/env.d.ts`, put
+   Declare both in `src/env.d.ts` and put
    `<meta name="build-sha" content={__BUILD_SHA__} />` in the base layout
-   `<head>`, and add `environment: __DEPLOY_ENV__` to every event in
-   `src/lib/server/analytics.ts`. The wrapper must send nothing when
-   `POSTHOG_API_KEY` is absent.
-9. In the site's PostHog project, add *`environment` is not `production`* to
+   `<head>`. With `posthog-server-only`, also add `environment: __DEPLOY_ENV__`
+   to every event in `src/lib/server/analytics.ts`; the wrapper must send
+   nothing when `POSTHOG_API_KEY` is absent.
+10. With `posthog-server-only`, in the site's PostHog project, add *`environment` is not `production`* to
    the internal and test account filter, applied by default.
-10. Ruleset on the site's `main`: require a pull request, require the `verify`
+11. Ruleset on the site's `main`: require a pull request, require the `verify`
     check, require the branch to be up to date, block force pushes and
-    deletions. Required approvals: 0 while Paul is the only committer.
-11. Workers Builds: production branch `main`, non-production branch builds on,
+    deletions. Required approvals: 0 while one person is the only committer.
+12. Workers Builds: production branch `main`, non-production branch builds on,
     preview URLs on.
-12. Turn on secret scanning, push protection and Dependabot alerts.
+13. Turn on secret scanning, push protection and Dependabot alerts.
 
-Claude Code prompt for steps 1–8:
+Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v1.1.0 in this repo following pauljosephdp/Ship-Gate README
-> "Adopting it in a site repo", steps 1–8, and this site's section of
-> docs/portfolio-ci-audit-2026-09-24.md. Carry every existing CI check into
+> Adopt Ship Gate v2.0.0 in this repo following pauljosephdp/Ship-Gate README
+> "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
-> locally, fix or list every failure, and open a PR titled "chore: adopt ship
-> gate v1.1.0". Do not change deploy configuration or Cloudflare settings.
+> locally, then the discovery scan, and fix or list every failure. Open a PR
+> titled "chore: adopt ship gate v2.0.0". Do not change deploy configuration
+> or Cloudflare settings.
+
+Run the discovery scan locally after `npm run build`, from the site directory,
+with a checkout of Ship Gate beside it:
+
+```sh
+node ../Ship-Gate/scripts/prepare.mjs after-build && node ../Ship-Gate/scripts/check-discovery.mjs
+```
 
 ## Changing Ship Gate
 
@@ -327,7 +445,8 @@ on bad input and passes on good input. Add a case there for every new rule.
 The `fixture` jobs then run the whole action, end to end, against
 `test/fixture-site` (a tiny Astro site) and against copies broken one way each
 by `test/break-fixture.sh`: missing alt text, a too-wide element, a CSP
-violation, a dead redirect, two `h1`s, a directly loaded tag. The conforming
+violation, a dead redirect, two `h1`s, a directly loaded tag, an AI search
+crawler blocked in `robots.txt`, invalid JSON-LD. The conforming
 run must pass; each broken run must fail on the check that owns the fault.
 
 Then publish a release. Version by effect on site repos:
@@ -340,7 +459,7 @@ Then publish a release. Version by effect on site repos:
 
 Dependabot then opens a PR in each site repo, and that PR runs through the
 site's own `verify` before merging. A bad release fails on one PR instead of
-breaking seven sites at once.
+breaking every site at once.
 
 ## Open items
 
@@ -350,10 +469,10 @@ breaking seven sites at once.
 - **[TO CONFIRM]** `WORKERS_CI_COMMIT_SHA` and `WORKERS_CI_BRANCH` are present
   in production builds, so the post-deploy SHA check and environment tagging
   both work.
+- The discovery scan reads the static build. Pages rendered on request by the
+  Worker are outside it: list their prefixes in `discovery.ignoreLinks`, and
+  cover them with a site browser check.
 - Pages that render on the server rather than at build time are not served by
-  the `static` server. Every portfolio site builds with `output: 'static'`
-  today. A site that adds server-rendered pages to `pages` sets
+  the `static` server, which serves only what `output: 'static'` emits. A site that adds server-rendered pages to `pages` sets
   `"server": "preview"`, which has not yet been proven with the Cloudflare
   adapter in CI.
-- Portus Immigration and FullFrameGear have no brand review skill yet. Their PRs
-  get a manual check against the brand guide.

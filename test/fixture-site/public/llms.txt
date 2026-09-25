@@ -1,0 +1,8 @@
+# Ship Gate fixture site
+
+> A tiny site that proves every Ship Gate check runs end to end on a conforming build.
+
+## Pages
+
+- [About](https://example.com/about/): why the fixture exists
+- [Contact](https://example.com/contact/): a contact form

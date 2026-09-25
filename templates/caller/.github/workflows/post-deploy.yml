@@ -1,4 +1,4 @@
-# Ship Gate post-deploy check. Cloudflare Workers Builds deploys; this only verifies.
+# Ship Gate post-deploy check. Your deploy pipeline deploys; this only verifies.
 # Never add `wrangler deploy` here, or every merge deploys twice.
 name: Post-deploy check
 
@@ -15,6 +15,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: pauljosephdp/Ship-Gate/post-deploy@v1.1.0
+      - uses: pauljosephdp/Ship-Gate/post-deploy@v2.0.0
         # with:
         #   working-directory: site

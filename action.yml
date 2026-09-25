@@ -1,11 +1,11 @@
 name: Ship Gate — verify
 description: >
-  Gallivant portfolio merge gate. Stack guards, contract check, astro check,
-  unit tests, the site's own checks, build, post-build scans, Playwright + axe,
-  reflow, CSP, edge files and Lighthouse CI. Every check runs; one summary at
-  the end says which failed. Run it as the only step after checkout in a job
-  named "verify".
-author: Gallivant Ventures
+  Merge gate for Astro sites. Stack guards, contract check, astro check, unit
+  tests, the site's own checks, build, post-build scans, SEO/AEO/GEO/AIO
+  discovery readiness, Playwright + axe, reflow, CSP, edge files and
+  Lighthouse CI. Every check runs; one summary at the end says which failed.
+  Run it as the only step after checkout in a job named "verify".
+author: Ship Gate
 inputs:
   working-directory:
     description: The site's directory inside the repo, e.g. "site". Defaults to the repo root.
@@ -114,7 +114,7 @@ runs:
 
     - name: Client bundle is PostHog-free
       id: dist
-      if: steps.build.outcome == 'success'
+      if: steps.build.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only ')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -127,6 +127,14 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: node "$GITHUB_ACTION_PATH/scripts/check-structure.mjs"
+
+    - name: Discovery scan (SEO, AEO, GEO, AIO)
+      id: discovery
+      if: steps.afterbuild.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: node "$GITHUB_ACTION_PATH/scripts/check-discovery.mjs"
 
     - name: Placeholder copy scan
       id: copy
@@ -213,6 +221,7 @@ runs:
           |Page resolution=${{ steps.afterbuild.outcome }}
           |Client bundle PostHog-free=${{ steps.dist.outcome }}
           |Structure scan=${{ steps.structure.outcome }}
+          |Discovery (SEO, AEO, GEO, AIO)=${{ steps.discovery.outcome }}
           |Placeholder copy=${{ steps.copy.outcome }}
           |Site checks after build=${{ steps.postbuild.outcome }}
           |Site browser checks=${{ steps.browser.outcome }}

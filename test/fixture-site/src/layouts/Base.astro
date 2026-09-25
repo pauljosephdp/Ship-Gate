@@ -2,6 +2,15 @@
 interface Props { title: string; description: string }
 const { title, description } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
+const image = new URL('/og.png', Astro.site);
+// The site entity goes on the home page; every page names the site it belongs to.
+const graph = [
+  { '@type': 'WebSite', '@id': `${Astro.site}#website`, name: 'Ship Gate fixture site', url: Astro.site?.href },
+  ...(Astro.url.pathname === '/' ? [{
+    '@type': 'Organization', '@id': `${Astro.site}#org`, name: 'Ship Gate fixture', url: Astro.site?.href,
+    sameAs: ['https://github.com/pauljosephdp/Ship-Gate'],
+  }] : []),
+];
 ---
 <!doctype html>
 <html lang="en">
@@ -11,6 +20,12 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={image} />
+    <script type="application/ld+json" set:html={JSON.stringify({ '@context': 'https://schema.org', '@graph': graph })} />
   </head>
   <body>
     <header><nav aria-label="Main"><a href="/">Home</a> <a href="/about/">About</a> <a href="/contact/">Contact</a></nav></header>

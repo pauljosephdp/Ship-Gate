@@ -24,8 +24,13 @@ runs:
         # Ship Gate's own fixture tests (uses: ./ in this repo) may stop a broken variant
         # at the stage that owns its fault. A site calling the published action always runs everything.
         stage=full
-        if [ "$GITHUB_ACTION_PATH" = "$GITHUB_WORKSPACE" ] && [ -n "${SHIP_GATE_FIXTURE_STAGE:-}" ]; then stage=$SHIP_GATE_FIXTURE_STAGE; fi
+        # Compare resolved paths: for uses: ./ the runner sets GITHUB_ACTION_PATH to "<workspace>/./".
+        if [ -n "${SHIP_GATE_FIXTURE_STAGE:-}" ] \
+          && [ "$(cd "$GITHUB_ACTION_PATH" && pwd -P)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)" ]; then
+          stage=$SHIP_GATE_FIXTURE_STAGE
+        fi
         case "$stage" in full|browser|scans) ;; *) echo "::error::Unknown fixture stage \"$stage\"."; exit 1 ;; esac
+        echo "Ship Gate stage: $stage"
         echo "stage=$stage" >> "$GITHUB_OUTPUT"
         for f in .nvmrc .node-version; do
           if [ -f "$f" ]; then echo "node-version-file=${{ inputs.working-directory }}/$f" >> "$GITHUB_OUTPUT"; exit 0; fi

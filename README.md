@@ -52,6 +52,10 @@ Sites on `analytics-always-on` also follow `templates/caller/analytics/` and
    edge files)
 6. Lighthouse CI (mobile)
 
+The action's steps use Node 24 actions (`setup-node@v7`, `setup-python@v7`,
+`cache@v6`, `upload-artifact@v7`). GitHub-hosted runners, which the caller
+templates use, need nothing; a self-hosted runner must be v2.327.1 or later.
+
 Every check runs even after another fails, so a PR shows all its failures at
 once; checks that need the build skip when the build fails. A summary table at
 the end names each check's result, and the job fails if any check failed.
@@ -807,11 +811,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.5.2 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.5.3 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.5.2". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.5.3". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

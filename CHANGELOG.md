@@ -1,5 +1,35 @@
 # Changelog
 
+## v3.5.0 — 2026-09-26
+
+Google Analytics and PostHog can run on every page, with or without consent,
+and store nothing until the visitor accepts. No site fails because of this
+release. The new policy is opt-in.
+
+**Added**
+- The `analytics-always-on` policy. It needs `posthog-hybrid` (not
+  `"cookieless": "off"`) and `tags-via-zaraz`. GA4 runs as a Zaraz tool with no
+  consent purpose, in Google Consent Mode v2 with every signal denied by
+  default. The consent test still fails a direct Google tag or a `_ga` cookie
+  before consent.
+- Post-deploy, with `analytics-always-on`: a warning when production's home
+  page has no Zaraz loader (`/cdn-cgi/zaraz/`).
+- `templates/caller/analytics/zaraz-setup.md`: the Zaraz dashboard checklist
+  (GA4 tool, Consent Mode default, purposes, and a production check).
+- `templates/caller/legal/analytics-disclosure.md`: cookie and privacy policy
+  text for GA4 and PostHog before and after consent. Review it with counsel.
+
+**Changed**
+- `PostHogZarazConsent.astro` also sets Google Consent Mode: the analytics
+  purpose's answer grants or denies `analytics_storage` through
+  `zaraz.set('google_consent_update', …)`.
+
+**Fixed**
+- `PostHogZarazConsent.astro` said it needed no CSP inline allowance, but Astro
+  inlines a script that small, so a CSP without `'unsafe-inline'` blocked it
+  and no visitor was ever opted in. Sites using it add the `assetsInlineLimit`
+  line from the README to `astro.config.mjs`.
+
 ## v3.4.1 — 2026-09-26
 
 Dependabot can now raise the Ship Gate pin in site repos. No site fails

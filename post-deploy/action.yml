@@ -6,7 +6,8 @@ description: >
   crawlers and agents and that no WAF refuses plain requests, reports
   freshness headers and (optional) field Core Web Vitals, and
   (posthog-server-only policy) that production HTML is PostHog-free, or
-  (posthog-hybrid policy) that production starts PostHog with a live key.
+  (posthog-hybrid policy) that production starts PostHog with a live key, and
+  (analytics-always-on policy) warns when Zaraz is missing.
   On failure: roll back, then fix forward.
 author: Ship Gate
 inputs:
@@ -94,3 +95,8 @@ runs:
       if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-hybrid ')
       shell: bash
       run: node "$GITHUB_ACTION_PATH/../scripts/check-posthog-live.mjs"
+
+    - name: Production carries Zaraz (analytics-always-on)
+      if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' analytics-always-on ')
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../scripts/check-analytics-live.mjs"

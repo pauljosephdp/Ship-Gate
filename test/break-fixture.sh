@@ -54,6 +54,19 @@ JS
   npm install --save --no-audit --no-fund --loglevel=error $POSTHOG_PACKAGES
 }
 posthog_csp() { sed -i "s#default-src 'self'; #default-src 'self'; $POSTHOG_CSP#" public/_headers; }
+# analytics-always-on on top of posthog-hybrid: the Zaraz consent bridge, kept a same-origin
+# file (Astro inlines small scripts, which a CSP without 'unsafe-inline' blocks). Zaraz itself
+# runs only on Cloudflare's edge, so the fixture has none.
+analytics_always_on() {
+  cp ../../templates/caller/posthog/optional/src/components/PostHogZarazConsent.astro src/components/
+  sed -i '1s#^---$#---\nimport PostHogZarazConsent from "../components/PostHogZarazConsent.astro";#' src/layouts/Base.astro
+  sed -i 's#  <PostHog />#  <PostHog />\n    <PostHogZarazConsent />#' src/layouts/Base.astro
+  sed -i 's#  vite: {#  vite: {\n    build: { assetsInlineLimit: (file) => (/ZarazConsent/.test(file) ? false : undefined) },#' astro.config.mjs
+  node -e '
+    const fs = require("fs"); const c = JSON.parse(fs.readFileSync("ship-gate.config.json", "utf8"));
+    c.policies.push("analytics-always-on");
+    fs.writeFileSync("ship-gate.config.json", JSON.stringify(c, null, 2) + "\n");'
+}
 case "$1" in
   conforming) ;;
   missing-alt) echo '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>' > public/dot.svg; add '<img src="/dot.svg" width="8" height="8">' ;;
@@ -73,6 +86,7 @@ case "$1" in
   posthog-hybrid) posthog_hybrid; posthog_csp ;;
   posthog-hybrid-missing) posthog_hybrid; posthog_csp; sed -i 's#<PostHog />#{Astro.url.pathname === "/" \&\& <PostHog />}#' src/layouts/Base.astro ;;
   posthog-hybrid-csp) posthog_hybrid ;;
+  analytics-always-on) posthog_hybrid; posthog_csp; analytics_always_on ;;
   direct-tag) add '<script is:inline async src="https://www.googletagmanager.com/gtm.js?id=GTM-ABCD123"></script>' ;;
   *) echo "Unknown variant: $1" >&2; exit 2 ;;
 esac

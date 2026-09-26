@@ -6,6 +6,9 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # Every Dependabot PR runs the full verify job. Don't re-run it each time main
+    # moves; comment "@dependabot rebase" on one that conflicts.
+    rebase-strategy: disabled
     groups:
       minor-and-patch:
         update-types: [minor, patch]
@@ -25,3 +28,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    rebase-strategy: disabled
+    # One PR for every action bump, the Ship Gate pin included.
+    groups:
+      actions:
+        patterns: ["*"]

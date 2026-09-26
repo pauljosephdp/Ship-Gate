@@ -24,13 +24,14 @@ and the post-deploy check.
 
 | File | Purpose |
 |---|---|
-| `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify` |
-| `.github/workflows/post-deploy.yml` | Calls `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` |
+| `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify`; drafts run the fast stage only |
+| `.github/workflows/post-deploy.yml` | Calls `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` once Workers Builds reports the deploy |
+| `.github/workflows/full-sweep.yml` | Weekly: the gate against every page (`"all"`), which pull requests only sample |
 | `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
-| `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version |
+| `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs |
 | `.github/pull_request_template.md` | The review checklist |
 
-Templates for all five are in `templates/caller/`. Sites on the `posthog-hybrid`
+Templates for all six are in `templates/caller/`. Sites on the `posthog-hybrid`
 policy also copy `templates/caller/posthog/` (see PostHog in the browser and on the server).
 
 ## The gate
@@ -52,7 +53,26 @@ policy also copy `templates/caller/posthog/` (see PostHog in the browser and on 
 Every check runs even after another fails, so a PR shows all its failures at
 once; checks that need the build skip when the build fails. A summary table at
 the end names each check's result, and the job fails if any check failed.
-Reports upload as a build artifact for 14 days, never to public storage.
+When a check fails, the reports (Playwright traces, Lighthouse HTML, the
+discovery table) upload as a build artifact for 5 days, never to public
+storage. A green run uploads nothing: its summary table is the record, and
+storing reports for every green run filled the account's artifact quota.
+
+**Stages.** The `stage` input decides how far the gate runs: `full` (the
+default) runs everything above; `browser` stops before Lighthouse; `scans`
+stops after step 4, with no browser, in about two minutes. Skipped checks read
+"➖ not run" and the summary says which stage ran. The caller template passes
+`scans` for a draft pull request and `full` otherwise, and re-runs when the
+draft is marked ready for review. A draft cannot merge, so nothing reaches
+`main` without the full gate, and a PR iterated as a draft pays for one full
+run instead of one per push.
+
+**What a run costs.** Actions bills a private repo's runner by the minute,
+rounded up per job, and PR `verify` time is dominated by the browser suite and
+Lighthouse, which scale with the pages they cover. Keep `e2ePages` to the
+listed `pages` and `lighthouseUrls` to one page per template on pull requests
+(a list runs three times per URL, `"all"` once), and put `"all"` in the
+weekly `full-sweep.yml`, which the template builds from the same config.
 
 The built site is served by `scripts/serve-static.mjs`, which behaves like
 Cloudflare Workers static assets: it applies `_redirects` and `_headers`, hides
@@ -357,8 +377,15 @@ With `@astrojs/sitemap`, add `/sitemap.xml /sitemap-index.xml 301` to
   Link: </llms.txt>; rel="describedby"; type="text/markdown"
 ```
 
+The caller template starts the post-deploy check when Cloudflare Workers
+Builds reports a successful build of `main` (its `check_run`), not on the push,
+so no runner sits idle while the deploy runs; it passes the deployed commit as
+`sha`. A site deployed some other way triggers it on `push` instead, and `sha`
+defaults to the triggering commit. After adopting the template, confirm the
+check starts on the next merge.
+
 After deploy, the post-deploy action first waits (up to `wait-minutes`) until
-production's home page carries the merged commit in its `build-sha` meta tag,
+production's home page carries that commit (`sha`) in its `build-sha` meta tag,
 and fails if it never does. Every page it inspects is fetched in full before
 it is searched, so a match can't be lost to a closed pipe. It then checks what
 production **actually serves**, at the site's discovery levels: `robots.txt` is 200, `text/plain`,
@@ -711,11 +738,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.3.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.4.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.3.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.4.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -747,19 +774,25 @@ run, one that shows a site file named after a tracking vendor, and
 `templates/caller/posthog/` with `posthog-js` and `posthog-node` installed at
 the versions `break-fixture.sh` pins) must pass;
 each broken run must fail on the check that owns the fault (`test/expect-gate.sh`).
-Each variant stops at the stage that owns its fault (`expect-gate.sh --stage`):
-`scans` variants stop after the post-build scans, `browser` variants skip
-Lighthouse, and only the conforming run does everything. Skipped checks read
-"➖ not run" in the summary, and `expect-gate.sh` asserts that too. Sites never
-skip anything: the stage is honoured only when the action runs from this
-repo's own checkout (`uses: ./`). Two jobs share the variants,
+Each variant stops at the stage that owns its fault (`expect-gate.sh --stage`),
+passed as the action's `stage` input, so every fixture run exercises the same
+input the caller template uses for drafts: `scans` variants stop after the
+post-build scans, `browser` variants skip Lighthouse, and only the conforming
+run does everything. Skipped checks read "➖ not run" in the summary, and
+`expect-gate.sh` asserts that too. Fixture runs upload no reports; the
+summary table in the log is what `expect-gate.sh` reads. Two jobs share the variants,
 `fixture (browser)` and `fixture (scans)`; a new variant goes in a free `vN`
 slot, and `self-test` fails until it has an expectation, a stage and a slot.
-Pull requests skip the fixture jobs while in draft and when they change only
-Markdown outside `test/`. A push to `main` skips them when its pull request
-already passed both fixture jobs on the exact same tree (each passing job
-uploads a `fixtures-passed-<tree>-<group>` artifact); if `main` moved in
-between, or on a manual run, everything runs.
+The fixture jobs exercise the verify action only, so they run when a change
+touches it: `action.yml`, `scripts/` (not `self-test.sh`, `release.sh`,
+`check-readme.sh` or the post-deploy `check-*-live.mjs`), `e2e/`, `tools/`,
+`test/`, the Playwright and Lighthouse configs, or `self-test.yml`. Pull
+requests skip them while in draft and when they touch none of those (docs,
+`post-deploy/`, `templates/`). A push to `main` skips them when it touches none
+of those since the previous `main` commit, or when its pull request already
+passed both fixture jobs on the exact same tree (each passing job uploads a
+`fixtures-passed-<tree>-<group>` artifact); if `main` moved in between, or on
+a manual run, everything runs.
 Within a fixture job, only the first variant installs. `break-fixture.sh` keeps
 the fixture's and the test tools' `node_modules`, and the action, again only
 from this repo's own checkout, reuses them: no `npm ci`, no npm or Playwright

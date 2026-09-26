@@ -46,11 +46,15 @@ jobs:
         run: shellcheck -S error scripts/*.sh test/*.sh
       - name: Guards and config rules
         run: bash scripts/self-test.sh
-      # The fixture jobs are the expensive part.
-      # - Pull requests skip them while in draft and when they change only docs
-      #   (Markdown outside test/).
+      # The fixture jobs are the expensive part. They exercise the verify action only, so
+      # they run when a change touches it: action.yml, scripts/ (not the self-test,
+      # release, README and post-deploy-only scripts), e2e/, tools/, test/, the
+      # Playwright and Lighthouse configs, or this workflow.
+      # - Pull requests skip them while in draft, and when the change touches none of
+      #   those (docs, post-deploy/, templates/).
       # - A push to main skips them when a pull request run already passed every
-      #   fixture job on this exact tree (the squash of an up-to-date PR). If main moved
+      #   fixture job on this exact tree (the squash of an up-to-date PR), or when it
+      #   touches none of those files since the previous main commit. If main moved
       #   since, the tree differs and everything runs. The release still needs this job.
       # - Manual runs always run everything.
       - name: Decide whether the fixture jobs run
@@ -59,16 +63,27 @@ jobs:
           EVENT: ${{ github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft }}
           BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           run=true proven=false
+          # True when the files changed since $1 include any the fixture jobs exercise.
+          touches_fixtures() {
+            git diff --name-only "$1" HEAD \
+              | grep -E '^(action\.yml|scripts/|e2e/|tools/|test/|playwright\.config\.ts|lighthouserc|\.github/workflows/self-test\.yml)' \
+              | grep -vE '^scripts/(self-test\.sh|release\.sh|check-readme\.sh|check(-[a-z]+)*-live\.mjs)$' \
+              | grep -q .
+          }
           if [ "$EVENT" = pull_request ]; then
             if [ "$DRAFT" = true ]; then
               run=false; echo "Draft pull request: fixture jobs skipped until it is ready for review."
-            elif ! git diff --name-only "$BASE" HEAD | awk '!/\.md$/ || /^test\//' | grep -q .; then
-              run=false; echo "Docs-only change: fixture jobs skipped."
+            elif ! touches_fixtures "$BASE"; then
+              run=false; echo "No change to what the fixture jobs exercise: fixture jobs skipped."
             fi
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
+            && ! touches_fixtures "$BEFORE"; then
+            run=false proven=true; echo "No change to what the fixture jobs exercise since $BEFORE: fixture jobs skipped."
           elif [ "$EVENT" = push ]; then
             tree="$(git rev-parse 'HEAD^{tree}')" found=0
             for group in browser scans; do
@@ -137,6 +152,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (1)
         if: ${{ !cancelled() && matrix.v1 }}
         run: bash test/expect-gate.sh ${{ matrix.v1 }} ${{ steps.gate1.outcome }}
@@ -152,6 +168,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (2)
         if: ${{ !cancelled() && matrix.v2 }}
         run: bash test/expect-gate.sh ${{ matrix.v2 }} ${{ steps.gate2.outcome }}
@@ -167,6 +184,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (3)
         if: ${{ !cancelled() && matrix.v3 }}
         run: bash test/expect-gate.sh ${{ matrix.v3 }} ${{ steps.gate3.outcome }}
@@ -182,6 +200,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (4)
         if: ${{ !cancelled() && matrix.v4 }}
         run: bash test/expect-gate.sh ${{ matrix.v4 }} ${{ steps.gate4.outcome }}
@@ -197,6 +216,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (5)
         if: ${{ !cancelled() && matrix.v5 }}
         run: bash test/expect-gate.sh ${{ matrix.v5 }} ${{ steps.gate5.outcome }}
@@ -212,6 +232,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (6)
         if: ${{ !cancelled() && matrix.v6 }}
         run: bash test/expect-gate.sh ${{ matrix.v6 }} ${{ steps.gate6.outcome }}
@@ -227,6 +248,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (7)
         if: ${{ !cancelled() && matrix.v7 }}
         run: bash test/expect-gate.sh ${{ matrix.v7 }} ${{ steps.gate7.outcome }}
@@ -242,6 +264,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (8)
         if: ${{ !cancelled() && matrix.v8 }}
         run: bash test/expect-gate.sh ${{ matrix.v8 }} ${{ steps.gate8.outcome }}
@@ -257,6 +280,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (9)
         if: ${{ !cancelled() && matrix.v9 }}
         run: bash test/expect-gate.sh ${{ matrix.v9 }} ${{ steps.gate9.outcome }}
@@ -272,6 +296,7 @@ jobs:
         uses: ./
         with:
           working-directory: test/fixture-site
+          stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}
       - name: Expected result (10)
         if: ${{ !cancelled() && matrix.v10 }}
         run: bash test/expect-gate.sh ${{ matrix.v10 }} ${{ steps.gate10.outcome }}

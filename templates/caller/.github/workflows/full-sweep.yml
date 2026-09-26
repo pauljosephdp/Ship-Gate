@@ -1,0 +1,36 @@
+# Weekly full sweep: Ship Gate against every page the build emits.
+# Pull requests check the pages listed in ship-gate.config.json (Lighthouse on a few
+# templates), which keeps verify short. This run uses the same config with "all" for
+# Playwright and Lighthouse, so every page still gets the full suite each week.
+# Checks only; nothing deploys. Run it by hand before a change that touches many pages.
+name: Full sweep
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"   # Mondays 03:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: full-sweep
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  full-sweep:
+    name: full-sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        # Full history, only if a site check needs git dates (e.g. sitemap lastmod).
+        # with:
+        #   fetch-depth: 0
+      - name: Config with every page
+        # Add working-directory: site here too if the site is not at the repo root.
+        run: node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("ship-gate.config.json","utf8"));c.lighthouseUrls="all";c.e2ePages="all";fs.writeFileSync("ship-gate.full.json",JSON.stringify(c,null,2))'
+      - uses: pauljosephdp/Ship-Gate@v3.4.0
+        with:
+          config: ship-gate.full.json
+          # working-directory: site

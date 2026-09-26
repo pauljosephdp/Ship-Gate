@@ -1,9 +1,15 @@
 # Ship Gate caller. Keep this job named "verify": it is the required check on main.
+#
+# A draft pull request runs the fast stage only (guards, astro check, tests, build and
+# the post-build scans, about 2 minutes). Marking it ready for review runs every check,
+# browser tests and Lighthouse included. A draft cannot merge, so nothing reaches main
+# without the full gate. Open a PR as a draft while you iterate; mark it ready once.
 name: CI
 
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:
@@ -23,7 +29,8 @@ jobs:
         # Full history, only if a site check needs git dates (e.g. sitemap lastmod).
         # with:
         #   fetch-depth: 0
-      - uses: pauljosephdp/Ship-Gate@v3.3.0
-        # Only if the site is not at the repo root, e.g. "site".
-        # with:
-        #   working-directory: site
+      - uses: pauljosephdp/Ship-Gate@v3.4.0
+        with:
+          stage: ${{ github.event.pull_request.draft && 'scans' || 'full' }}
+          # Only if the site is not at the repo root, e.g. "site".
+          # working-directory: site

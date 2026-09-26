@@ -28,7 +28,7 @@ and the post-deploy check.
 | `.github/workflows/post-deploy.yml` | Calls `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` once Workers Builds reports the deploy |
 | `.github/workflows/full-sweep.yml` | Weekly: the gate against every page (`"all"`), which pull requests only sample |
 | `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
-| `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs |
+| `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs; reads this private repo with the `SHIP_GATE_READ_TOKEN` Dependabot secret (step 14) |
 | `.github/pull_request_template.md` | The review checklist |
 
 Templates for all six are in `templates/caller/`. Sites on the `posthog-hybrid`
@@ -740,14 +740,24 @@ belong in `post-deploy.yml` or a scheduled workflow.
 12. Workers Builds: production branch `main`, non-production branch builds on,
     preview URLs on.
 13. Turn on secret scanning, push protection and Dependabot alerts.
+14. Let Dependabot see Ship Gate's releases. This repo is private, so the
+    template's `dependabot.yml` reads it through a `git` registry whose token is
+    the Dependabot secret `SHIP_GATE_READ_TOKEN`. Create one fine-grained
+    personal access token (resource owner `pauljosephdp`, only
+    `pauljosephdp/Ship-Gate`, permission Contents: read-only), then add it to
+    each site under Settings → Secrets and variables → **Dependabot** (not
+    Actions) as `SHIP_GATE_READ_TOKEN`. Without it, Dependabot's
+    `github_actions` job fails with "Repository not found" and never raises the
+    Ship Gate pin. When the token expires, renew it and update the secret in
+    every site.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.4.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.4.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.4.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.4.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

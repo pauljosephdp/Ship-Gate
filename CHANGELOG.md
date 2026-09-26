@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.4.1 — 2026-09-26
+
+Dependabot can now raise the Ship Gate pin in site repos. No site fails
+because of this release.
+
+**Fixed**
+- The caller `dependabot.yml` gives the `github-actions` updates a `git`
+  registry for this private repo, authenticated by the Dependabot secret
+  `SHIP_GATE_READ_TOKEN` (a fine-grained token with read-only Contents on
+  `pauljosephdp/Ship-Gate`). Before, Dependabot's `github_actions` job in every
+  site failed with "Repository not found", so the pin never moved on its own.
+  Re-copy the template's `registries` block and add the secret (README →
+  Adopting it in a site repo, step 14).
+
 ## v3.4.0 — 2026-09-26
 
 Ship Gate costs sites far fewer Actions minutes and far less artifact storage.

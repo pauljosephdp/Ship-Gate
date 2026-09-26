@@ -136,7 +136,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { group: browser, v1: conforming, v2: vendor-named-asset, v3: missing-alt, v4: wide-element, v5: csp-violation, v6: bad-redirect, v7: no-focus-ring, v8: tracker-cookie, v9: posthog-hybrid }
+          - { group: browser, v1: conforming, v2: vendor-named-asset, v3: missing-alt, v4: wide-element, v5: csp-violation, v6: bad-redirect, v7: no-focus-ring, v8: tracker-cookie, v9: posthog-hybrid, v10: analytics-always-on }
           - { group: scans, v1: two-h1, v2: direct-tag, v3: blocks-ai-search, v4: bad-jsonld, v5: robots-no-agents, v6: rtl-no-dir, v7: google-font, v8: allows-training, v9: posthog-hybrid-missing, v10: posthog-hybrid-csp }
     steps:
       - uses: actions/checkout@v4

@@ -2,12 +2,19 @@
 // Optional: drive PostHog's consent from Zaraz's consent manager (posthog-hybrid).
 // Render it in the base layout right after <PostHog /> or <PostHogSnippet />, and set
 // PURPOSE_ID to the Zaraz purpose that covers analytics (Zaraz → Consent → Purposes).
-// A bundled same-origin script, so a CSP needs no inline allowance.
+// The same answer drives Google Analytics' Consent Mode v2 (analytics-always-on): the GA4
+// tool is assigned to no purpose, so it always loads, with analytics_storage denied by
+// Zaraz's default (templates/caller/analytics/zaraz-setup.md) until this grants it.
+// Ad signals stay denied here: ads tools keep their own purpose.
+// Astro inlines a script this small, and a CSP without 'unsafe-inline' blocks it silently:
+// no one is ever opted in. Keep it a same-origin file with this in astro.config.mjs:
+//   vite: { build: { assetsInlineLimit: (file) => (/ZarazConsent/.test(file) ? false : undefined) } }
 ---
 <script>
   const PURPOSE_ID = 'REPLACE_WITH_ZARAZ_PURPOSE_ID';
 
   type Consent = { APIReady?: boolean; get(purpose: string): boolean | undefined };
+  type Zaraz = { consent?: Consent; set?(key: string, value: unknown): void };
   type PostHogConsent = {
     opt_in_capturing(): void;
     opt_out_capturing(): void;
@@ -17,10 +24,14 @@
   // Nothing happens until Zaraz's consent API is ready: before that, a returning visitor who
   // already said yes would read as "no" and be opted out on first paint.
   function sync() {
-    const consent = (window as { zaraz?: { consent?: Consent } }).zaraz?.consent;
-    const ph = window.posthog as PostHogConsent | undefined;
-    if (!consent?.APIReady || !ph) return;
+    const zaraz = (window as { zaraz?: Zaraz }).zaraz;
+    const consent = zaraz?.consent;
+    if (!consent?.APIReady) return;
     const granted = consent.get(PURPOSE_ID);
+    if (granted === true || granted === false)
+      zaraz?.set?.('google_consent_update', { analytics_storage: granted ? 'granted' : 'denied' });
+    const ph = window.posthog as PostHogConsent | undefined;
+    if (!ph) return;
     if (granted === true && !ph.has_opted_in_capturing?.()) ph.opt_in_capturing();
     else if (granted === false) ph.opt_out_capturing();
   }

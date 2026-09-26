@@ -307,6 +307,11 @@ expect_prepare "posthog settings without policy"  "warn:only used by the posthog
 expect_prepare "hybrid: CI key for the build"     "has:PUBLIC_POSTHOG_KEY=$TK" "cfg '$HY'"
 expect_prepare "hybrid: shared guard exemptible"  "warn:exempted until"       "cfg '$HY,\"guardExemptions\":[{\"guard\":\"posthog-us-host\",\"reason\":\"Moving the project to EU Cloud\",\"restoreBy\":\"$FUTURE\"}]'"
 expect_prepare "hybrid guard, policy off"         "which this site does not use" "cfg '\"guardExemptions\":[{\"guard\":\"posthog-csp\",\"reason\":\"CSP update ships next sprint\",\"restoreBy\":\"$FUTURE\"}]'"
+AO='"policies":["posthog-hybrid","tags-via-zaraz","analytics-always-on","consent-before-tracking"]'
+expect_prepare "always-on: full stack accepted"   pass                        "cfg '$AO'"
+expect_prepare "always-on: needs posthog-hybrid"  "analytics-always-on needs posthog-hybrid" "cfg '\"policies\":[\"tags-via-zaraz\",\"analytics-always-on\"]'"
+expect_prepare "always-on: needs tags-via-zaraz"  "analytics-always-on needs tags-via-zaraz" "cfg '\"policies\":[\"posthog-hybrid\",\"analytics-always-on\"]'"
+expect_prepare "always-on: PostHog cookies refused" "loads PostHog before consent only because it stores nothing" "cfg '\"policies\":[\"posthog-hybrid\",\"tags-via-zaraz\",\"analytics-always-on\"],\"posthog\":{\"cookieless\":\"off\"}'"
 
 echo "Lighthouse config and static server"
 lh_case() {
@@ -718,6 +723,19 @@ ph_live_case "production ships the CI key"         "CI PostHog key"         "{\"
 ph_live_case "production key unknown to PostHog"   "does not know the project key" "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$LIVE_KEY')</script>\"}}"
 ph_live_case "proxy serves HTML for recorder.js"    "does not serve PostHog's assets" "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$LIVE_KEY')</script>\"},\"/ingest/array/$LIVE_KEY/config.js\":{\"type\":\"text/javascript\",\"body\":\"x\"},\"/ingest/static/recorder.js\":{\"type\":\"text/html\",\"body\":\"<h1>404</h1>\"}}"
 ph_live_case "production leaks a personal key"     "personal API key"       "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>const p='${PHX}abcdefghijklmnopqrstuvwxyz0123'</script>\"}}"
+
+# check-analytics-live.mjs (analytics-always-on): Zaraz on production, a warning when missing.
+an_live_case() {
+  local name=$1 expect=$2 port pid out code
+  exec 3< <(OVERRIDES="$3" node -e "$LIVE_SERVER")
+  pid=$!; read -r port <&3
+  out="$(SHIP_GATE_SITE_URL="http://127.0.0.1:$port" node "$HERE/check-analytics-live.mjs" 2>&1)"; code=$?
+  kill "$pid" 2>/dev/null; exec 3<&-
+  check "$name" "$expect" "$code" "$out"
+}
+an_live_case "production carries Zaraz"           "nowarn:Zaraz"              "{\"/\":{\"type\":\"text/html\",\"body\":\"<script src=/cdn-cgi/zaraz/i.js></script>\"}}"
+an_live_case "production without Zaraz warns"     "warn:Zaraz is not on production" "{\"/\":{\"type\":\"text/html\",\"body\":\"<h1>Home</h1>\"}}"
+an_live_case "production home page down"           "Could not fetch production HTML" "{\"/\":{\"status\":500,\"type\":\"text/html\",\"body\":\"x\"}}"
 
 echo "Release (release.sh)"
 # rel_case NAME EXPECT(pass|substring) CHANGELOG-TEXT — a dry run, so nothing is published

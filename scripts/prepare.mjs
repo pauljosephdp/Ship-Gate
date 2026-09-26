@@ -77,6 +77,7 @@ export const POLICIES = {
   'market-cn': 'The site serves mainland China: no Google, YouTube, Facebook, X or Gravatar resources, ASCII URLs',
   'rtl-logical-css': 'The site serves right-to-left languages: built CSS uses logical properties, not left/right',
   'consent-before-tracking': 'No tracking cookie or tracker loads before the visitor consents',
+  'analytics-always-on': 'Google Analytics (a Zaraz tool in Consent Mode v2) and PostHog (posthog-hybrid) load on every page, with or without consent; neither stores anything until the visitor accepts',
 };
 
 // Guards a site may exempt for a while, with a reason and a restore date. A guard
@@ -184,6 +185,17 @@ if (!(posthog.apiHost === POSTHOG_EU.api || (typeof posthog.apiHost === 'string'
   err(`posthog.apiHost must be "${POSTHOG_EU.api}" (EU Cloud) or a same-origin proxy path such as "/ph".`);
 if (hybrid && posthog.cookieless === 'off' && policyOn('consent-before-tracking'))
   err('posthog.cookieless "off" sets PostHog cookies before consent, which consent-before-tracking forbids. Use "on_reject" (cookieless until the visitor accepts) or "always".');
+// ── Analytics on every page (analytics-always-on) ──
+// Google Analytics runs as a Zaraz tool, sent from Cloudflare's edge through the site's own
+// /cdn-cgi/zaraz/, so a browser request to a Google host is still a direct tag and _ga before
+// consent still fails the consent test: Consent Mode keeps GA cookieless until the visitor accepts.
+const alwaysOn = policyOn('analytics-always-on');
+if (alwaysOn && !hybrid)
+  err('policies: analytics-always-on needs posthog-hybrid (PostHog in the browser on every page). Add it.');
+if (alwaysOn && !policyOn('tags-via-zaraz'))
+  err('policies: analytics-always-on needs tags-via-zaraz (Google Analytics runs as a Zaraz tool, in Consent Mode). Add it.');
+if (alwaysOn && hybrid && posthog.cookieless === 'off')
+  err('posthog.cookieless "off" sets PostHog cookies from the first page view; analytics-always-on loads PostHog before consent only because it stores nothing. Use "on_reject" or "always".');
 const posthogHosts = typeof posthog.apiHost === 'string' && posthog.apiHost.startsWith('/') ? [] : ['posthog.com'];
 // Other search engines' crawlers the site must admit, on top of Googlebot and Bingbot.
 const searchCrawlers = cfg.discovery?.searchCrawlers ?? [];

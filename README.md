@@ -33,6 +33,8 @@ and the post-deploy check.
 
 Templates for all six are in `templates/caller/`. Sites on the `posthog-hybrid`
 policy also copy `templates/caller/posthog/` (see PostHog in the browser and on the server).
+Sites on `analytics-always-on` also follow `templates/caller/analytics/` and
+`templates/caller/legal/` (see Analytics on every page).
 
 ## The gate
 
@@ -156,7 +158,10 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   must write no `ph_` cookie and no `ph_`/`__ph` localStorage or
   sessionStorage key. With the npm embed and `"cookieless": "on_reject"`, a
   second test accepts (`posthog.opt_in_capturing()`) and expects PostHog to
-  start storing its identity.
+  start storing its identity. With `analytics-always-on`, Google Analytics
+  also runs before consent, but as a Zaraz tool: its hits go through the
+  site's own `/cdn-cgi/zaraz/`, so a request to a Google host still means a
+  direct tag, and a `_ga` cookie before consent still fails.
 
 Other origins are blocked in the browser, so a vendor outage never fails a PR.
 CSP still reports a disallowed URL before any request is made.
@@ -417,7 +422,11 @@ read-only GET of the project's remote config (`/array/<key>/config.js`), which
 answers 404 for an unknown key. With a same-origin proxy (`posthog.apiHost` a
 path such as `"/ph"`), it also fetches `<siteUrl><apiHost>/static/recorder.js`
 and fails unless that answers 200 with a JavaScript content type: an HTML 404
-page or a redirect means the proxy isn't reaching PostHog.
+page or a redirect means the proxy isn't reaching PostHog. With
+`analytics-always-on` it warns when production's home page has no Zaraz loader
+(`/cdn-cgi/zaraz/`), because then Google Analytics runs nowhere. It warns rather
+than fails: a Zaraz setting is not a fault in the deployed commit, and a
+post-deploy failure means roll back.
 
 With a `crux-api-key` input (a Google API key with the Chrome UX Report API
 enabled, passed as a secret), it also reports **field Core Web Vitals** for
@@ -446,6 +455,7 @@ checks:
 | `rtl-logical-css` | Warns with a count of physical `left`/`right` declarations in the built CSS (`margin-left`, `padding-right`, `left:`, `text-align: left`, `float: right`, `border-left`), which don't mirror under `dir="rtl"`. Use logical properties (`margin-inline-start`, `inset-inline-start`, `text-align: start`). Never fails: some physical values are right |
 | `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. A wrangler config without `secrets.required` listing `POSTHOG_API_KEY` (and, with `turnstile-forms`, the `turnstileEnv` secret) warns, and becomes an error in v4. Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
 | `consent-before-tracking` | The browser consent check: no non-essential cookie and no tracker before the visitor chooses. Strictly necessary cookies go in `consentEssentialCookies` |
+| `analytics-always-on` | Google Analytics and PostHog load on every page, with or without consent, and neither stores anything until the visitor accepts. Needs `posthog-hybrid` (with `posthog.cookieless` `"on_reject"` or `"always"`) and `tags-via-zaraz`. GA4 is a Zaraz tool with no consent purpose, in Google Consent Mode v2 with every signal denied by default. Then the post-deploy Zaraz check. See Analytics on every page |
 
 ```json
 "policies": ["posthog-server-only", "tags-via-zaraz", "turnstile-forms", "workers-builds-only"]
@@ -473,7 +483,7 @@ these same files, so CI proves them on every Ship Gate change.
 | `src/env.d.ts` | merge | Declares `__BUILD_SHA__`, `__DEPLOY_ENV__`, `PUBLIC_POSTHOG_KEY` and `window.posthog` |
 | `csp.txt` | merge into `public/_headers` | The CSP sources PostHog needs |
 | `src/lib/server/posthog-proxy.ts` and `src/worker.ts` | same paths; wrangler `"main": "./src/worker.ts"` | Optional same-origin reverse proxy at `/ph`, so ad blockers don't drop events and CSP needs only `'self'`. It runs in the Worker entry before Astro, so it needs no on-demand rendering and `trailingSlash: 'always'` never redirects PostHog's POSTs. `/ph/static/*` and `/ph/array/*` go to `eu-assets.i.posthog.com`, the rest to `eu.i.posthog.com`; the site's cookies and PostHog's `Set-Cookie` are dropped, and `CF-Connecting-IP` goes on as `X-Forwarded-For` so PostHog still geolocates. A site with its own `worker.ts` adds the import and `posthogProxy(request) ?? handle(request, env, ctx)`. Then set `apiHost` to `/ph` in both the options file and the config. Unit-tested in `test/posthog-proxy.test.mjs`; the fixture (a static site) doesn't build it |
-| `optional/src/components/PostHogZarazConsent.astro` | same path, right after the PostHog component | Zaraz consent → PostHog: on `zarazConsentAPIReady` and `zarazConsentChoicesUpdated`, the purpose's `true` calls `opt_in_capturing()` and `false` calls `opt_out_capturing()`. Does nothing until `zaraz.consent.APIReady`, so a returning visitor who said yes is never opted out on first paint. Set `PURPOSE_ID` |
+| `optional/src/components/PostHogZarazConsent.astro` | same path, right after the PostHog component | Zaraz consent → PostHog and Google Analytics: on `zarazConsentAPIReady` and `zarazConsentChoicesUpdated`, the purpose's `true` calls `opt_in_capturing()` and grants `analytics_storage` (`zaraz.set('google_consent_update', …)`); `false` calls `opt_out_capturing()` and denies it. Does nothing until `zaraz.consent.APIReady`, so a returning visitor who said yes is never opted out on first paint. Set `PURPOSE_ID`. Astro inlines a script this small, which a CSP without `'unsafe-inline'` blocks without an error, so add `vite: { build: { assetsInlineLimit: (file) => (/ZarazConsent/.test(file) ? false : undefined) } }` to `astro.config.mjs` to keep it a same-origin file |
 | `optional/src/lib/hubspot-conversion.ts` | same path | `trackHubSpotForm(formId, event)`: on a HubSpot embed's `hsFormCallback`/`onFormSubmitted` for that form, `zaraz.track` and `posthog.capture` the event with the form ID only |
 
 ```json
@@ -497,6 +507,44 @@ the npm embed the smoke test compares them.
 Consent copy: in one short test, session replay started only after opt-in.
 That isn't confirmed yet, so adoption guides and cookie-policy text must not
 claim replay runs before consent.
+
+### Analytics on every page (`analytics-always-on`)
+
+Google Analytics and PostHog load on every page, with or without consent.
+Neither stores anything in the browser until the visitor accepts analytics in
+the Zaraz consent modal.
+
+- **PostHog:** `posthog-hybrid` with `"cookieless": "on_reject"`, as above.
+- **Google Analytics 4:** a Zaraz tool assigned to **no** consent purpose, so it
+  always loads. Zaraz's *Set Google Consent Mode v2 state* setting has every
+  signal denied by default. GA then sends hits without cookies, and sets
+  `_ga`/`_ga_*` only after `PostHogZarazConsent.astro` grants
+  `analytics_storage`.
+- **Ads and marketing tools** (Meta, LinkedIn, TikTok, HubSpot tracking) stay
+  on a Marketing purpose and load only after consent.
+
+| Template | What it is |
+|---|---|
+| `templates/caller/analytics/zaraz-setup.md` | The Zaraz dashboard checklist: GA4 tool, Consent Mode default, purposes, and a one-time check on production |
+| `templates/caller/legal/analytics-disclosure.md` | Paste-ready cookie and privacy policy text for GA4 and PostHog before and after consent, with the choices section. Not legal advice: review it with counsel |
+| `templates/caller/posthog/optional/src/components/PostHogZarazConsent.astro` | The consent bridge (see the PostHog table) |
+
+```json
+"policies": ["posthog-hybrid", "tags-via-zaraz", "consent-before-tracking", "analytics-always-on"],
+"posthog": { "embed": "npm", "cookieless": "on_reject" }
+```
+
+The gate can't see Zaraz: it runs only on Cloudflare's edge. Before merge,
+Ship Gate checks the config, the consent test (no `_ga` or `ph_` storage
+before consent) and the consent bridge's build. After deploy, it checks that
+the Zaraz loader is on production. Cloudflare doesn't document whether the Zaraz
+GA4 tool sets any cookie while `analytics_storage` is denied. So do the
+checklist's production check once per site before its cookie policy says "no
+cookies before consent".
+
+Legal note: some EU and UK regulators consider measuring visitors before
+consent unlawful even without cookies. The lawful basis and the policy wording
+are the site owner's decisions.
 
 **PostHog project settings.**
 - *Cookieless server hash mode* = 2 (stateful), under Settings → Web analytics.
@@ -588,6 +636,8 @@ guards, exemptible only when the site uses the policy:
 - `workers-builds-only`: `pages-config` and `cloudflare-in-workflows`
 - `market-cn`: `blocked-in-cn`
 - `consent-before-tracking`: `consent`
+- `analytics-always-on`: no guards of its own; it relies on `tags-via-zaraz`'s
+  `direct-tags`, the `consent` check, and `posthog-hybrid`'s guards
 
 Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 `posthog-server-only` or `posthog-hybrid`) a hard-coded PostHog key.
@@ -743,11 +793,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.4.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.5.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.4.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.5.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

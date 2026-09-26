@@ -19,6 +19,9 @@ templates (`ci.yml`, `post-deploy.yml`, `dependabot.yml`, and the new
 **Changed**
 - Reports upload only when a check failed, and are kept 5 days instead of 14.
   Green runs upload nothing.
+- Each run deletes its branch's older report artifacts, so a branch keeps at
+  most its latest failed run's reports. The caller `ci.yml` and `full-sweep.yml`
+  grant `actions: write` for this; without it the step logs a notice.
 - The caller `post-deploy.yml` starts when Cloudflare Workers Builds reports a
   successful build of `main`, instead of polling from the push while the deploy
   runs. Sites deployed another way keep `on: push`.

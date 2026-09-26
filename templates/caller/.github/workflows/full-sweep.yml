@@ -16,6 +16,8 @@ concurrency:
 
 permissions:
   contents: read
+  # Ship Gate deletes this branch's older report artifacts, keeping one run's at most.
+  actions: write
 
 jobs:
   full-sweep:

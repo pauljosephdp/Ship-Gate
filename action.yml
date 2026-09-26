@@ -324,6 +324,31 @@ runs:
         echo "$table" > "${SHIP_GATE_DIR:-$RUNNER_TEMP}/summary.md"
         echo "failed=$failed" >> "$GITHUB_OUTPUT"
 
+    # At most one run's reports per branch: a failed run's reports replace the branch's
+    # older ones, and a green run clears them. Other branches' reports are left alone,
+    # since someone may be reading one. Deleting needs `actions: write` (the caller
+    # templates grant it); without it this logs a notice and the reports expire.
+    - name: Prune older reports on this branch
+      if: always() && steps.site.outputs.fixture != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        ids="$(gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" --jq '.artifacts[]
+          | select((.expired | not) and (.name | startswith("ship-gate-reports-")))
+          | select(.workflow_run.head_branch == env.BRANCH and (.workflow_run.id | tostring) != env.RUN_ID)
+          | .id')" || { echo "::notice::Could not list artifacts; older reports stay until they expire."; exit 0; }
+        n=0
+        for id in $ids; do
+          if gh api -X DELETE "repos/$REPO/actions/artifacts/$id" >/dev/null 2>&1; then n=$((n + 1))
+          else echo "::notice::Could not delete older reports (the workflow needs actions: write); they expire after 5 days."; break; fi
+        done
+        echo "Deleted $n older report artifact(s) from $BRANCH."
+
     # Reports (Playwright traces, Lighthouse HTML) only when a check failed: that is when
     # someone reads them. Kept on every green run, they filled the artifact storage quota.
     # Ship Gate's own fixture runs fail on purpose and print the summary instead.

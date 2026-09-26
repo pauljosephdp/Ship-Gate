@@ -790,6 +790,9 @@ cost_case "fixture steps pass their stage as the input"  .github/workflows/self-
 cost_case "caller CI runs drafts at stage scans"         templates/caller/.github/workflows/ci.yml "stage: \${{ github.event.pull_request.draft && 'scans' || 'full' }}"
 cost_case "caller CI re-runs when a draft turns ready"   templates/caller/.github/workflows/ci.yml 'ready_for_review'
 cost_case "caller post-deploy waits for the deployed SHA" templates/caller/.github/workflows/post-deploy.yml 'sha: ${{ github.event.check_run.head_sha || github.sha }}'
+cost_case "each run prunes its branch's older reports"   action.yml 'select(.workflow_run.head_branch == env.BRANCH and (.workflow_run.id | tostring) != env.RUN_ID)'
+cost_case "caller CI may delete its older reports"      templates/caller/.github/workflows/ci.yml 'actions: write'
+cost_case "caller full sweep may delete its older reports" templates/caller/.github/workflows/full-sweep.yml 'actions: write'
 cost_case "caller Dependabot does not rebase open PRs"   templates/caller/.github/dependabot.yml 'rebase-strategy: disabled'
 n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/workflows/self-test.yml")"
 m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"

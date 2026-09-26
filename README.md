@@ -56,7 +56,12 @@ the end names each check's result, and the job fails if any check failed.
 When a check fails, the reports (Playwright traces, Lighthouse HTML, the
 discovery table) upload as a build artifact for 5 days, never to public
 storage. A green run uploads nothing: its summary table is the record, and
-storing reports for every green run filled the account's artifact quota.
+storing reports for every green run filled the account's artifact quota. Each
+run also deletes its branch's older reports, so a branch keeps at most its
+latest failed run's and a green run leaves none. Other branches' reports stay,
+since someone may be reading one. Deleting needs `actions: write`, which the
+caller `ci.yml` and `full-sweep.yml` grant; without it (a fork's PR, an older
+caller) the step logs a notice and the reports simply expire.
 
 **Stages.** The `stage` input decides how far the gate runs: `full` (the
 default) runs everything above; `browser` stops before Lighthouse; `scans`

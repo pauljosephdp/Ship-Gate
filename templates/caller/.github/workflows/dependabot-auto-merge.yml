@@ -1,0 +1,41 @@
+# Merges Dependabot's Ship Gate bump on its own once "verify" passes.
+#
+# Only a PR that raises pauljosephdp/Ship-Gate by a minor or patch version is
+# queued. A major Ship Gate release means the site must change something, so it
+# waits for a person, as does any group that also carries another action's major.
+# npm updates are left alone. Auto-merge never skips the required "verify" check:
+# a bump that fails the gate stays open.
+#
+# Needs Settings → General → "Allow auto-merge" on. The ruleset requires the branch
+# to be up to date and Dependabot does not rebase open PRs here, so if main moved
+# after the PR opened, comment "@dependabot rebase" on it.
+#
+# pull_request_target runs this file from main and never checks out the PR, so the
+# write token never touches the PR's code.
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  ship-gate:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v3
+      - name: Queue the merge
+        if: >-
+          contains(steps.meta.outputs.dependency-names, 'pauljosephdp/Ship-Gate')
+          && (steps.meta.outputs.update-type == 'version-update:semver-minor'
+            || steps.meta.outputs.update-type == 'version-update:semver-patch')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"

@@ -835,6 +835,10 @@ cost_case "caller full sweep may delete its older reports" templates/caller/.git
 cost_case "caller Dependabot reads Ship Gate with a token" templates/caller/.github/dependabot.yml 'password: ${{secrets.SHIP_GATE_READ_TOKEN}}'
 cost_case "caller Dependabot uses it for action updates"  templates/caller/.github/dependabot.yml 'registries: [ship-gate]'
 cost_case "caller Dependabot does not rebase open PRs"   templates/caller/.github/dependabot.yml 'rebase-strategy: disabled'
+cost_case "caller auto-merge runs from main, not the PR"  templates/caller/.github/workflows/dependabot-auto-merge.yml 'pull_request_target:'
+cost_case "caller auto-merge acts on Dependabot PRs only" templates/caller/.github/workflows/dependabot-auto-merge.yml "if: github.event.pull_request.user.login == 'dependabot[bot]'"
+cost_case "caller auto-merge only for Ship Gate bumps"   templates/caller/.github/workflows/dependabot-auto-merge.yml "contains(steps.meta.outputs.dependency-names, 'pauljosephdp/Ship-Gate')"
+cost_case "caller auto-merge never for a major"          templates/caller/.github/workflows/dependabot-auto-merge.yml "steps.meta.outputs.update-type == 'version-update:semver-minor'"
 n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/workflows/self-test.yml")"
 m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"
 if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi

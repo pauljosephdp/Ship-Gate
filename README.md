@@ -29,9 +29,10 @@ and the post-deploy check.
 | `.github/workflows/full-sweep.yml` | Weekly: the gate against every page (`"all"`), which pull requests only sample |
 | `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
 | `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs; reads this private repo with the `SHIP_GATE_READ_TOKEN` Dependabot secret (step 14) |
+| `.github/workflows/dependabot-auto-merge.yml` | Queues Dependabot's minor or patch Ship Gate bump to squash-merge once `verify` passes; majors and npm updates wait for a person (step 15) |
 | `.github/pull_request_template.md` | The review checklist |
 
-Templates for all six are in `templates/caller/`. Sites on the `posthog-hybrid`
+Templates for all seven are in `templates/caller/`. Sites on the `posthog-hybrid`
 policy also copy `templates/caller/posthog/` (see PostHog in the browser and on the server).
 Sites on `analytics-always-on` also follow `templates/caller/analytics/` and
 `templates/caller/legal/` (see Analytics on every page).
@@ -814,14 +815,24 @@ belong in `post-deploy.yml` or a scheduled workflow.
     `github_actions` job fails with "Repository not found" and never raises the
     Ship Gate pin. When the token expires, renew it and update the secret in
     every site.
+15. Let Ship Gate bumps merge themselves. Turn on Settings → General → **Allow
+    auto-merge**. `dependabot-auto-merge.yml` then queues each Dependabot PR
+    that raises the Ship Gate pin by a minor or patch version (`gh pr merge
+    --auto --squash`); it merges when `verify` passes. A major Ship Gate
+    release, a group that also carries another action's major, and npm
+    updates wait for a person. The workflow runs on `pull_request_target` from
+    `main` and never checks out the PR. The ruleset requires an up-to-date
+    branch and Dependabot doesn't rebase here, so if `main` moved since the PR
+    opened, comment `@dependabot rebase` on it. If the site's ruleset allows
+    only merge commits, change `--squash` to `--merge`.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.6.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.7.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.6.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.7.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -909,9 +920,10 @@ never releases. Choose the version by its effect on site repos:
   conforming site already passes.
 - **Patch** (v1.1.1): fixes that make no conforming site fail.
 
-Dependabot then opens a PR in each site repo, and that PR runs through the
-site's own `verify` before merging. A bad release fails on one PR instead of
-breaking every site at once.
+Dependabot then opens a PR in each site repo (weekly, on Monday), and that PR
+runs through the site's own `verify` before merging. Minor and patch bumps
+merge themselves once `verify` passes (step 15); a major waits for a person.
+A bad release fails on one PR instead of breaking every site at once.
 
 ## Out of scope
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.7.0 — 2026-09-26
+
+Ship Gate bumps can merge themselves. No site fails because of this release.
+
+**Added**
+- `templates/caller/.github/workflows/dependabot-auto-merge.yml`: queues
+  Dependabot's minor or patch Ship Gate bump to squash-merge once `verify`
+  passes. A major Ship Gate release, a group that also carries another
+  action's major, and npm updates still wait for a person.
+
+**Copy into each site** (optional, from `templates/caller/`)
+- `.github/workflows/dependabot-auto-merge.yml`, then turn on Settings →
+  General → Allow auto-merge (README → Adopting it in a site repo, step 15).
+- Raise the pin in `ci.yml`, `post-deploy.yml` and `full-sweep.yml` to v3.7.0.
+
 ## v3.6.0 — 2026-09-26
 
 Three new warnings, and the reflow check now sees motion as shipped. No site

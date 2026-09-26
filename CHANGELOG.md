@@ -1,5 +1,54 @@
 # Changelog
 
+## v3.3.0 — 2026-09-26
+
+Lessons from getting `posthog-hybrid` running on Qualified Deals, moved into the
+templates and checks. No site needs to change anything to stay green; bump the
+pin. Sites on `posthog-hybrid` should re-copy the templates they use from
+`templates/caller/posthog/`, and add `secrets.required` to their wrangler config.
+
+**Added**
+- Proxy in the Worker entry: `src/lib/server/posthog-proxy.ts` (a pure function,
+  unit-tested in `test/posthog-proxy.test.mjs`) and `src/worker.ts`. It serves
+  `/ph` by default: `/ph/static/*` and `/ph/array/*` go to
+  `eu-assets.i.posthog.com`, the rest to `eu.i.posthog.com`. It drops the site's
+  cookies and PostHog's `Set-Cookie`, and forwards `CF-Connecting-IP` as
+  `X-Forwarded-For`. It needs no on-demand rendering and isn't redirected by
+  `trailingSlash: 'always'`.
+- `optional/src/components/PostHogZarazConsent.astro`: syncs Zaraz consent
+  into PostHog's opt-in or opt-out. It does nothing until
+  `zaraz.consent.APIReady`, so a returning visitor who said yes isn't opted out
+  on first paint.
+- `optional/src/lib/hubspot-conversion.ts`: a HubSpot embed submission
+  (`hsFormCallback`/`onFormSubmitted`) goes to `zaraz.track` and
+  `posthog.capture` with the form ID only.
+- `posthog-hybrid` warns when the wrangler config's `secrets.required` lacks
+  `POSTHOG_API_KEY` or, with `turnstile-forms`, the `turnstileEnv` secret. This
+  becomes an error in v4.
+- Post-deploy with a proxy path: `<siteUrl><apiHost>/static/recorder.js` must
+  answer 200 with a JavaScript content type.
+- README: where each key goes, the PostHog project settings (cookieless server
+  hash mode 2), the unconfirmed consent-copy caveat on session replay, and
+  one-use Turnstile tokens.
+
+**Fixed**
+- `PostHog.astro` and `PostHogSnippet.astro` register `environment` again
+  after `opt_in_capturing()` and `opt_out_capturing()`. Opting in moved
+  posthog-js to cookie storage and dropped the tag, so every event after
+  consent went untagged and slipped past the "not production" filter.
+- `analytics.ts`:
+  - finds the visitor from the tracing headers, then ids sent in the form body
+    (`browserIds(body)`), then the cookie's `distinct_id` and `$sesid[1]`
+  - with no identity at all, uses a random id with
+    `$process_person_profile: false`, not one shared `'server'` person
+  - trims the key, logs each send (key prefix and length) and PostHog's own
+    errors, and when the key is missing warns once with the binding names
+    (never their values)
+
+**Removed**
+- `optional/src/pages/api/ingest/[...path].ts`, replaced by the Worker-entry
+  proxy. A site that copied it keeps working; move to `/ph` when convenient.
+
 ## v3.2.1 — 2026-09-26
 
 A fix for sites on `posthog-hybrid` with a same-origin proxy

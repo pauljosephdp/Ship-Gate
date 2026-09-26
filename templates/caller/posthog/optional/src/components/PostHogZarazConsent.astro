@@ -1,0 +1,34 @@
+---
+// Optional: drive PostHog's consent from Zaraz's consent manager (posthog-hybrid).
+// Render it in the base layout right after <PostHog /> or <PostHogSnippet />, and set
+// PURPOSE_ID to the Zaraz purpose that covers analytics (Zaraz → Consent → Purposes).
+// A bundled same-origin script, so a CSP needs no inline allowance.
+---
+<script>
+  const PURPOSE_ID = 'REPLACE_WITH_ZARAZ_PURPOSE_ID';
+
+  type Consent = { APIReady?: boolean; get(purpose: string): boolean | undefined };
+  type PostHogConsent = {
+    opt_in_capturing(): void;
+    opt_out_capturing(): void;
+    has_opted_in_capturing?(): boolean;
+  };
+
+  // Nothing happens until Zaraz's consent API is ready: before that, a returning visitor who
+  // already said yes would read as "no" and be opted out on first paint.
+  function sync() {
+    const consent = (window as { zaraz?: { consent?: Consent } }).zaraz?.consent;
+    const ph = window.posthog as PostHogConsent | undefined;
+    if (!consent?.APIReady || !ph) return;
+    const granted = consent.get(PURPOSE_ID);
+    if (granted === true && !ph.has_opted_in_capturing?.()) ph.opt_in_capturing();
+    else if (granted === false) ph.opt_out_capturing();
+  }
+
+  if (!(window as { __posthog_zaraz_consent?: boolean }).__posthog_zaraz_consent) {
+    (window as { __posthog_zaraz_consent?: boolean }).__posthog_zaraz_consent = true;
+    document.addEventListener('zarazConsentAPIReady', sync);
+    document.addEventListener('zarazConsentChoicesUpdated', sync);
+    sync();
+  }
+</script>

@@ -10,4 +10,5 @@
 # img-src      'self' data: https://eu.i.posthog.com
 # style-src    'self' 'unsafe-inline'   (surveys and the toolbar inject styles)
 #
-# With the optional /api/ingest proxy, 'self' covers script-src and connect-src.
+# With the optional /ph proxy (posthog-proxy.ts in the Worker entry), 'self' covers
+# script-src and connect-src.

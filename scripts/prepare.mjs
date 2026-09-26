@@ -181,7 +181,7 @@ if (!['snippet', 'npm'].includes(posthog.embed)) err('posthog.embed must be "sni
 if (!['on_reject', 'always', 'off'].includes(posthog.cookieless)) err('posthog.cookieless must be "on_reject" (the default), "always" or "off".');
 // EU Cloud, or a same-origin path the site proxies to it.
 if (!(posthog.apiHost === POSTHOG_EU.api || (typeof posthog.apiHost === 'string' && /^\/[A-Za-z0-9._~\/-]+$/.test(posthog.apiHost))))
-  err(`posthog.apiHost must be "${POSTHOG_EU.api}" (EU Cloud) or a same-origin proxy path such as "/api/ingest".`);
+  err(`posthog.apiHost must be "${POSTHOG_EU.api}" (EU Cloud) or a same-origin proxy path such as "/ph".`);
 if (hybrid && posthog.cookieless === 'off' && policyOn('consent-before-tracking'))
   err('posthog.cookieless "off" sets PostHog cookies before consent, which consent-before-tracking forbids. Use "on_reject" (cookieless until the visitor accepts) or "always".');
 const posthogHosts = typeof posthog.apiHost === 'string' && posthog.apiHost.startsWith('/') ? [] : ['posthog.com'];
@@ -604,6 +604,7 @@ if (hybrid) {
 if (turnstile) {
   exportEnv(turnstileEnv.siteKey, TURNSTILE_TEST_KEYS.siteKey);
   exportEnv(turnstileEnv.secretKey, TURNSTILE_TEST_KEYS.secretKey);
+  exportEnv('SHIP_GATE_TURNSTILE_SECRET', turnstileEnv.secretKey);
 }
 const n = (p) => checkLists[p].length;
 console.log(`Ship Gate prepared: ${pages.length} key page(s), ${formPages.length} form page(s), ` +

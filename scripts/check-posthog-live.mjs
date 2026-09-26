@@ -8,6 +8,9 @@
 // loads (PUBLIC_POSTHOG_KEY was unset in the production build); when it carries Ship Gate's
 // CI key or a personal key (phx_); and when PostHog does not know the key. The key check is
 // one read-only GET of the project's remote config, the file every page load fetches.
+// With a same-origin proxy (apiHost a path such as "/ph"), it also fetches the session
+// replay recorder through the proxy: a 200 with a JavaScript content type, not the site's
+// HTML 404 page or a redirect, proves the proxy reaches PostHog's assets host.
 // No dependencies: Node built-ins only.
 
 const site = process.env.SHIP_GATE_SITE_URL;
@@ -53,4 +56,13 @@ let res;
 try { res = await fetch(configUrl); } catch (e) { fail(`Could not reach PostHog at ${configUrl}: ${e.message}.`); }
 if (res.status === 404) fail(`PostHog does not know the project key production ships (${key.slice(0, 12)}…). Check PUBLIC_POSTHOG_KEY.`);
 if (!res.ok) fail(`PostHog's remote config answered ${res.status} for production's key (${configUrl}).`);
+if (apiHost.startsWith('/')) {
+  const recorder = `${site}${apiHost}/static/recorder.js`;
+  let r;
+  try { r = await fetch(recorder, { redirect: 'manual' }); } catch (e) { fail(`Could not reach the PostHog proxy at ${recorder}: ${e.message}.`); }
+  const type = r.headers.get('content-type') ?? '';
+  if (r.status !== 200 || !/javascript/i.test(type))
+    fail(`The PostHog proxy does not serve PostHog's assets: ${recorder} answered ${r.status} (${type || 'no content type'}), not 200 JavaScript. Route ${apiHost}/* to posthogProxy in the Worker entry (templates/caller/posthog/src/worker.ts).`);
+  console.log(`The PostHog proxy at ${apiHost} serves PostHog's assets.`);
+}
 console.log(`Production starts PostHog with a live project key (${key.slice(0, 12)}…).`);

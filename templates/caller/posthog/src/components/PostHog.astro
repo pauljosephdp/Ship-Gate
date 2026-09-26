@@ -12,9 +12,21 @@
   // <ClientRouter> re-runs scripts on navigation; initialise once.
   if (key && !window.__posthog_initialized) {
     window.__posthog_initialized = true;
-    posthog.init(key, { ...posthogOptions, tracing_headers: [location.hostname] });
     // Preview and local traffic stay out of production analytics.
-    posthog.register({ environment: __DEPLOY_ENV__ });
+    const tag = { environment: __DEPLOY_ENV__ };
+    posthog.init(key, {
+      ...posthogOptions,
+      tracing_headers: [location.hostname],
+      // Consent moves posthog-js between cookieless and cookie storage, which drops
+      // registered properties: without this, every event after opt-in goes untagged.
+      loaded: (ph) => {
+        const optIn = ph.opt_in_capturing.bind(ph);
+        const optOut = ph.opt_out_capturing.bind(ph);
+        ph.opt_in_capturing = (...a: Parameters<typeof optIn>) => { optIn(...a); ph.register(tag); };
+        ph.opt_out_capturing = () => { optOut(); ph.register(tag); };
+      },
+    });
+    posthog.register(tag);
     window.posthog = posthog;
   }
 </script>

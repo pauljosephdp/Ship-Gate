@@ -11,8 +11,7 @@ const MODES = [
 ];
 
 async function overflow(browser: Browser, baseURL: string, path: string, mode: (typeof MODES)[number]) {
-  // Reduced motion: an element sliding in from off-screen is not a layout fault.
-  const ctx = await browser.newContext({ baseURL, viewport: mode.viewport, deviceScaleFactor: mode.scale, reducedMotion: 'reduce' });
+  const ctx = await browser.newContext({ baseURL, viewport: mode.viewport, deviceScaleFactor: mode.scale });
   const page = await ctx.newPage();
   await sameOriginOnly(page);
   const res = await page.goto(path);

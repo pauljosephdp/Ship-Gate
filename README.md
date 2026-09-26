@@ -149,6 +149,8 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
 - **Reflow:** no horizontal scroll at 320, 360 and 390px and at 200% zoom
   (1280px at 2x), WCAG 1.4.10 and 1.4.4. Content inside its own `overflow-x`
   scroller or clipper passes; the failure names the elements past the edge.
+  The page runs with its motion as shipped (Ship Gate never emulates reduced
+  motion) and is measured after scrolling and letting animations finish.
 - **CSP:** a page that sends a Content-Security-Policy (enforced or Report-Only)
   must load with zero violations.
 - **Consent** (`consent-before-tracking` policy, desktop): before any
@@ -457,7 +459,7 @@ checks:
 |---|---|
 | `posthog-server-only` | `posthog-node` only inside `src/lib/server`, `src/pages/api`, `src/actions` or `src/middleware`; EU host; the key is never `PUBLIC_` and never hard-coded; every event tagged with `__DEPLOY_ENV__`; no PostHog in the client bundle, in browser requests, or in production HTML. Markdown content (`src/content/**/*.md`, `*.mdx`) may name `posthog.com` in prose, as a privacy policy's disclosure does ("PostHog Privacy Policy: posthog.com/privacy"); `posthog-node`, `POSTHOG_`, `new PostHog(`, `posthog.init` and ingestion hosts (`i.posthog.com`, `eu.i.posthog.com`, `us-assets.i.posthog.com`) still fail there. The client-bundle and production-HTML checks look for `posthog-js`, `posthog.init`, ingestion hosts and keys, so the disclosure passes them too |
 | `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot tracking (`hs-scripts`, `hs-analytics`) go through Cloudflare Zaraz. HubSpot form embeds (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until HubSpot's forms API is available. They render their own form, so list only Turnstile forms in `formPages`. A tag host that loads nothing passes: `_headers` comment lines and `Content-Security-Policy` values (a client-side Zaraz tool such as Clarity needs its hosts in the CSP), and a bare `www.clarity.ms` in prose or a link. Clarity's loader (`clarity.ms/tag`) still fails |
-| `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys |
+| `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys. When a page carries the widget, a wrangler config without `secrets.required` listing the `turnstileEnv` secret warns, so a deploy without it fails instead of rejecting every submission |
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
 | `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: Google (Fonts, Maps, reCAPTCHA, tags), YouTube, Facebook, Instagram, X/Twitter, Vimeo, Gravatar. A blocked font or script stalls the page until it times out. Links and JSON-LD `sameAs` load nothing and pass. jsDelivr and unpkg warn; non-ASCII URLs warn |
 | `rtl-logical-css` | Warns with a count of physical `left`/`right` declarations in the built CSS (`margin-left`, `padding-right`, `left:`, `text-align: left`, `float: right`, `border-left`), which don't mirror under `dir="rtl"`. Use logical properties (`margin-inline-start`, `inset-inline-start`, `text-align: start`). Never fails: some physical values are right |
@@ -593,8 +595,12 @@ These apply to every site:
 - **No committed `.env` or `.dev.vars` files**, anywhere in the repository, even
   outside the site directory. `.example` files are fine.
 - **Node pinned** in `.nvmrc` or `.node-version`, at 22.12.0 or later (Astro
-  7's floor). A bare `22` warns: pin the exact version so CI and Workers Builds
-  agree.
+  7's floor). A pin that isn't an exact `major.minor.patch` (a bare `24`, or
+  `24.21`) warns: pin the exact version, the same as `NODE_VERSION` in Workers
+  Builds, so CI and deploys agree.
+- **Tailwind 4 without a leftover JS config.** A `tailwind.config.*` file beside
+  Tailwind 4 or later warns, unless a stylesheet in `src` loads it with
+  `@config`: Tailwind 4 reads its theme from CSS (`@theme`) and ignores the file.
 - **No workflow pushes to `main`.** Pushing to `main` skips the PR and its
   checks. There is no exemption; a bot opens a PR like anyone else.
 - **Lighthouse reports stay private.** Temporary public storage fails.
@@ -811,11 +817,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.5.3 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.6.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.5.3". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.6.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

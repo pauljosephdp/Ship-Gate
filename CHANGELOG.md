@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.6.0 — 2026-09-26
+
+Three new warnings, and the reflow check now sees motion as shipped. No site
+fails because of the warnings; see Changed for the reflow check.
+
+**Added**
+- `node-pin` warns on any pin that isn't an exact `major.minor.patch`. Only a
+  bare `22` warned before, so a bare `24` passed silently.
+- `turnstile-forms` warns when a page carries the Turnstile widget and the
+  wrangler config's `secrets.required` lacks the `turnstileEnv` secret
+  (`TURNSTILE_SECRET_KEY` by default). `posthog-hybrid` sites already had this
+  warning; it now applies whatever the PostHog mode.
+- A `tailwind.config.*` file beside Tailwind 4 or later warns, unless a
+  stylesheet in `src` loads it with `@config`.
+
+**Changed**
+- The reflow check no longer emulates `prefers-reduced-motion`. It measures
+  the page with its motion as shipped, after scrolling and letting animations
+  finish. An element an animation leaves past the right edge now fails, as it
+  scrolls sideways for visitors too.
+- The caller pull request template's preview checklist drops "reduced motion".
+
+**Copy into each site** (optional, from `templates/caller/`)
+- `.github/pull_request_template.md`.
+
 ## v3.5.3 — 2026-09-26
 
 The action's own steps move to the current GitHub Actions majors. No site fails

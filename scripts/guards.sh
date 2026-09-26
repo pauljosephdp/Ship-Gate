@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stack guards — fail CI when code breaks the standard.
-# Guards 1, 1b, 2, 3 and 5 are stack policies, run only when the site's config opts into them
+# Guards 1, 1b, 2, 3, 3b and 5 are stack policies, run only when the site's config opts into them
 # (policies, passed in SHIP_GATE_POLICIES by prepare.mjs). The rest apply to every site.
 set -uo pipefail
 
@@ -22,6 +22,29 @@ DIRS="src public"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 POLICIES=" ${SHIP_GATE_POLICIES:-} "
 policy() { [[ "$POLICIES" == *" $1 "* ]]; }
+
+# secrets_missing "NAME..." — prints what the wrangler config's secrets.required lacks, or
+# that there is no readable wrangler config; prints nothing when every name is declared.
+secrets_missing() {
+  NEED="$1" node -e '
+  const fs = require("fs");
+  const f = ["wrangler.jsonc", "wrangler.json", "wrangler.toml"].find((n) => fs.existsSync(n));
+  if (!f) { console.log("no wrangler config"); process.exit(); }
+  const src = fs.readFileSync(f, "utf8");
+  let req = [];
+  if (f.endsWith(".toml")) {
+    const sec = src.split(/^\s*\[/m).find((b) => /^secrets\]/.test(b)) ?? "";
+    const m = sec.match(/^\s*required\s*=\s*\[([^\]]*)\]/m);
+    req = m ? [...m[1].matchAll(/["\x27]([^"\x27]+)["\x27]/g)].map((x) => x[1]) : [];
+  } else {
+    const json = src.replace(/"(?:[^"\\]|\\.)*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m[0] === "\"" ? m : ""))
+      .replace(/,(\s*[}\]])/g, "$1");
+    try { req = JSON.parse(json).secrets?.required ?? []; } catch { console.log(`${f} is not valid JSON`); process.exit(); }
+  }
+  const miss = process.env.NEED.split(" ").filter((n) => !req.includes(n));
+  if (miss.length) console.log(`${f} secrets.required lacks ${miss.join(", ")}`);
+' 2>&1
+}
 
 if policy posthog-server-only; then
 
@@ -101,24 +124,7 @@ done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
 # shipping a Worker that silently sends nothing. A warning in v3; an error from v4.
 need="POSTHOG_API_KEY"
 policy turnstile-forms && need="$need ${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
-missing="$(NEED="$need" node -e '
-  const fs = require("fs");
-  const f = ["wrangler.jsonc", "wrangler.json", "wrangler.toml"].find((n) => fs.existsSync(n));
-  if (!f) { console.log("no wrangler config"); process.exit(); }
-  const src = fs.readFileSync(f, "utf8");
-  let req = [];
-  if (f.endsWith(".toml")) {
-    const sec = src.split(/^\s*\[/m).find((b) => /^secrets\]/.test(b)) ?? "";
-    const m = sec.match(/^\s*required\s*=\s*\[([^\]]*)\]/m);
-    req = m ? [...m[1].matchAll(/["\x27]([^"\x27]+)["\x27]/g)].map((x) => x[1]) : [];
-  } else {
-    const json = src.replace(/"(?:[^"\\]|\\.)*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m[0] === "\"" ? m : ""))
-      .replace(/,(\s*[}\]])/g, "$1");
-    try { req = JSON.parse(json).secrets?.required ?? []; } catch { console.log(`${f} is not valid JSON`); process.exit(); }
-  }
-  const miss = process.env.NEED.split(" ").filter((n) => !req.includes(n));
-  if (miss.length) console.log(`${f} secrets.required lacks ${miss.join(", ")}`);
-' 2>&1)"
+missing="$(secrets_missing "$need")"
 [ -z "$missing" ] || echo "::warning::posthog-hybrid: $missing. Declare the Worker's runtime secrets in the wrangler config (secrets.required listing ${need// /, } and any other secret the Worker reads) so a deploy or preview upload without them fails loudly. Note that wrangler dev then loads only the listed secrets. This becomes an error in Ship Gate v4."
 fi
 
@@ -137,6 +143,15 @@ policy turnstile-forms && while IFS= read -r f; do
   grep -qiE 'cf-turnstile|<Turnstile' "$f" || err turnstile "$f has a <form> without Turnstile."
 done < <(grep -rlE '<form[ >]' src --include='*.astro' --include='*.tsx' --include='*.jsx' --include='*.svelte' --include='*.vue' 2>/dev/null)
 
+# 3b. [turnstile-forms] Turnstile is verified server-side, so the Worker's secret is declared in
+#     secrets.required: a deploy or preview upload without it then fails instead of rejecting every
+#     submission. posthog-hybrid's check above already covers it. A warning.
+if policy turnstile-forms && ! policy posthog-hybrid && scan 'cf-turnstile|<Turnstile' src >/dev/null; then
+  need="${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
+  missing="$(secrets_missing "$need")"
+  [ -z "$missing" ] || echo "::warning::turnstile-forms: $missing. Declare the Turnstile secret in the wrangler config (secrets.required listing $need and any other secret the Worker reads) so a deploy or preview upload without it fails loudly."
+fi
+
 # 4. No committed env or Worker secret files.
 git -C "$ROOT" ls-files | grep -E '(^|/)(\.env|\.dev\.vars)(\..+)?$' | grep -vE '\.example$' && err env-file "Env/secret file committed. Remove it and rotate its secrets."
 
@@ -145,7 +160,7 @@ policy workers-builds-only && for w in wrangler.toml wrangler.json wrangler.json
   [ -f "$w" ] && grep -q 'pages_build_output_dir' "$w" && err pages-config "$w is Pages config; the standard is Workers."
 done
 
-# 6. Node version pinned, at or above Astro 7's floor (22.12.0).
+# 6. Node version pinned exactly, at or above Astro 7's floor (22.12.0).
 NODE_FILE=""
 for f in .nvmrc .node-version; do [ -f "$f" ] && { NODE_FILE=$f; break; }; done
 if [ -z "$NODE_FILE" ]; then
@@ -153,11 +168,11 @@ if [ -z "$NODE_FILE" ]; then
 else
   v="$(tr -d ' \r\n' < "$NODE_FILE")"; v="${v#v}"
   if [[ "$v" =~ ^([0-9]+)(\.([0-9]+))?(\.([0-9]+))?$ ]]; then
-    maj=${BASH_REMATCH[1]}; min=${BASH_REMATCH[3]:-}
+    maj=${BASH_REMATCH[1]}; min=${BASH_REMATCH[3]:-}; patch=${BASH_REMATCH[5]:-}
     if [ "$maj" -lt 22 ] || { [ "$maj" -eq 22 ] && [ -n "$min" ] && [ "$min" -lt 12 ]; }; then
       err node-pin "$NODE_FILE pins Node $v, below Astro 7's floor of 22.12.0."
-    elif [ "$maj" -eq 22 ] && [ -z "$min" ]; then
-      echo "::warning::$NODE_FILE pins Node 22 without a minor version. Pin 22.12.0 or later exactly, so CI and Workers Builds agree."
+    elif [ -z "$patch" ]; then
+      echo "::warning::$NODE_FILE pins Node $v, not an exact version. Pin major.minor.patch (22.12.0 or later), the same value as NODE_VERSION in Workers Builds, so CI and deploys agree."
     fi
   else
     echo "::warning::$NODE_FILE holds \"$v\", not a version number. Pin an exact version so CI and Workers Builds agree."
@@ -184,6 +199,18 @@ done < <(grep -rlE 'temporaryPublicStorage:[[:space:]]*true|temporary-public-sto
 # 8. One dependency bot. Both open duplicate PRs for every update.
 if [ -f "$ROOT/.github/dependabot.yml" ] && ls "$ROOT"/renovate.json* "$ROOT"/.renovaterc* "$ROOT"/.github/renovate.json* >/dev/null 2>&1; then
   echo "::warning::Both Dependabot and Renovate are configured — every update arrives twice. Keep one (Ship Gate's templates use Dependabot)."
+fi
+
+# 9. Tailwind 4 reads its config from CSS (@theme). A tailwind.config.* file beside Tailwind 4 is
+#    ignored unless a stylesheet loads it with @config: a half-finished v3 migration. A warning.
+tw_major="$(node -e 'const p = require("./package.json"); const v = { ...p.dependencies, ...p.devDependencies }.tailwindcss;
+  const m = /(\d+)/.exec(v ?? ""); if (m) console.log(m[1]);' 2>/dev/null)"
+if [ -n "$tw_major" ] && [ "$tw_major" -ge 4 ]; then
+  for f in tailwind.config.js tailwind.config.cjs tailwind.config.mjs tailwind.config.ts; do
+    [ -f "$f" ] || continue
+    scan '@config[[:space:]]' src >/dev/null \
+      || echo "::warning::$f sits beside Tailwind $tw_major, which ignores it unless a stylesheet loads it with @config. Move its theme into CSS (@theme) and delete it."
+  done
 fi
 
 [ "$fail" -eq 0 ] && echo "All stack guards passed."

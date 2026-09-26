@@ -7,7 +7,7 @@
 
 ## Checklist
 - [ ] CI `verify` is green, including the discovery table in the job summary
-- [ ] Checked the preview on mobile and desktop (layout, animations, reduced motion)
+- [ ] Checked the preview on mobile and desktop (layout, animations)
 - [ ] Brand review: no drift from this site's brand guide or design system
 - [ ] New pages: in the sitemap, with a unique title, meta description, canonical and Open Graph image
 - [ ] New structured data describes only what the page visibly says

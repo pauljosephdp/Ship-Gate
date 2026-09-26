@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.5.1 — 2026-09-26
+
+`tags-via-zaraz` no longer fails a site for naming a tag host where nothing
+loads. No site fails because of this release.
+
+**Fixed**
+- `direct-tags` failed on a Zaraz tool's hosts in the CSP. Clarity runs as a
+  Zaraz Custom HTML tool and calls its own hosts from the browser, so the CSP
+  must name `www.clarity.ms`; the guard read that as a direct load. `_headers`
+  comment lines and `Content-Security-Policy` values are now skipped.
+- `direct-tags` failed on a bare `www.clarity.ms` in prose, such as a cookie
+  policy naming where Clarity sends data. The guard now matches Clarity's
+  loader (`clarity.ms/tag`) only.
+
 ## v3.5.0 — 2026-09-26
 
 Google Analytics and PostHog can run on every page, with or without consent,

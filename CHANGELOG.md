@@ -2,8 +2,9 @@
 
 ## v3.5.1 — 2026-09-26
 
-`tags-via-zaraz` no longer fails a site for naming a tag host where nothing
-loads. No site fails because of this release.
+`tags-via-zaraz` and `faq-visible` no longer fail a site on text that is fine:
+a tag host where nothing loads, or a FAQ question split by inline markup. No
+site fails because of this release.
 
 **Fixed**
 - `direct-tags` failed on a Zaraz tool's hosts in the CSP. Clarity runs as a
@@ -13,6 +14,10 @@ loads. No site fails because of this release.
 - `direct-tags` failed on a bare `www.clarity.ms` in prose, such as a cookie
   policy naming where Clarity sends data. The guard now matches Clarity's
   loader (`clarity.ms/tag`) only.
+- `faq-visible` failed a FAQ question that was on the page when it contained
+  inline markup: `CuSO<sub>4</sub>` read as "CuSO 4", so "CuSO4" in the JSON-LD
+  never matched. The discovery scan now reads text as rendered, joining across
+  inline elements (`span`, `sub`, `sup`, `a`, `em` and the rest).
 
 ## v3.5.0 — 2026-09-26
 

@@ -240,7 +240,7 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | AEO | `structured-data` | error | JSON-LD doesn't parse, lacks a schema.org `@context` or `@type`, or lacks key properties (below) |
 | AEO | `site-entity` | error | the home page declares no Organization, LocalBusiness or Person, or its `url` is off-site |
 | AEO | `entity-sameas` | warn | that entity has no `sameAs` profile links |
-| AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content) |
+| AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content). Text is read as rendered, so inline markup such as `CuSO<sub>4</sub>` matches `CuSO4` |
 | AEO | `breadcrumbs` | warn | a page two or more levels deep has no BreadcrumbList |
 | GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, Applebot, DuckAssistBot |
 | GEO | `ai-training` | error | an AI training token (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent, Bytespider) can fetch `/`, or a `Content-Signal` says `ai-train=yes`; with `"aiTraining": "reserve"`, a training token that can fetch `/` is governed by a group with no `ai-train=no` signal; with `"aiTraining": "allow"`, the reverse of the default. Build and after deploy |

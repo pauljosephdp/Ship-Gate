@@ -240,7 +240,7 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | AEO | `structured-data` | error | JSON-LD doesn't parse, lacks a schema.org `@context` or `@type`, or lacks key properties (below) |
 | AEO | `site-entity` | error | the home page declares no Organization, LocalBusiness or Person, or its `url` is off-site |
 | AEO | `entity-sameas` | warn | that entity has no `sameAs` profile links |
-| AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content) |
+| AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content). Text is read as rendered, so inline markup such as `CuSO<sub>4</sub>` matches `CuSO4` |
 | AEO | `breadcrumbs` | warn | a page two or more levels deep has no BreadcrumbList |
 | GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, Applebot, DuckAssistBot |
 | GEO | `ai-training` | error | an AI training token (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent, Bytespider) can fetch `/`, or a `Content-Signal` says `ai-train=yes`; with `"aiTraining": "reserve"`, a training token that can fetch `/` is governed by a group with no `ai-train=no` signal; with `"aiTraining": "allow"`, the reverse of the default. Build and after deploy |
@@ -448,7 +448,7 @@ checks:
 | Policy | What it enforces |
 |---|---|
 | `posthog-server-only` | `posthog-node` only inside `src/lib/server`, `src/pages/api`, `src/actions` or `src/middleware`; EU host; the key is never `PUBLIC_` and never hard-coded; every event tagged with `__DEPLOY_ENV__`; no PostHog in the client bundle, in browser requests, or in production HTML. Markdown content (`src/content/**/*.md`, `*.mdx`) may name `posthog.com` in prose, as a privacy policy's disclosure does ("PostHog Privacy Policy: posthog.com/privacy"); `posthog-node`, `POSTHOG_`, `new PostHog(`, `posthog.init` and ingestion hosts (`i.posthog.com`, `eu.i.posthog.com`, `us-assets.i.posthog.com`) still fail there. The client-bundle and production-HTML checks look for `posthog-js`, `posthog.init`, ingestion hosts and keys, so the disclosure passes them too |
-| `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot tracking (`hs-scripts`, `hs-analytics`) go through Cloudflare Zaraz. HubSpot form embeds (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until HubSpot's forms API is available. They render their own form, so list only Turnstile forms in `formPages` |
+| `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot tracking (`hs-scripts`, `hs-analytics`) go through Cloudflare Zaraz. HubSpot form embeds (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until HubSpot's forms API is available. They render their own form, so list only Turnstile forms in `formPages`. A tag host that loads nothing passes: `_headers` comment lines and `Content-Security-Policy` values (a client-side Zaraz tool such as Clarity needs its hosts in the CSP), and a bare `www.clarity.ms` in prose or a link. Clarity's loader (`clarity.ms/tag`) still fails |
 | `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys |
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
 | `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: Google (Fonts, Maps, reCAPTCHA, tags), YouTube, Facebook, Instagram, X/Twitter, Vimeo, Gravatar. A blocked font or script stalls the page until it times out. Links and JSON-LD `sameAs` load nothing and pass. jsDelivr and unpkg warn; non-ASCII URLs warn |
@@ -803,11 +803,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.5.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.5.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.5.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.5.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

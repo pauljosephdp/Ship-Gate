@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.check_run.head_sha || github.sha }}
-      - uses: pauljosephdp/Ship-Gate/post-deploy@v3.5.0
+      - uses: pauljosephdp/Ship-Gate/post-deploy@v3.5.1
         with:
           sha: ${{ github.event.check_run.head_sha || github.sha }}
           # working-directory: site

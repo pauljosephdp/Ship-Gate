@@ -125,8 +125,11 @@ fi
 # 2. [tags-via-zaraz] No third-party tags loaded directly. All tags, GTM included, go through Zaraz. No sGTM in this stack.
 #    HubSpot form embeds (js-*.hsforms.net) are forms, not tags: they are the portfolio's form
 #    standard until HubSpot's forms API is available, so they are allowed. HubSpot tracking is not.
-BLOCKED='googletagmanager\.com/(gtm|gtag)|google-analytics\.com|connect\.facebook\.net|static\.hotjar\.com|snap\.licdn\.com|analytics\.tiktok\.com|clarity\.ms/tag|www\.clarity\.ms|js\.hs-scripts\.com|js\.hs-analytics\.net|["'\''\`]GTM-[A-Z0-9]{4,}["'\''\`]'
-policy tags-via-zaraz && scan "$BLOCKED" $DIRS && err direct-tags "Third-party tag loaded directly. Route it through Zaraz (GTM runs as a Zaraz tool)."
+BLOCKED='googletagmanager\.com/(gtm|gtag)|google-analytics\.com|connect\.facebook\.net|static\.hotjar\.com|snap\.licdn\.com|analytics\.tiktok\.com|clarity\.ms/tag|js\.hs-scripts\.com|js\.hs-analytics\.net|["'\''\`]GTM-[A-Z0-9]{4,}["'\''\`]'
+# A host named in a _headers comment or in the CSP loads nothing: a Zaraz tool that runs client-side
+# (Clarity as Custom HTML) needs its hosts in the CSP, and the file explains why in comments.
+tag_scan() { scan "$BLOCKED" $DIRS | grep -vE '(^|/)_headers:[0-9]+:[[:space:]]*(#|Content-Security-Policy(-Report-Only)?:)'; }
+policy tags-via-zaraz && tag_scan && err direct-tags "Third-party tag loaded directly. Route it through Zaraz (GTM runs as a Zaraz tool)."
 
 # 3. [turnstile-forms] Every form has Turnstile (opt out non-public forms with: turnstile-exempt: reason).
 policy turnstile-forms && while IFS= read -r f; do

@@ -123,6 +123,10 @@ expect_guard ".node-version accepted"             pass                        "r
 expect_guard "Node below Astro 7 floor (major)"   "below Astro 7"             "echo 20 > .nvmrc"
 expect_guard "Node below Astro 7 floor (minor)"   "below Astro 7"             "echo v22.11.0 > .nvmrc"
 expect_guard "Clarity loaded directly"            "Third-party tag"           "echo '<script src=\"https://www.clarity.ms/tag/abc\"></script>' > src/pages/c.astro"
+expect_guard "Clarity hosts in CSP allowed"      pass                        "mkdir -p public && printf '/*\\n  Content-Security-Policy: script-src '\\''self'\\'' https://www.clarity.ms https://scripts.clarity.ms\\n' > public/_headers"
+expect_guard "tag host in _headers comment"      pass                        "mkdir -p public && printf '/*\\n# google-analytics.com was removed when GA4 moved to Zaraz\\n  X-Frame-Options: DENY\\n' > public/_headers"
+expect_guard "Clarity host in prose allowed"     pass                        "echo '<p>Clarity reports to <a href=\"https://www.clarity.ms/\">www.clarity.ms</a>.</p>' > src/pages/legal.astro"
+expect_guard "GA loaded directly, _headers ok"   "Third-party tag"           "mkdir -p public && printf '/*\\n  Content-Security-Policy: script-src https://www.clarity.ms\\n' > public/_headers && echo '<script src=\"https://www.google-analytics.com/analytics.js\"></script>' > src/pages/ga.astro"
 expect_guard "HubSpot tracking loaded directly"   "Third-party tag"           "echo '<script src=\"https://js.hs-scripts.com/1.js\"></script>' > src/pages/h.astro"
 expect_guard "workflow pushes to main"            "pushes to main"            "wf auto.yml '      - run: git push origin HEAD:main'"
 expect_guard "workflow pushes a feature branch"   pass                        "wf ok.yml '      - run: git push origin HEAD:feature/x'"
@@ -606,6 +610,8 @@ disco_case "@graph nodes share the context"      pass                           
 FAQ='<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"How long does setup take?","acceptedAnswer":{"@type":"Answer","text":"About a week."}}]}</script>'
 disco_case "FAQ question not on the page"        "not on the page"                "inject dist/client/about/index.html '</head>' '$FAQ'"
 disco_case "FAQ question on the page"            pass                             "inject dist/client/about/index.html '</head>' '$FAQ' && inject dist/client/about/index.html '</body>' '<h2>How long does setup take&#x3F;</h2><p>About a week.</p>'"
+FAQSUB='<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is CuSO4 called?","acceptedAnswer":{"@type":"Answer","text":"Copper(II) sulphate."}}]}</script>'
+disco_case "FAQ question with inline markup"     pass                             "inject dist/client/about/index.html '</head>' '$FAQSUB' && inject dist/client/about/index.html '</body>' '<h2>What is <span class=\"f\">CuSO<sub>4</sub></span> called&#x3F;</h2><p>Copper(II) sulphate.</p>'"
 disco_case "FAQ answer missing"                  "acceptedAnswer.text"            "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"FAQPage\",\"mainEntity\":[{\"@type\":\"Question\",\"name\":\"Why?\"}]}</script>'"
 disco_case "home without site entity"            "no Organization"                "sed -i 's#<script type=\"application/ld+json\">.*</script>##' dist/client/index.html"
 disco_case "LocalBusiness needs an address"      "missing address"                "sed -i 's#\"@type\":\"Organization\"#\"@type\":\"LocalBusiness\"#' dist/client/index.html"

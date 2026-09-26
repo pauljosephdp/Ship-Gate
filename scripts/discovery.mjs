@@ -86,6 +86,8 @@ export const decode = (s) => s.replace(/&#(\d+);/g, (_, n) => String.fromCodePoi
 export const visibleText = (html) => decode((html.match(/<body\b[\s\S]*<\/body>/i)?.[0] ?? html)
   .replace(/<!--[\s\S]*?-->/g, ' ')
   .replace(/<(script|style|template|svg|noscript)\b[\s\S]*?<\/\1>/gi, ' ')
+  // Inline elements don't break a word as rendered: CuSO<sub>4</sub> reads "CuSO4".
+  .replace(/<\/?(a|abbr|b|bdi|bdo|cite|code|data|dfn|em|i|kbd|mark|q|s|samp|small|span|strong|sub|sup|time|u|var|wbr)\b[^>]*>/gi, '')
   .replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 // For "does this sentence appear on the page": letters and digits only.
 export const normalise = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();

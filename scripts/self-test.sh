@@ -777,6 +777,27 @@ for v in $variants; do
 done
 [ -n "$variants" ] || bad "fixture variants found" "no cases read from test/break-fixture.sh" ""
 
+echo
+echo "Actions cost wiring (action.yml, caller templates, self-test.yml)"
+# cost_case NAME FILE PATTERN — FILE must contain the fixed string PATTERN.
+cost_case() {
+  if grep -qF -- "$3" "$HERE/../$2"; then ok "$1"; else bad "$1" "$2 lacks: $3" ""; fi
+}
+cost_case "action takes a stage input"                   action.yml 'STAGE: ${{ inputs.stage }}'
+cost_case "reports upload only when a check failed"      action.yml "steps.summary.outputs.failed == '1' && steps.site.outputs.fixture != 'true'"
+cost_case "the Result step fails the job"                action.yml 'FAILED: ${{ steps.summary.outputs.failed }}'
+cost_case "fixture steps pass their stage as the input"  .github/workflows/self-test.yml 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}'
+cost_case "caller CI runs drafts at stage scans"         templates/caller/.github/workflows/ci.yml "stage: \${{ github.event.pull_request.draft && 'scans' || 'full' }}"
+cost_case "caller CI re-runs when a draft turns ready"   templates/caller/.github/workflows/ci.yml 'ready_for_review'
+cost_case "caller post-deploy waits for the deployed SHA" templates/caller/.github/workflows/post-deploy.yml 'sha: ${{ github.event.check_run.head_sha || github.sha }}'
+cost_case "each run prunes its branch's older reports"   action.yml 'select(.workflow_run.head_branch == env.BRANCH and (.workflow_run.id | tostring) != env.RUN_ID)'
+cost_case "caller CI may delete its older reports"      templates/caller/.github/workflows/ci.yml 'actions: write'
+cost_case "caller full sweep may delete its older reports" templates/caller/.github/workflows/full-sweep.yml 'actions: write'
+cost_case "caller Dependabot does not rebase open PRs"   templates/caller/.github/dependabot.yml 'rebase-strategy: disabled'
+n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/workflows/self-test.yml")"
+m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"
+if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi
+
 echo "Template unit tests (node --test test/*.test.mjs)"
 if out="$(node --test "$HERE"/../test/*.test.mjs 2>&1)"; then ok "posthog-proxy and other template tests pass"
 else bad "template unit tests" "node --test failed" "$(grep -E '^not ok|Error|expected|actual' <<<"$out" | head -20)"; fi

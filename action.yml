@@ -13,6 +13,13 @@ inputs:
   config:
     description: Path to the site's Ship Gate config, relative to working-directory.
     default: ship-gate.config.json
+  stage:
+    description: >
+      How far the gate runs. "full" (default) runs every check. "browser" skips
+      Lighthouse. "scans" stops after the post-build scans, with no browser. The
+      caller template passes "scans" for draft pull requests; a draft can't merge,
+      and marking it ready runs the full gate.
+    default: full
 runs:
   using: composite
   steps:
@@ -20,22 +27,22 @@ runs:
       id: site
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        STAGE: ${{ inputs.stage }}
       run: |
-        # Ship Gate's own fixture tests (uses: ./ in this repo) may stop a broken variant
-        # at the stage that owns its fault. A site calling the published action always runs everything.
-        stage=full reuse=false
+        stage=$STAGE fixture=false reuse=false
+        case "$stage" in full|browser|scans) ;; *) echo "::error::Unknown stage \"$stage\": use full, browser or scans."; exit 1 ;; esac
+        # Ship Gate's own fixture tests (uses: ./ in this repo, SHIP_GATE_FIXTURE_STAGE set).
         # Compare resolved paths: for uses: ./ the runner sets GITHUB_ACTION_PATH to "<workspace>/./".
         if [ -n "${SHIP_GATE_FIXTURE_STAGE:-}" ] \
           && [ "$(cd "$GITHUB_ACTION_PATH" && pwd -P)" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)" ]; then
-          stage=$SHIP_GATE_FIXTURE_STAGE
+          fixture=true
           # A later variant in the same job reuses the installs of the first
           # (test/break-fixture.sh keeps node_modules; the lockfiles never change).
           if [ -d node_modules ]; then reuse=true; fi
         fi
-        case "$stage" in full|browser|scans) ;; *) echo "::error::Unknown fixture stage \"$stage\"."; exit 1 ;; esac
-        echo "Ship Gate stage: $stage (reuse installs: $reuse)"
-        echo "stage=$stage" >> "$GITHUB_OUTPUT"
-        echo "reuse=$reuse" >> "$GITHUB_OUTPUT"
+        echo "Ship Gate stage: $stage (fixture: $fixture, reuse installs: $reuse)"
+        { echo "stage=$stage"; echo "fixture=$fixture"; echo "reuse=$reuse"; } >> "$GITHUB_OUTPUT"
         for f in .nvmrc .node-version; do
           if [ -f "$f" ]; then echo "node-version-file=${{ inputs.working-directory }}/$f" >> "$GITHUB_OUTPUT"; exit 0; fi
         done
@@ -49,7 +56,7 @@ runs:
         cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
 
     # From here on every check runs even after one fails (continue-on-error), so a PR
-    # shows all its failures at once. The Summary step at the end fails the job.
+    # shows all its failures at once. The Result step at the end fails the job.
     - name: Contract and config
       id: prepare
       continue-on-error: true
@@ -241,7 +248,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        npx --no-install playwright install --with-deps chromium
+        # The tools step already installed the system packages on this runner.
+        if [ -f "$RUNNER_TEMP/.ship-gate-pw-deps" ]; then
+          npx --no-install playwright install chromium
+        else
+          npx --no-install playwright install --with-deps chromium
+        fi
         bash "$GITHUB_ACTION_PATH/scripts/run-checks.sh" --serve $SHIP_GATE_CHECKS_BROWSER
 
     - name: Smoke, axe (WCAG 2.2 AA), keyboard, reflow, CSP, consent and edge files
@@ -260,27 +272,12 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: '"$SHIP_GATE_DIR/node_modules/.bin/lhci" autorun --config="$SHIP_GATE_DIR/lighthouserc.json"'
 
-    # Artifact names must be unique per run; matrix jobs share github.job.
-    - name: Name the reports
-      id: reports
-      if: always() && env.SHIP_GATE_DIR != ''
-      shell: bash
-      run: echo "name=ship-gate-reports-${{ github.job }}-${{ github.run_attempt }}-$(date +%s%N | tail -c 7)" >> "$GITHUB_OUTPUT"
-
-    - name: Upload reports
-      if: always() && env.SHIP_GATE_DIR != ''
-      continue-on-error: true
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ steps.reports.outputs.name }}
-        path: ${{ env.SHIP_GATE_DIR }}/reports/
-        retention-days: 14
-        if-no-files-found: ignore
-
     - name: Summary
+      id: summary
       if: always()
       shell: bash
       env:
+        STAGE: ${{ steps.site.outputs.stage }}
         OUTCOMES: >-
           Node version pinned=${{ steps.site.outcome }}
           |Contract and config=${{ steps.prepare.outcome }}
@@ -316,9 +313,68 @@ runs:
           esac
           table+=$'\n'"| $name | $mark |"
         done
-        printf '## Ship Gate\n\n%s\n' "$table" >> "$GITHUB_STEP_SUMMARY"
+        note=""
+        case "$STAGE" in
+          scans) note=$'\n'"Stage \`scans\`: browser tests and Lighthouse run when the pull request is ready for review."$'\n' ;;
+          browser) note=$'\n'"Stage \`browser\`: Lighthouse did not run."$'\n' ;;
+        esac
+        printf '## Ship Gate\n%s\n%s\n' "$note" "$table" >> "$GITHUB_STEP_SUMMARY"
         echo "$table"
         # Machine-readable copy for callers (and Ship Gate's own fixture tests).
         echo "$table" > "${SHIP_GATE_DIR:-$RUNNER_TEMP}/summary.md"
-        if [ "$failed" -ne 0 ]; then echo "::error::Ship Gate failed — see the table above and each step's log."; exit 1; fi
+        echo "failed=$failed" >> "$GITHUB_OUTPUT"
+
+    # At most one run's reports per branch: a failed run's reports replace the branch's
+    # older ones, and a green run clears them. Other branches' reports are left alone,
+    # since someone may be reading one. Deleting needs `actions: write` (the caller
+    # templates grant it); without it this logs a notice and the reports expire.
+    - name: Prune older reports on this branch
+      if: always() && steps.site.outputs.fixture != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        ids="$(gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" --jq '.artifacts[]
+          | select((.expired | not) and (.name | startswith("ship-gate-reports-")))
+          | select(.workflow_run.head_branch == env.BRANCH and (.workflow_run.id | tostring) != env.RUN_ID)
+          | .id')" || { echo "::notice::Could not list artifacts; older reports stay until they expire."; exit 0; }
+        n=0
+        for id in $ids; do
+          if gh api -X DELETE "repos/$REPO/actions/artifacts/$id" >/dev/null 2>&1; then n=$((n + 1))
+          else echo "::notice::Could not delete older reports (the workflow needs actions: write); they expire after 5 days."; break; fi
+        done
+        echo "Deleted $n older report artifact(s) from $BRANCH."
+
+    # Reports (Playwright traces, Lighthouse HTML) only when a check failed: that is when
+    # someone reads them. Kept on every green run, they filled the artifact storage quota.
+    # Ship Gate's own fixture runs fail on purpose and print the summary instead.
+    # Artifact names must be unique per run; matrix jobs share github.job.
+    - name: Name the reports
+      id: reports
+      if: always() && env.SHIP_GATE_DIR != '' && steps.summary.outputs.failed == '1' && steps.site.outputs.fixture != 'true'
+      shell: bash
+      run: echo "name=ship-gate-reports-${{ github.job }}-${{ github.run_attempt }}-$(date +%s%N | tail -c 7)" >> "$GITHUB_OUTPUT"
+
+    - name: Upload reports
+      if: always() && steps.reports.outcome == 'success'
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.reports.outputs.name }}
+        path: ${{ env.SHIP_GATE_DIR }}/reports/
+        retention-days: 5
+        if-no-files-found: ignore
+
+    - name: Result
+      if: always()
+      shell: bash
+      env:
+        FAILED: ${{ steps.summary.outputs.failed }}
+      run: |
+        if [ "$FAILED" != 0 ]; then echo "::error::Ship Gate failed — see the summary table and each step's log."; exit 1; fi
         echo "Ship Gate passed."
+

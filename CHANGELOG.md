@@ -1,5 +1,42 @@
 # Changelog
 
+## v3.4.0 — 2026-09-26
+
+Ship Gate costs sites far fewer Actions minutes and far less artifact storage.
+No site fails because of this release. To get the savings, re-copy the caller
+templates (`ci.yml`, `post-deploy.yml`, `dependabot.yml`, and the new
+`full-sweep.yml`) and bump the pin.
+
+**Added**
+- A `stage` input on the verify action: `full` (default), `browser` (no
+  Lighthouse) or `scans` (no browser, about two minutes). The caller `ci.yml`
+  runs drafts at `scans` and re-runs the full gate when the PR is marked ready.
+- A `sha` input on the post-deploy action: the commit production must serve.
+  It defaults to the triggering commit.
+- `templates/caller/.github/workflows/full-sweep.yml`: the gate against every
+  page, weekly and on demand, so PR config can sample pages.
+
+**Changed**
+- Reports upload only when a check failed, and are kept 5 days instead of 14.
+  Green runs upload nothing.
+- Each run deletes its branch's older report artifacts, so a branch keeps at
+  most its latest failed run's reports. The caller `ci.yml` and `full-sweep.yml`
+  grant `actions: write` for this; without it the step logs a notice.
+- The caller `post-deploy.yml` starts when Cloudflare Workers Builds reports a
+  successful build of `main`, instead of polling from the push while the deploy
+  runs. Sites deployed another way keep `on: push`.
+- The caller `dependabot.yml` groups action updates into one PR and does not
+  rebase open PRs when `main` moves.
+- Site browser checks no longer reinstall Playwright's system packages when the
+  test tools already did on the same runner.
+
+**Ship Gate's own CI**
+- The fixture jobs run only when a change touches what they exercise (the
+  verify action, its scripts, browser tests, tools and fixtures), on pull
+  requests and on pushes to `main`. Docs, `post-deploy/` and `templates/`
+  changes cost about a minute.
+- Fixture steps pass their stage through the new `stage` input.
+
 ## v3.3.0 — 2026-09-26
 
 Lessons from getting `posthog-hybrid` running on Qualified Deals, moved into the

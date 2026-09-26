@@ -16,6 +16,11 @@ inputs:
   config:
     description: Path to the site's Ship Gate config, relative to working-directory.
     default: ship-gate.config.json
+  sha:
+    description: >
+      The commit production must serve. Defaults to the commit that triggered the
+      workflow; the check_run-triggered caller template passes the deployed commit.
+    default: ${{ github.sha }}
   wait-minutes:
     description: How long to wait for the deploy pipeline to serve the new commit.
     default: "10"
@@ -36,6 +41,7 @@ runs:
       shell: bash
       env:
         WAIT_MINUTES: ${{ inputs.wait-minutes }}
+        SHA: ${{ inputs.sha }}
       run: |
         tries=$(( WAIT_MINUTES * 3 ))
         # Fetch first, then search. Piping curl into `grep -q` breaks under the
@@ -43,12 +49,12 @@ runs:
         # the rest of the page (exit 23), and the match reads as a miss.
         for i in $(seq 1 "$tries"); do
           page=$(curl -fsS "$SHIP_GATE_SITE_URL/?cb=$(date +%s)") || page=""
-          if grep -qF "name=\"build-sha\" content=\"$GITHUB_SHA\"" <<<"$page"; then
-            echo "Production is serving $GITHUB_SHA"; exit 0
+          if grep -qF "name=\"build-sha\" content=\"$SHA\"" <<<"$page"; then
+            echo "Production is serving $SHA"; exit 0
           fi
           sleep 20
         done
-        echo "::error::Production not serving $GITHUB_SHA after $WAIT_MINUTES min. Check the deploy pipeline; roll back if needed."
+        echo "::error::Production not serving $SHA after $WAIT_MINUTES min. Check the deploy pipeline; roll back if needed."
         exit 1
 
     - name: Smoke check key URLs

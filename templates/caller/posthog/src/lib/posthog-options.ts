@@ -13,7 +13,7 @@
 //   remove both lines — cookies from the first page view, without asking (not
 //   lawful in the EU without consent; Ship Gate refuses it with consent-before-tracking).
 // Keep ship-gate.config.json → posthog.cookieless and posthog.apiHost in step.
-export const POSTHOG_API_HOST = 'https://eu.i.posthog.com'; // or '/api/ingest' with the optional proxy
+export const POSTHOG_API_HOST = 'https://eu.i.posthog.com'; // or '/ph' with the optional proxy (src/lib/server/posthog-proxy.ts)
 
 export const posthogOptions = {
   api_host: POSTHOG_API_HOST,

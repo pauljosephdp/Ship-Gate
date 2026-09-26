@@ -41,6 +41,8 @@ export default defineConfig({
   },
 });
 JS
+  # The Worker's runtime secrets, declared so deploys fail without them (guards.sh warns otherwise).
+  printf '{ "name": "fixture", "secrets": { "required": ["POSTHOG_API_KEY", "TURNSTILE_SECRET_KEY"] } }\n' > wrangler.jsonc
   sed -i '1s#^---$#---\nimport PostHog from "../components/PostHog.astro";#' src/layouts/Base.astro
   sed -i 's#</head>#  <PostHog />\n  </head>#' src/layouts/Base.astro
   node -e '

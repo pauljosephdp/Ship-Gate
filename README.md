@@ -382,7 +382,10 @@ fetched at all. With `posthog-hybrid` it fails when production's home page (or
 a same-origin script it loads) carries no PostHog project key, carries Ship
 Gate's CI key or a personal key, or carries a key PostHog doesn't know: one
 read-only GET of the project's remote config (`/array/<key>/config.js`), which
-answers 404 for an unknown key.
+answers 404 for an unknown key. With a same-origin proxy (`posthog.apiHost` a
+path such as `"/ph"`), it also fetches `<siteUrl><apiHost>/static/recorder.js`
+and fails unless that answers 200 with a JavaScript content type: an HTML 404
+page or a redirect means the proxy isn't reaching PostHog.
 
 With a `crux-api-key` input (a Google API key with the Chrome UX Report API
 enabled, passed as a secret), it also reports **field Core Web Vitals** for
@@ -409,7 +412,7 @@ checks:
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
 | `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: Google (Fonts, Maps, reCAPTCHA, tags), YouTube, Facebook, Instagram, X/Twitter, Vimeo, Gravatar. A blocked font or script stalls the page until it times out. Links and JSON-LD `sameAs` load nothing and pass. jsDelivr and unpkg warn; non-ASCII URLs warn |
 | `rtl-logical-css` | Warns with a count of physical `left`/`right` declarations in the built CSS (`margin-left`, `padding-right`, `left:`, `text-align: left`, `float: right`, `border-left`), which don't mirror under `dir="rtl"`. Use logical properties (`margin-inline-start`, `inset-inline-start`, `text-align: start`). Never fails: some physical values are right |
-| `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
+| `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. A wrangler config without `secrets.required` listing `POSTHOG_API_KEY` (and, with `turnstile-forms`, the `turnstileEnv` secret) warns, and becomes an error in v4. Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
 | `consent-before-tracking` | The browser consent check: no non-essential cookie and no tracker before the visitor chooses. Strictly necessary cookies go in `consentEssentialCookies` |
 
 ```json
@@ -432,12 +435,14 @@ these same files, so CI proves them on every Ship Gate change.
 | Template | Put it at | What it does |
 |---|---|---|
 | `src/lib/posthog-options.ts` | same path | Every browser feature on: `defaults: '2026-08-30'`, `person_profiles: 'always'`, autocapture, `capture_pageview: 'history_change'`, page leave, heatmaps, dead clicks, exceptions, web vitals and network timing, session replay (cross-origin iframes, console logs), surveys and feature flags, `cross_subdomain_cookie`, and `cookieless_mode: 'on_reject'` with `opt_out_capturing_by_default` |
-| `src/components/PostHog.astro` | same path, in the base layout's `<head>` | The npm embed: bundles `posthog-js` into a same-origin `/_astro/` script, initialises once (`<ClientRouter>`-safe), adds `tracing_headers` for the site's own host, registers `environment: __DEPLOY_ENV__` |
-| `src/components/PostHogSnippet.astro` | instead of `PostHog.astro` | The snippet from PostHog's Astro guide, EU host, same options, no npm dependency; needs `'unsafe-inline'` under a CSP |
-| `src/lib/server/analytics.ts` | same path | `posthog-node` for Workers: `track`, `trackError` (error tracking) and `flag` (feature flags), each joined to the browser's visitor through the `X-POSTHOG-DISTINCT-ID`/`X-POSTHOG-SESSION-ID` tracing headers or the PostHog cookie, flushed with `waitUntil`, tagged with `environment` |
+| `src/components/PostHog.astro` | same path, in the base layout's `<head>` | The npm embed: bundles `posthog-js` into a same-origin `/_astro/` script, initialises once (`<ClientRouter>`-safe), adds `tracing_headers` for the site's own host, registers `environment: __DEPLOY_ENV__`, and registers it again after every `opt_in_capturing()` and `opt_out_capturing()` (opting in moves posthog-js to cookie storage, which drops the tag; every event after consent would then slip past the "not production" filter) |
+| `src/components/PostHogSnippet.astro` | instead of `PostHog.astro` | The snippet from PostHog's Astro guide, EU host, same options and the same re-tagging after consent, no npm dependency; needs `'unsafe-inline'` under a CSP |
+| `src/lib/server/analytics.ts` | same path | `posthog-node` for Workers: `track`, `trackError` (error tracking) and `flag` (feature flags), flushed with `waitUntil`, tagged with `environment`. Each joins the browser's visitor through, in order: the `X-POSTHOG-DISTINCT-ID`/`X-POSTHOG-SESSION-ID` tracing headers, the ids the form sent in its body (`posthog: { distinctId, sessionId }` from `window.posthog`, read with `browserIds(body)` and passed as the last argument; the tracing headers come from a lazily loaded extension, so the first form post often lacks them), then the PostHog cookie's `distinct_id` and `$sesid[1]`. With none, a random id with `$process_person_profile: false`, so anonymous visitors never merge into one person. Logs `[analytics] sending <event> key phc_xxxx… (N chars)` and PostHog's own errors (`shutdown()` hides them), and warns once with the Worker's binding names (never values) when `POSTHOG_API_KEY` is missing |
 | `src/env.d.ts` | merge | Declares `__BUILD_SHA__`, `__DEPLOY_ENV__`, `PUBLIC_POSTHOG_KEY` and `window.posthog` |
 | `csp.txt` | merge into `public/_headers` | The CSP sources PostHog needs |
-| `optional/src/pages/api/ingest/[...path].ts` | same path | A same-origin reverse proxy (needs on-demand rendering), so ad blockers don't drop events; then set `apiHost` to `/api/ingest` in both the options file and the config. The fixture doesn't build it (it is a static site), so test it on the site |
+| `src/lib/server/posthog-proxy.ts` and `src/worker.ts` | same paths; wrangler `"main": "./src/worker.ts"` | Optional same-origin reverse proxy at `/ph`, so ad blockers don't drop events and CSP needs only `'self'`. It runs in the Worker entry before Astro, so it needs no on-demand rendering and `trailingSlash: 'always'` never redirects PostHog's POSTs. `/ph/static/*` and `/ph/array/*` go to `eu-assets.i.posthog.com`, the rest to `eu.i.posthog.com`; the site's cookies and PostHog's `Set-Cookie` are dropped, and `CF-Connecting-IP` goes on as `X-Forwarded-For` so PostHog still geolocates. A site with its own `worker.ts` adds the import and `posthogProxy(request) ?? handle(request, env, ctx)`. Then set `apiHost` to `/ph` in both the options file and the config. Unit-tested in `test/posthog-proxy.test.mjs`; the fixture (a static site) doesn't build it |
+| `optional/src/components/PostHogZarazConsent.astro` | same path, right after the PostHog component | Zaraz consent → PostHog: on `zarazConsentAPIReady` and `zarazConsentChoicesUpdated`, the purpose's `true` calls `opt_in_capturing()` and `false` calls `opt_out_capturing()`. Does nothing until `zaraz.consent.APIReady`, so a returning visitor who said yes is never opted out on first paint. Set `PURPOSE_ID` |
+| `optional/src/lib/hubspot-conversion.ts` | same path | `trackHubSpotForm(formId, event)`: on a HubSpot embed's `hsFormCallback`/`onFormSubmitted` for that form, `zaraz.track` and `posthog.capture` the event with the form ID only |
 
 ```json
 "policies": ["posthog-hybrid", "consent-before-tracking"],
@@ -457,13 +462,41 @@ count as new people each day, and GeoIP and bot enrichment are lost. Keep
 `posthog.cookieless` and `posthog.apiHost` in step with the options file: with
 the npm embed the smoke test compares them.
 
-In the site's PostHog project, turn on session replay (with console logs and
-network), heatmaps, autocapture, web vitals, exception autocapture, surveys and
-*Cookieless server hash mode*. Add *`environment` is not `production`* to the
-internal and test account filter. In Workers Builds, set `PUBLIC_POSTHOG_KEY`
-(the `phc_` project key) as a build variable and `POSTHOG_API_KEY` (the same key)
-as a secret. CI never needs a real key: Ship Gate builds with its own
-CI-only key, and post-deploy fails if that one reaches production.
+Consent copy: in one short test, session replay started only after opt-in.
+That isn't confirmed yet, so adoption guides and cookie-policy text must not
+claim replay runs before consent.
+
+**PostHog project settings.**
+- *Cookieless server hash mode* = 2 (stateful), under Settings → Web analytics.
+  Without it, events captured before consent are dropped.
+- Turn on session replay (with console logs and network), heatmaps,
+  autocapture, web vitals, exception autocapture, dead clicks and surveys.
+- Add *`environment` is not `production`* to the internal and test account
+  filter.
+
+**Where each key goes** (Cloudflare dashboard, the Worker):
+- `PUBLIC_POSTHOG_KEY`: Settings → Build → *Build variables*. It is read at
+  build time and baked into the pages.
+- `POSTHOG_API_KEY`, and with `turnstile-forms` the Turnstile secret: Settings
+  → *Variables and Secrets*, type **Secret**. A plaintext variable there is
+  wiped by the next deploy (the wrangler config owns plaintext vars).
+- Both PostHog keys are the same `phc_` project key. A `phx_` personal key is
+  refused by PostHog without an error, and it's a personal credential that must
+  never sit in a site.
+- List every runtime secret under `secrets.required` in the wrangler config:
+  ```jsonc
+  "secrets": { "required": ["POSTHOG_API_KEY", "TURNSTILE_SECRET_KEY"] }
+  ```
+  `wrangler deploy` and `wrangler versions upload` (every preview) then fail
+  when one is unset, instead of shipping a Worker that silently sends nothing.
+  Once `secrets` is set, `wrangler dev` loads only the secrets listed, so list
+  all of them. Ship Gate warns when the list is missing (an error from v4).
+
+CI never needs a real key: Ship Gate builds with its own CI-only key, and
+post-deploy fails if that one reaches production.
+
+Testing a form by hand: a Turnstile token works for one submission only, so
+reload the page before submitting again.
 
 ### Guards
 
@@ -561,7 +594,7 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `python` | none | `{ "version": "3.11", "packages": ["fonttools"] }` for Python checks |
 | `posthog.embed` | `"snippet"` | With `posthog-hybrid`: `"snippet"` (the inline loader from PostHog's Astro guide) or `"npm"` (`posthog-js` bundled) |
 | `posthog.cookieless` | `"on_reject"` | With `posthog-hybrid`: `"on_reject"`, `"always"` or `"off"`; must match `cookieless_mode` in the options file |
-| `posthog.apiHost` | `"https://eu.i.posthog.com"` | With `posthog-hybrid`: EU Cloud, or a same-origin proxy path such as `"/api/ingest"` |
+| `posthog.apiHost` | `"https://eu.i.posthog.com"` | With `posthog-hybrid`: EU Cloud, or a same-origin proxy path such as `"/ph"` (the proxy template's default) |
 | `turnstileEnv` | `PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | With `turnstile-forms`: env names that receive Cloudflare's always-pass test keys |
 | `thresholdOverrides` | `[]` | See below |
 
@@ -678,11 +711,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.2.1 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.3.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.2.1". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.3.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -697,7 +730,9 @@ node ../Ship-Gate/scripts/prepare.mjs after-build && node ../Ship-Gate/scripts/c
 Every change goes through a PR to this repo, and `self-test` must pass.
 `scripts/self-test.sh` builds fixture sites at run time and proves each guard,
 config rule, scan, server behaviour and generated Lighthouse setting still fires
-on bad input and passes on good input. Add a case there for every new rule.
+on bad input and passes on good input. Add a case there for every new rule. It
+also runs the template unit tests (`node --test test/*.test.mjs`, which import
+the `.ts` templates through Node 22's type stripping).
 
 The `fixture` jobs then run the whole action, end to end, against
 `test/fixture-site` (a tiny Astro site) and against copies broken one way each

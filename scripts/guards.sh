@@ -96,6 +96,30 @@ while IFS= read -r f; do
   grep -q '__DEPLOY_ENV__' "$f" \
     || err posthog-env-tag "$f uses posthog-node without tagging events with __DEPLOY_ENV__ — preview traffic would pollute production analytics."
 done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
+# The Worker's runtime secrets are declared in the wrangler config (secrets.required), so
+# wrangler deploy and versions upload (every preview) fail when one is unset, instead of
+# shipping a Worker that silently sends nothing. A warning in v3; an error from v4.
+need="POSTHOG_API_KEY"
+policy turnstile-forms && need="$need ${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
+missing="$(NEED="$need" node -e '
+  const fs = require("fs");
+  const f = ["wrangler.jsonc", "wrangler.json", "wrangler.toml"].find((n) => fs.existsSync(n));
+  if (!f) { console.log("no wrangler config"); process.exit(); }
+  const src = fs.readFileSync(f, "utf8");
+  let req = [];
+  if (f.endsWith(".toml")) {
+    const sec = src.split(/^\s*\[/m).find((b) => /^secrets\]/.test(b)) ?? "";
+    const m = sec.match(/^\s*required\s*=\s*\[([^\]]*)\]/m);
+    req = m ? [...m[1].matchAll(/["\x27]([^"\x27]+)["\x27]/g)].map((x) => x[1]) : [];
+  } else {
+    const json = src.replace(/"(?:[^"\\]|\\.)*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m[0] === "\"" ? m : ""))
+      .replace(/,(\s*[}\]])/g, "$1");
+    try { req = JSON.parse(json).secrets?.required ?? []; } catch { console.log(`${f} is not valid JSON`); process.exit(); }
+  }
+  const miss = process.env.NEED.split(" ").filter((n) => !req.includes(n));
+  if (miss.length) console.log(`${f} secrets.required lacks ${miss.join(", ")}`);
+' 2>&1)"
+[ -z "$missing" ] || echo "::warning::posthog-hybrid: $missing. Declare the Worker's runtime secrets in the wrangler config (secrets.required listing ${need// /, } and any other secret the Worker reads) so a deploy or preview upload without them fails loudly. Note that wrangler dev then loads only the listed secrets. This becomes an error in Ship Gate v4."
 fi
 
 # 2. [tags-via-zaraz] No third-party tags loaded directly. All tags, GTM included, go through Zaraz. No sGTM in this stack.

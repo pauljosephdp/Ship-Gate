@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.5.3 — 2026-09-26
+
+The action's own steps move to the current GitHub Actions majors. No site fails
+because of this release.
+
+**Changed**
+- `action.yml` pins `actions/setup-node@v7`, `actions/setup-python@v7`,
+  `actions/cache@v6` and `actions/upload-artifact@v7` (from v4/v5). These run
+  on Node 24, so the Node 20 deprecation warning is gone from site runs.
+  GitHub-hosted runners need nothing; a self-hosted runner must be v2.327.1 or
+  later.
+
 ## v3.5.2 — 2026-09-26
 
 Post-deploy accepts a PostHog proxy that refuses `/static/` on purpose. No site

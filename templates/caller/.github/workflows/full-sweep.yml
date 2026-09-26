@@ -32,7 +32,7 @@ jobs:
       - name: Config with every page
         # Add working-directory: site here too if the site is not at the repo root.
         run: node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("ship-gate.config.json","utf8"));c.lighthouseUrls="all";c.e2ePages="all";fs.writeFileSync("ship-gate.full.json",JSON.stringify(c,null,2))'
-      - uses: pauljosephdp/Ship-Gate@v3.5.2
+      - uses: pauljosephdp/Ship-Gate@v3.5.3
         with:
           config: ship-gate.full.json
           # working-directory: site

@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.2.1 — 2026-09-26
+
+A fix for sites on `posthog-hybrid` with a same-origin proxy
+(`posthog.apiHost` a path such as `"/ph"` or `"/api/ingest"`). Sites on EU
+Cloud (`"https://eu.i.posthog.com"`) need nothing; bump the pin.
+
+**Fixed**
+- The browser tests abort PostHog requests to the proxy path, as they already
+  did for PostHog's own hosts. Before, the static server answered them with an
+  HTML page, the browser refused to run it as a script, and every page failed
+  "no JS errors" on the SDK's lazily loaded extensions
+  (`/ph/static/…/web-vitals-with-attribution.js`, `/ph/array/…/config.js`).
+  Found on Qualified Deals. PostHog's requests are still recorded before the
+  abort, so "PostHog on every page" keeps proving the attempt.
+
 ## v3.2.0 — 2026-09-25
 
 A new opt-in stack policy, `posthog-hybrid`: PostHog in the browser on every

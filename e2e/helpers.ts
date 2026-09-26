@@ -39,11 +39,15 @@ export function isPostHog(url: string) {
 
 // Other origins are aborted: a vendor outage must not fail a PR, and the gate
 // tests this site's code. CSP still reports a blocked URL before any request is made.
+// PostHog is aborted too when it is same-origin (posthog.apiHost a proxy path): the
+// static server has no proxy behind that path and would answer with an HTML page,
+// which the browser refuses to run as a script, failing every page on "no JS errors".
 export async function sameOriginOnly(page: Page) {
   await page.route('**/*', (route) => {
-    const { hostname, protocol } = new URL(route.request().url());
+    const url = route.request().url();
+    const { hostname, protocol } = new URL(url);
     const local = hostname === 'localhost' || hostname === '127.0.0.1' || protocol === 'data:' || protocol === 'blob:';
-    return local ? route.continue() : route.abort();
+    return local && !isPostHog(url) ? route.continue() : route.abort();
   });
 }
 

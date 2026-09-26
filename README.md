@@ -168,8 +168,9 @@ assets are `immutable`; an unknown path answers 404 with the site's 404 page;
   (session replay), and for the snippet `'unsafe-inline'` with no hashes. The
   snippet holds the key, so no one hash fits CI and production. A same-origin
   proxy (`posthog.apiHost` a path) needs only `'self'`. The browser tests
-  abort PostHog's requests, so lazily loaded replay and survey code would
-  otherwise never meet the CSP before production.
+  abort PostHog's requests, to its hosts and to a same-origin proxy path alike
+  (the static server has nothing behind the proxy), so lazily loaded replay and
+  survey code would otherwise never meet the CSP before production.
 
 ### Discovery scan: SEO, AEO, GEO and AIO readiness
 
@@ -677,11 +678,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.2.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.2.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.2.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.2.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

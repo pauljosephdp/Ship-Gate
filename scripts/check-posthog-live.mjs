@@ -10,7 +10,8 @@
 // one read-only GET of the project's remote config, the file every page load fetches.
 // With a same-origin proxy (apiHost a path such as "/ph"), it also fetches the session
 // replay recorder through the proxy: a 200 with a JavaScript content type, not the site's
-// HTML 404 page or a redirect, proves the proxy reaches PostHog's assets host.
+// HTML 404 page or a redirect, proves the proxy reaches PostHog's assets host. A proxy that
+// refuses /static/ on purpose (a plain-text 404: replay off) warns instead.
 // No dependencies: Node built-ins only.
 
 const site = process.env.SHIP_GATE_SITE_URL;
@@ -56,13 +57,21 @@ let res;
 try { res = await fetch(configUrl); } catch (e) { fail(`Could not reach PostHog at ${configUrl}: ${e.message}.`); }
 if (res.status === 404) fail(`PostHog does not know the project key production ships (${key.slice(0, 12)}…). Check PUBLIC_POSTHOG_KEY.`);
 if (!res.ok) fail(`PostHog's remote config answered ${res.status} for production's key (${configUrl}).`);
+if (/html/i.test(res.headers.get('content-type') ?? ''))
+  fail(`PostHog's remote config came back as HTML (${configUrl}): the site answered, not PostHog. Route ${apiHost}/* to the PostHog proxy in the Worker entry.`);
 if (apiHost.startsWith('/')) {
   const recorder = `${site}${apiHost}/static/recorder.js`;
   let r;
   try { r = await fetch(recorder, { redirect: 'manual' }); } catch (e) { fail(`Could not reach the PostHog proxy at ${recorder}: ${e.message}.`); }
   const type = r.headers.get('content-type') ?? '';
-  if (r.status !== 200 || !/javascript/i.test(type))
+  // A site with session replay off may refuse ${apiHost}/static/ on purpose, so that
+  // recorder.js can never load through its own origin. That answers 404 from the proxy
+  // itself as plain text, not the site's HTML 404 page; the remote config above already proved the
+  // proxy reaches PostHog's assets host, so a refusal is a warning, not a broken proxy.
+  if (r.status === 404 && /^text\/plain/i.test(type))
+    console.log(`::warning::The PostHog proxy refuses ${apiHost}/static/ (${recorder} answered 404, ${type || 'no content type'}). Session replay, surveys and the toolbar cannot load. Fine if the site turned them off on purpose.`);
+  else if (r.status !== 200 || !/javascript/i.test(type))
     fail(`The PostHog proxy does not serve PostHog's assets: ${recorder} answered ${r.status} (${type || 'no content type'}), not 200 JavaScript. Route ${apiHost}/* to posthogProxy in the Worker entry (templates/caller/posthog/src/worker.ts).`);
-  console.log(`The PostHog proxy at ${apiHost} serves PostHog's assets.`);
+  else console.log(`The PostHog proxy at ${apiHost} serves PostHog's assets.`);
 }
 console.log(`Production starts PostHog with a live project key (${key.slice(0, 12)}…).`);

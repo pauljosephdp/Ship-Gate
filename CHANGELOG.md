@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.5.2 — 2026-09-26
+
+Post-deploy accepts a PostHog proxy that refuses `/static/` on purpose. No site
+fails because of this release.
+
+**Fixed**
+- `check-posthog-live.mjs` failed any same-origin proxy that did not serve
+  `recorder.js`. A site with session replay off can refuse `<apiHost>/static/`
+  so replay, surveys and the toolbar can never load through its own origin;
+  that plain-text 404 now warns. An HTML or empty 404 still fails.
+- The remote config fetched through the proxy now fails when it comes back as
+  HTML: the site answered, not PostHog.
+
 ## v3.5.1 — 2026-09-26
 
 `tags-via-zaraz` and `faq-visible` no longer fail a site on text that is fine:

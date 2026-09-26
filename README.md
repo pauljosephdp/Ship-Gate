@@ -422,7 +422,11 @@ read-only GET of the project's remote config (`/array/<key>/config.js`), which
 answers 404 for an unknown key. With a same-origin proxy (`posthog.apiHost` a
 path such as `"/ph"`), it also fetches `<siteUrl><apiHost>/static/recorder.js`
 and fails unless that answers 200 with a JavaScript content type: an HTML 404
-page or a redirect means the proxy isn't reaching PostHog. With
+page or a redirect means the proxy isn't reaching PostHog. A plain-text 404 is
+the proxy refusing `/static/` on purpose (a site with session replay off keeps
+`recorder.js` from ever loading through its own origin), so it warns instead;
+the remote config, which must not come back as HTML, already proved the proxy
+reaches PostHog's assets host. With
 `analytics-always-on` it warns when production's home page has no Zaraz loader
 (`/cdn-cgi/zaraz/`), because then Google Analytics runs nowhere. It warns rather
 than fails: a Zaraz setting is not a fault in the deployed commit, and a
@@ -803,11 +807,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.5.1 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.5.2 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.5.1". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.5.2". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

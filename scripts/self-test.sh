@@ -728,6 +728,10 @@ ph_live_case "production without PostHog"          "no project key"         '{}'
 ph_live_case "production ships the CI key"         "CI PostHog key"         "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$TK')</script>\"}}"
 ph_live_case "production key unknown to PostHog"   "does not know the project key" "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$LIVE_KEY')</script>\"}}"
 ph_live_case "proxy serves HTML for recorder.js"    "does not serve PostHog's assets" "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$LIVE_KEY')</script>\"},\"/ingest/array/$LIVE_KEY/config.js\":{\"type\":\"text/javascript\",\"body\":\"x\"},\"/ingest/static/recorder.js\":{\"type\":\"text/html\",\"body\":\"<h1>404</h1>\"}}"
+LIVE_HOME="\"/\":{\"type\":\"text/html\",\"body\":\"<script>posthog.init('$LIVE_KEY')</script>\"}"
+ph_live_case "proxy refuses /static/ on purpose"   pass                     "{$LIVE_HOME,\"/ingest/array/$LIVE_KEY/config.js\":{\"type\":\"text/javascript\",\"body\":\"x\"},\"/ingest/static/recorder.js\":{\"status\":404,\"type\":\"text/plain;charset=UTF-8\",\"body\":\"Not found\"}}"
+ph_live_case "proxy not routed: empty 404"        "does not serve PostHog's assets" "{$LIVE_HOME,\"/ingest/array/$LIVE_KEY/config.js\":{\"type\":\"text/javascript\",\"body\":\"x\"}}"
+ph_live_case "remote config answered by the site"  "came back as HTML"      "{$LIVE_HOME,\"/ingest/array/$LIVE_KEY/config.js\":{\"type\":\"text/html\",\"body\":\"<h1>Home</h1>\"}}"
 ph_live_case "production leaks a personal key"     "personal API key"       "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>const p='${PHX}abcdefghijklmnopqrstuvwxyz0123'</script>\"}}"
 
 # check-analytics-live.mjs (analytics-always-on): Zaraz on production, a warning when missing.

@@ -300,6 +300,22 @@ jobs:
       - name: Expected result (10)
         if: ${{ !cancelled() && matrix.v10 }}
         run: bash test/expect-gate.sh ${{ matrix.v10 }} ${{ steps.gate10.outcome }}
+      # The fast stage outside Actions (scripts/gate-fast.sh, run by Workers Builds on
+      # every site push): it must pass the conforming build and fail two-h1 on the
+      # structure scan, like the action does.
+      - name: Fast stage outside Actions
+        if: ${{ !cancelled() && matrix.group == 'scans' }}
+        run: |
+          bash test/break-fixture.sh conforming
+          (cd test/fixture-site && npm run build && bash ../../scripts/gate-fast.sh)
+          bash test/break-fixture.sh two-h1
+          cd test/fixture-site && npm run build
+          if bash ../../scripts/gate-fast.sh > "$RUNNER_TEMP/gate-fast.log" 2>&1; then
+            cat "$RUNNER_TEMP/gate-fast.log"; echo "::error::gate-fast.sh passed a build with two h1s."; exit 1
+          fi
+          grep -qF '| Structure scan | ❌ failed |' "$RUNNER_TEMP/gate-fast.log" \
+            || { cat "$RUNNER_TEMP/gate-fast.log"; echo "::error::gate-fast.sh did not fail the structure scan."; exit 1; }
+          echo "gate-fast.sh behaved as expected."
       # Lets the push to main skip this group when it lands the exact tree tested here.
       - name: Record the tree that passed
         id: passed

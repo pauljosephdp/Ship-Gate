@@ -1,5 +1,38 @@
 # Changelog
 
+## v3.8.0 — 2026-09-27
+
+The gate is split between Cloudflare Workers Builds and GitHub Actions, so both
+free tiers carry a site's CI (README → Where the gate runs). No site fails
+because of this release. To move work off Actions, re-copy the caller templates
+and set the Workers Builds build command, deploy command and
+`SHIP_GATE_READ_TOKEN` build secret.
+
+**Added**
+- `scripts/gate-fast.sh`: every check that needs no browser (contract, guards,
+  `astro check`, lint, tests, the site's checks, every post-build scan), run
+  outside Actions against a finished build. It prints the verify summary table.
+- `templates/caller/scripts/ship-gate-workers.sh`: called at the end of the
+  site's build, it runs the fast stage in every non-production Workers Builds
+  build. It does nothing locally, in `verify` or on `main`. `SHIP_GATE_SKIP_CHECKS`
+  leaves named site checks (ones that need git history) to `verify`.
+- `scripts/post-deploy.sh` and `templates/caller/scripts/ship-gate-after-deploy.sh`:
+  the post-deploy check, appended to the Workers Builds deploy command, so it
+  runs straight after each deploy without an Actions runner.
+
+**Changed**
+- The post-deploy action runs `scripts/post-deploy.sh`: one implementation for
+  both callers. Every live check now runs even after another fails.
+- Caller `ci.yml`: `verify` skips draft pull requests entirely; the fast stage
+  in Workers Builds covers them.
+- Caller `post-deploy.yml` is a manual fallback (`workflow_dispatch`).
+- Caller `full-sweep.yml` and `dependabot.yml` run monthly instead of weekly.
+
+**Ship Gate's own CI**
+- `fixture (scans)` also runs `gate-fast.sh` against the fixture site: the
+  conforming build must pass, and a build with two `h1`s must fail its
+  structure scan.
+
 ## v3.7.0 — 2026-09-26
 
 Ship Gate bumps can merge themselves. No site fails because of this release.

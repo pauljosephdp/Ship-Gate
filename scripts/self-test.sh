@@ -476,10 +476,10 @@ dist_case "key in client output never exempt"       "PostHog key found"   "echo 
 DISCLOSURE='<p>PostHog Privacy Policy: <a href="https://posthog.com/privacy">posthog.com/privacy</a></p>'
 dist_case "privacy page naming posthog.com passes"  pass                  "mkdir -p dist/client/privacy-policy && echo '$DISCLOSURE' > dist/client/privacy-policy/index.html"
 dist_case "EU ingestion host in client HTML"        "PostHog found"       "mkdir -p dist/client/privacy-policy && echo '$DISCLOSURE<script>fetch(\"https://eu.i.posthog.com/e\")</script>' > dist/client/privacy-policy/index.html"
-# post-deploy's "Production HTML is PostHog-free" pattern, read from the action itself.
-PROD_PH="$(sed -n "s/.*grep -qE '\([^']*posthog-js[^']*\)'.*/\1/p" "$HERE/../post-deploy/action.yml")"
+# post-deploy's "Production HTML is PostHog-free" pattern, read from scripts/post-deploy.sh itself.
+PROD_PH="$(sed -n "s/.*grep -qE '\([^']*posthog-js[^']*\)'.*/\1/p" "$HERE/../scripts/post-deploy.sh")"
 prod_ph_case() {
-  if [ -z "$PROD_PH" ]; then bad "$1" "PostHog pattern not found in post-deploy/action.yml" ""
+  if [ -z "$PROD_PH" ]; then bad "$1" "PostHog pattern not found in scripts/post-deploy.sh" ""
   elif grep -qE "$PROD_PH" <<<"$3"; then [ "$2" = fail ] && ok "$1" || bad "$1" "production HTML check flags it" "$3"
   else [ "$2" = pass ] && ok "$1" || bad "$1" "production HTML check misses it" "$3"; fi
 }
@@ -826,9 +826,32 @@ cost_case "action takes a stage input"                   action.yml 'STAGE: ${{ 
 cost_case "reports upload only when a check failed"      action.yml "steps.summary.outputs.failed == '1' && steps.site.outputs.fixture != 'true'"
 cost_case "the Result step fails the job"                action.yml 'FAILED: ${{ steps.summary.outputs.failed }}'
 cost_case "fixture steps pass their stage as the input"  .github/workflows/self-test.yml 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}'
-cost_case "caller CI runs drafts at stage scans"         templates/caller/.github/workflows/ci.yml "stage: \${{ github.event.pull_request.draft && 'scans' || 'full' }}"
+cost_case "caller CI skips verify on drafts"             templates/caller/.github/workflows/ci.yml 'if: github.event.pull_request.draft != true'
 cost_case "caller CI re-runs when a draft turns ready"   templates/caller/.github/workflows/ci.yml 'ready_for_review'
-cost_case "caller post-deploy waits for the deployed SHA" templates/caller/.github/workflows/post-deploy.yml 'sha: ${{ github.event.check_run.head_sha || github.sha }}'
+cost_case "post-deploy action runs the shared script"   post-deploy/action.yml 'scripts/post-deploy.sh'
+cost_case "caller post-deploy is a manual fallback"       templates/caller/.github/workflows/post-deploy.yml 'workflow_dispatch:'
+cost_case "Workers build hook runs the fast stage"        templates/caller/scripts/ship-gate-workers.sh 'scripts/gate-fast.sh'
+cost_case "Workers build hook skips production builds"    templates/caller/scripts/ship-gate-workers.sh '"${WORKERS_CI_BRANCH:-}" = main'
+cost_case "Workers deploy hook runs post-deploy"          templates/caller/scripts/ship-gate-after-deploy.sh 'scripts/post-deploy.sh'
+# gate-fast.sh runs every non-browser check the verify action runs.
+for f in 'prepare.mjs" verify' 'prepare.mjs" after-build' guards.sh check-dist.sh check-posthog.mjs check-structure.mjs \
+         check-discovery.mjs check-copy.mjs check-market.mjs 'run-checks.sh" $SHIP_GATE_CHECKS_PREBUILD' \
+         'run-checks.sh" $SHIP_GATE_CHECKS_POSTBUILD' 'npm run check' 'npm run lint' 'npm test'; do
+  if grep -qF -- "$f" "$HERE/../action.yml" && ! grep -qF -- "$f" "$HERE/gate-fast.sh"; then
+    bad "gate-fast.sh runs $f" "action.yml runs it; gate-fast.sh does not" ""
+  fi
+done
+ok "gate-fast.sh covers the action's non-browser checks"
+# post-deploy.sh runs every live check the old action steps ran.
+for f in check-live.mjs check-headers-live.mjs check-posthog-live.mjs check-analytics-live.mjs SHIP_GATE_SMOKE_PATHS 'name=\"build-sha\"'; do
+  grep -qF -- "$f" "$HERE/post-deploy.sh" || bad "post-deploy.sh runs $f" "missing" ""
+done
+ok "post-deploy.sh covers the live checks"
+# The Workers hooks do nothing outside Workers Builds, and the build hook nothing on main.
+( cd "$(mktemp -d)" && env -u WORKERS_CI bash "$HERE/../templates/caller/scripts/ship-gate-workers.sh" ) \
+  && ok "Workers build hook is a no-op outside Workers Builds" || bad "Workers build hook is a no-op outside Workers Builds" "it failed" ""
+( cd "$(mktemp -d)" && WORKERS_CI=1 WORKERS_CI_BRANCH=main bash "$HERE/../templates/caller/scripts/ship-gate-workers.sh" ) >/dev/null \
+  && ok "Workers build hook is a no-op on main" || bad "Workers build hook is a no-op on main" "it failed" ""
 cost_case "each run prunes its branch's older reports"   action.yml 'select(.workflow_run.head_branch == env.BRANCH and (.workflow_run.id | tostring) != env.RUN_ID)'
 cost_case "caller CI may delete its older reports"      templates/caller/.github/workflows/ci.yml 'actions: write'
 cost_case "caller full sweep may delete its older reports" templates/caller/.github/workflows/full-sweep.yml 'actions: write'

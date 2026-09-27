@@ -14,8 +14,7 @@ updates:
   - package-ecosystem: npm
     directory: /   # the site directory if it is not the repo root, e.g. /site
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     open-pull-requests-limit: 5
     # Every Dependabot PR runs the full verify job. Don't re-run it each time main
     # moves; comment "@dependabot rebase" on one that conflicts.
@@ -33,13 +32,12 @@ updates:
         update-types: ["version-update:semver-major"]
 
   # Also bumps the pinned Ship Gate version (pauljosephdp/Ship-Gate@vX.Y.Z).
-  # Weekly, so a new Ship Gate release reaches each site within a week, through that site's own PR gate.
+  # Monthly, so a site takes Ship Gate releases in one batch, through that site's own PR gate.
   - package-ecosystem: github-actions
     directory: /   # always the repo root: workflows live there
     registries: [ship-gate]
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     rebase-strategy: disabled
     # One PR for every action bump, the Ship Gate pin included.
     groups:

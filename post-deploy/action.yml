@@ -33,70 +33,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Load site config
+    # One implementation with the Workers Builds deploy command: scripts/post-deploy.sh.
+    - name: Post-deploy check
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: node "$GITHUB_ACTION_PATH/../scripts/prepare.mjs" post-deploy "${{ inputs.config }}"
-
-    - name: Wait for production to serve this commit
-      shell: bash
       env:
-        WAIT_MINUTES: ${{ inputs.wait-minutes }}
         SHA: ${{ inputs.sha }}
-      run: |
-        tries=$(( WAIT_MINUTES * 3 ))
-        # Fetch first, then search. Piping curl into `grep -q` breaks under the
-        # runner's pipefail: grep exits on the first match, curl fails writing
-        # the rest of the page (exit 23), and the match reads as a miss.
-        for i in $(seq 1 "$tries"); do
-          page=$(curl -fsS "$SHIP_GATE_SITE_URL/?cb=$(date +%s)") || page=""
-          if grep -qF "name=\"build-sha\" content=\"$SHA\"" <<<"$page"; then
-            echo "Production is serving $SHA"; exit 0
-          fi
-          sleep 20
-        done
-        echo "::error::Production not serving $SHA after $WAIT_MINUTES min. Check the deploy pipeline; roll back if needed."
-        exit 1
-
-    - name: Smoke check key URLs
-      shell: bash
-      run: |
-        status=0
-        for p in $SHIP_GATE_SMOKE_PATHS; do
-          code=$(curl -s -o /dev/null -w '%{http_code}' "$SHIP_GATE_SITE_URL$p")
-          echo "$p -> $code"
-          [ "$code" = "200" ] || { echo "::error::$p returned $code"; status=1; }
-        done
-        exit $status
-
-    - name: Production serves crawlers and agents (robots.txt, sitemaps, Link, Markdown)
-      shell: bash
-      run: node "$GITHUB_ACTION_PATH/../scripts/check-live.mjs"
-
-    - name: Production answers plain requests; freshness headers; field Core Web Vitals
-      shell: bash
-      env:
+        WAIT_MINUTES: ${{ inputs.wait-minutes }}
         CRUX_API_KEY: ${{ inputs.crux-api-key }}
-      run: node "$GITHUB_ACTION_PATH/../scripts/check-headers-live.mjs"
-
-    - name: Production HTML is PostHog-free
-      if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only ')
-      shell: bash
-      run: |
-        # Fetch first, then search: `curl | grep -q` under pipefail turns a
-        # match into a pass (see the wait step). An unreachable page fails too.
-        page=$(curl -fsS "$SHIP_GATE_SITE_URL/") || { echo "::error::Could not fetch production HTML to check it."; exit 1; }
-        if grep -qE 'posthog-js|posthog\.init|i\.posthog\.com|ph[cx]_[A-Za-z0-9]{20,}' <<<"$page"; then
-          echo "::error::PostHog client code or key found in production HTML."; exit 1
-        fi
-        echo "Production HTML is PostHog-free."
-
-    - name: Production starts PostHog (posthog-hybrid)
-      if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-hybrid ')
-      shell: bash
-      run: node "$GITHUB_ACTION_PATH/../scripts/check-posthog-live.mjs"
-
-    - name: Production carries Zaraz (analytics-always-on)
-      if: contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' analytics-always-on ')
-      shell: bash
-      run: node "$GITHUB_ACTION_PATH/../scripts/check-analytics-live.mjs"
+      run: bash "$GITHUB_ACTION_PATH/../scripts/post-deploy.sh" "${{ inputs.config }}"

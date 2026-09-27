@@ -1,15 +1,14 @@
-# Ship Gate post-deploy check. Your deploy pipeline deploys; this only verifies.
+# Ship Gate post-deploy check — manual fallback.
+# The check itself runs inside Cloudflare Workers Builds, straight after each
+# production deploy, with no Actions runner: set the Workers Builds deploy command to
+#   <your deploy command> && bash scripts/ship-gate-after-deploy.sh
+# (README → Where the gate runs). Run this workflow by hand to re-check production.
+# A site not deployed by Workers Builds triggers it on `push: branches: [main]` instead.
 # Never add a deploy step here, or every merge deploys twice (and the
 # workers-builds-only guard reads a wrangler write command here as one).
-#
-# It starts when Cloudflare Workers Builds reports a successful build of main, so
-# the runner does not sit idle while the deploy runs. If your deploys do not come
-# from Workers Builds, trigger on `push: branches: [main]` instead.
 name: Post-deploy check
 
 on:
-  check_run:
-    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -17,27 +16,11 @@ permissions:
 
 jobs:
   production:
-    # Every check run in the repo triggers this workflow; only a successful Workers
-    # Builds run on main gets a runner. The rest are skipped at no cost.
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || (github.event.check_run.app.slug == 'cloudflare-workers-and-pages'
-          && github.event.check_run.conclusion == 'success'
-          && github.event.check_run.check_suite.head_branch == 'main')
-    # A newer deploy supersedes an older check: the older one would wait for a commit
-    # production no longer serves, then fail on a healthy deploy. Job-level, so a
-    # skipped run (another app's check run) never cancels a real one.
-    concurrency:
-      group: post-deploy
-      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.check_run.head_sha || github.sha }}
-      - uses: pauljosephdp/Ship-Gate/post-deploy@v3.7.0
-        with:
-          sha: ${{ github.event.check_run.head_sha || github.sha }}
-          # working-directory: site
-          # crux-api-key: ${{ secrets.CRUX_API_KEY }}   # optional: field Core Web Vitals
+      - uses: pauljosephdp/Ship-Gate/post-deploy@v3.8.0
+        # with:
+        #   working-directory: site
+        #   crux-api-key: ${{ secrets.CRUX_API_KEY }}   # optional: field Core Web Vitals

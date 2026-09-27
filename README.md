@@ -24,15 +24,17 @@ and the post-deploy check.
 
 | File | Purpose |
 |---|---|
-| `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify`; drafts run the fast stage only |
-| `.github/workflows/post-deploy.yml` | Calls `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` once Workers Builds reports the deploy |
-| `.github/workflows/full-sweep.yml` | Weekly: the gate against every page (`"all"`), which pull requests only sample |
+| `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify`; skips drafts |
+| `scripts/ship-gate-workers.sh` | Called at the end of the Workers Builds build command: the fast stage on every non-production push |
+| `scripts/ship-gate-after-deploy.sh` | Appended to the Workers Builds deploy command: the post-deploy check after every production deploy |
+| `.github/workflows/post-deploy.yml` | Manual fallback: `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` on demand |
+| `.github/workflows/full-sweep.yml` | Monthly: the gate against every page (`"all"`), which pull requests only sample |
 | `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
 | `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs; reads this private repo with the `SHIP_GATE_READ_TOKEN` Dependabot secret (step 14) |
 | `.github/workflows/dependabot-auto-merge.yml` | Queues Dependabot's minor or patch Ship Gate bump to squash-merge once `verify` passes; majors and npm updates wait for a person (step 15) |
 | `.github/pull_request_template.md` | The review checklist |
 
-Templates for all seven are in `templates/caller/`. Sites on the `posthog-hybrid`
+Templates for all of them are in `templates/caller/`. Sites on the `posthog-hybrid`
 policy also copy `templates/caller/posthog/` (see PostHog in the browser and on the server).
 Sites on `analytics-always-on` also follow `templates/caller/analytics/` and
 `templates/caller/legal/` (see Analytics on every page).
@@ -73,18 +75,55 @@ caller) the step logs a notice and the reports simply expire.
 **Stages.** The `stage` input decides how far the gate runs: `full` (the
 default) runs everything above; `browser` stops before Lighthouse; `scans`
 stops after step 4, with no browser, in about two minutes. Skipped checks read
-"➖ not run" and the summary says which stage ran. The caller template passes
-`scans` for a draft pull request and `full` otherwise, and re-runs when the
-draft is marked ready for review. A draft cannot merge, so nothing reaches
-`main` without the full gate, and a PR iterated as a draft pays for one full
-run instead of one per push.
+"➖ not run" and the summary says which stage ran.
+
+### Where the gate runs: Cloudflare vs GitHub
+
+Both free tiers are small (GitHub Actions: 2,000 minutes a month on private
+repos; Cloudflare Workers Builds: 3,000 build minutes, one build at a time,
+20 minutes per build), so the gate is split by what each does best:
+
+| Work | Runs in | When |
+|---|---|---|
+| Fast stage: contract, guards, `astro check`, lint and tests, the site's checks, every post-build scan (`scripts/gate-fast.sh`) | **Cloudflare Workers Builds**, inside the preview build it already runs | every push to a non-production branch, drafts included |
+| Browser suite (smoke, axe, keyboard, reflow, CSP, consent, edge) and Lighthouse, plus the fast stage again as the merge authority (the verify action) | **GitHub Actions** | once a pull request is ready for review, and on each push to it after that |
+| Post-deploy check (`scripts/post-deploy.sh`) and the site's own after-deploy steps | **Cloudflare Workers Builds**, in the deploy command | every production deploy |
+| Full sweep of every page | **GitHub Actions** | monthly, and on demand |
+
+The fast stage takes about 15 seconds on top of a site's build and needs no
+browser, so it fits Workers Builds' single build slot without holding up
+production deploys. The browser suite stays on Actions: the Workers Builds
+image has no documented way to install Chromium's system packages.
+
+A draft runs no Actions job at all; the "Workers Builds: <worker>" check shows
+the fast stage's result. So: open a PR as a draft, iterate on it, run the
+browser suite locally before you mark it ready (a Claude Code cloud session has
+Chromium), and mark it ready once. Each push after that costs a full `verify`,
+roughly ten Actions minutes.
+
+With three sites of about 40 PRs and 40 merges a month each, the split comes to
+about 1,100 Workers Builds minutes and 1,500 Actions minutes. The biggest
+variable is pushes to a PR after it is ready.
+
+**Set up Workers Builds** (dashboard → the Worker → Settings → Build):
+- **Build command:** the site's existing build, with `scripts/ship-gate-workers.sh`
+  at its end, in `package.json` (`"build": "astro build && bash scripts/ship-gate-workers.sh"`,
+  or at the end of `ci:build` if that is the build command). It does nothing
+  outside Workers Builds (locally and in `verify`) and nothing on `main`.
+- **Deploy command:** the existing one, then `&& bash scripts/ship-gate-after-deploy.sh`,
+  then any after-deploy step the site had in `post-deploy.yml` (IndexNow, live
+  checks). A failure marks the production build red: roll back, then fix forward.
+- **Build variables and secrets:** `SHIP_GATE_READ_TOKEN`, as a secret: the same
+  fine-grained token as step 14 (Contents read-only on `pauljosephdp/Ship-Gate`).
+  Without it the fast stage is skipped with a notice, and the after-deploy check
+  fails.
 
 **What a run costs.** Actions bills a private repo's runner by the minute,
 rounded up per job, and PR `verify` time is dominated by the browser suite and
 Lighthouse, which scale with the pages they cover. Keep `e2ePages` to the
 listed `pages` and `lighthouseUrls` to one page per template on pull requests
 (a list runs three times per URL, `"all"` once), and put `"all"` in the
-weekly `full-sweep.yml`, which the template builds from the same config.
+monthly `full-sweep.yml`, which the template builds from the same config.
 
 The built site is served by `scripts/serve-static.mjs`, which behaves like
 Cloudflare Workers static assets: it applies `_redirects` and `_headers`, hides
@@ -394,12 +433,12 @@ With `@astrojs/sitemap`, add `/sitemap.xml /sitemap-index.xml 301` to
   Link: </llms.txt>; rel="describedby"; type="text/markdown"
 ```
 
-The caller template starts the post-deploy check when Cloudflare Workers
-Builds reports a successful build of `main` (its `check_run`), not on the push,
-so no runner sits idle while the deploy runs; it passes the deployed commit as
-`sha`. A site deployed some other way triggers it on `push` instead, and `sha`
-defaults to the triggering commit. After adopting the template, confirm the
-check starts on the next merge.
+The post-deploy check (`scripts/post-deploy.sh`) runs inside the Workers Builds
+deploy command, straight after the deploy, through
+`templates/caller/scripts/ship-gate-after-deploy.sh`, so no Actions runner is
+used. The post-deploy action runs the same script; the caller's
+`post-deploy.yml` keeps it as a manual fallback. A site deployed some other way
+triggers that workflow on `push`, and `sha` defaults to the triggering commit.
 
 After deploy, the post-deploy action first waits (up to `wait-minutes`) until
 production's home page carries that commit (`sha`) in its `build-sha` meta tag,
@@ -803,7 +842,8 @@ belong in `post-deploy.yml` or a scheduled workflow.
     check, require the branch to be up to date, block force pushes and
     deletions. Required approvals: 0 while one person is the only committer.
 12. Workers Builds: production branch `main`, non-production branch builds on,
-    preview URLs on.
+    preview URLs on. Then set the build command, deploy command and
+    `SHIP_GATE_READ_TOKEN` build secret as in "Where the gate runs".
 13. Turn on secret scanning, push protection and Dependabot alerts.
 14. Let Dependabot see Ship Gate's releases. This repo is private, so the
     template's `dependabot.yml` reads it through a `git` registry whose token is
@@ -828,11 +868,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.7.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.8.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.7.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.8.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -920,7 +960,7 @@ never releases. Choose the version by its effect on site repos:
   conforming site already passes.
 - **Patch** (v1.1.1): fixes that make no conforming site fail.
 
-Dependabot then opens a PR in each site repo (weekly, on Monday), and that PR
+Dependabot then opens a PR in each site repo (monthly), and that PR
 runs through the site's own `verify` before merging. Minor and patch bumps
 merge themselves once `verify` passes (step 15); a major waits for a person.
 A bad release fails on one PR instead of breaking every site at once.

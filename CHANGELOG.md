@@ -14,7 +14,8 @@ and set the Workers Builds build command, deploy command and
   outside Actions against a finished build. It prints the verify summary table.
 - `templates/caller/scripts/ship-gate-workers.sh`: called at the end of the
   site's build, it runs the fast stage in every non-production Workers Builds
-  build. It does nothing locally, in `verify` or on `main`.
+  build. It does nothing locally, in `verify` or on `main`. `SHIP_GATE_SKIP_CHECKS`
+  leaves named site checks (ones that need git history) to `verify`.
 - `scripts/post-deploy.sh` and `templates/caller/scripts/ship-gate-after-deploy.sh`:
   the post-deploy check, appended to the Workers Builds deploy command, so it
   runs straight after each deploy without an Actions runner.

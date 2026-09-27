@@ -7,6 +7,7 @@
 # in the verify action, which runs once the pull request is ready for review.
 #
 #   gate-fast.sh [CONFIG]   run from the site directory, after `npm run build`
+#   SHIP_GATE_SKIP_CHECKS="name …"   site checks to leave to verify (need git history)
 #
 # It runs the same commands as action.yml's steps of the same names and prints the
 # same summary table; self-test.sh fails if the two lists drift apart.
@@ -16,7 +17,8 @@ GATE="$(cd "$(dirname "$0")/.." && pwd -P)"
 export RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
 # prepare.mjs exports NAME=value lines to $GITHUB_ENV. Always a private file: inside
 # GitHub Actions the real one belongs to the job, and truncating it would lose its env.
-export GITHUB_ENV="$(mktemp "$RUNNER_TEMP/ship-gate.env.XXXXXX")"
+GITHUB_ENV="$(mktemp "$RUNNER_TEMP/ship-gate.env.XXXXXX")"
+export GITHUB_ENV
 
 declare -A outcome
 # run ID COMMAND... — record success or failure; never stop the sequence.
@@ -34,6 +36,19 @@ load_env() {
 policy() { [[ " ${SHIP_GATE_POLICIES:-} " == *" $1 "* ]]; }
 
 run prepare node "$GATE/scripts/prepare.mjs" verify "$CONFIG"; load_env
+# SHIP_GATE_SKIP_CHECKS: site checks this build cannot answer (e.g. one that needs git
+# history, which Workers Builds does not clone). They still run in verify.
+skipped=""
+if [ -n "${SHIP_GATE_SKIP_CHECKS:-}" ]; then
+  for phase in PREBUILD POSTBUILD; do
+    var="SHIP_GATE_CHECKS_$phase" kept=""
+    for c in ${!var:-}; do
+      if [[ " $SHIP_GATE_SKIP_CHECKS " == *" $c "* ]]; then skipped+=" $c"; else kept+=" $c"; fi
+    done
+    export "$var=${kept# }"
+  done
+  [ -n "$skipped" ] && echo "Site checks left to verify:$skipped"
+fi
 run guards bash "$GATE/scripts/guards.sh"
 run check npm run check
 [ -n "${SHIP_GATE_HAS_LINT:-}" ] && run lint npm run lint
@@ -69,6 +84,7 @@ for row in \
   esac
   table+=$'\n'"| $name | $mark |"
 done
+[ -n "$skipped" ] && table+=$'\n'"| Site checks left to verify:$skipped | ➖ not run here |"
 table+=$'\n'"| Browser tests and Lighthouse | ➖ run by verify once the PR is ready |"
 printf '\nShip Gate (fast stage)\n\n%s\n\n' "$table"
 if [ "$failed" -ne 0 ]; then echo "Ship Gate fast stage failed — see the table above and each group's log."; exit 1; fi

@@ -17,7 +17,8 @@ WAIT_MINUTES="${WAIT_MINUTES:-10}"
 export RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
 # prepare.mjs exports NAME=value lines to $GITHUB_ENV. Always a private file: inside
 # GitHub Actions the real one belongs to the job, and truncating it would lose its env.
-export GITHUB_ENV="$(mktemp "$RUNNER_TEMP/ship-gate-post-deploy.env.XXXXXX")"
+GITHUB_ENV="$(mktemp "$RUNNER_TEMP/ship-gate-post-deploy.env.XXXXXX")"
+export GITHUB_ENV
 node "$GATE/scripts/prepare.mjs" post-deploy "$CONFIG" || exit 1
 while IFS= read -r line; do [ -n "$line" ] && export "${line?}"; done < "$GITHUB_ENV"
 policy() { [[ " ${SHIP_GATE_POLICIES:-} " == *" $1 "* ]]; }

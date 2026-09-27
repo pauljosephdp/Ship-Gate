@@ -110,6 +110,10 @@ variable is pushes to a PR after it is ready.
   at its end, in `package.json` (`"build": "astro build && bash scripts/ship-gate-workers.sh"`,
   or at the end of `ci:build` if that is the build command). It does nothing
   outside Workers Builds (locally and in `verify`) and nothing on `main`.
+  Workers Builds clones without git history, so a site check that needs it
+  (e.g. a sitemap `lastmod` check) is left to `verify`:
+  `SHIP_GATE_SKIP_CHECKS="lastmod:check" bash scripts/ship-gate-workers.sh`.
+  The summary lists it as not run.
 - **Deploy command:** the existing one, then `&& bash scripts/ship-gate-after-deploy.sh`,
   then any after-deploy step the site had in `post-deploy.yml` (IndexNow, live
   checks). A failure marks the production build red: roll back, then fix forward.

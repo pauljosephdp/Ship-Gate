@@ -2,6 +2,8 @@
 # Ship Gate's fast stage inside Cloudflare Workers Builds. Call it at the end of the
 # build command's script (package.json "build", or "ci:build"):
 #   "build": "astro build && bash scripts/ship-gate-workers.sh"
+# A site check that needs git history (Workers Builds clones without it) can be left
+# to verify:  ... && SHIP_GATE_SKIP_CHECKS="lastmod:check" bash scripts/ship-gate-workers.sh
 # It does nothing outside Workers Builds (locally, and in GitHub Actions' verify,
 # which runs the build too) and on the production branch (main was verified on its
 # PR). On every other branch it runs guards, astro check, tests, the site's checks

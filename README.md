@@ -525,8 +525,8 @@ A portfolio that shares a stack puts the same list in every site's config.
 
 PostHog loads on every page, with or without consent, and the server sends its
 own events into the same visitor's session. The files to copy are in
-`templates/caller/posthog/`; the fixture's `posthog-hybrid` variant builds from
-these same files, so CI proves them on every Ship Gate change.
+`templates/caller/posthog/`; the fixture's `analytics-always-on` variant (this
+policy plus the consent bridge) builds from these same files, so CI proves them on every Ship Gate change.
 
 | Template | Put it at | What it does |
 |---|---|---|
@@ -904,9 +904,9 @@ crawler blocked in `robots.txt`, invalid JSON-LD, an Arabic page without
 ring removed, a tracking cookie before consent, PostHog missing from some pages
 or blocked by the CSP (`posthog-hybrid`). The conforming
 run, one that shows a site file named after a tracking vendor, and
-`posthog-hybrid` (the fixture switched to `posthog-hybrid`, built from
-`templates/caller/posthog/` with `posthog-js` and `posthog-node` installed at
-the versions `break-fixture.sh` pins) must pass;
+`analytics-always-on` (the fixture switched to `posthog-hybrid` plus the consent
+bridge, built from `templates/caller/posthog/` with `posthog-js` and
+`posthog-node` installed at the versions `break-fixture.sh` pins) must pass;
 each broken run must fail on the check that owns the fault (`test/expect-gate.sh`).
 Each variant stops at the stage that owns its fault (`expect-gate.sh --stage`),
 passed as the action's `stage` input, so every fixture run exercises the same

@@ -83,7 +83,6 @@ case "$1" in
   no-focus-ring) add '<p><a href="/contact/" style="outline:none">Write to the fixture</a></p>' ;;
   tracker-cookie) printf '/\n  Set-Cookie: _ga=GA1.1.123.456; Path=/\n' >> public/_headers ;;
   vendor-named-asset) echo '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>' > public/hubspot-partner-badge.svg; add '<img src="/hubspot-partner-badge.svg" alt="HubSpot partner" width="8" height="8">' ;;
-  posthog-hybrid) posthog_hybrid; posthog_csp ;;
   posthog-hybrid-missing) posthog_hybrid; posthog_csp; sed -i 's#<PostHog />#{Astro.url.pathname === "/" \&\& <PostHog />}#' src/layouts/Base.astro ;;
   posthog-hybrid-csp) posthog_hybrid ;;
   analytics-always-on) posthog_hybrid; posthog_csp; analytics_always_on ;;

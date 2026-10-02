@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.9.1 — 2026-10-02
+
+**Fixed**
+- `ship-gate-after-deploy.sh`: the automatic rollback never ran on a depth-1 clone. With no parent commit, the changed-files check treated every commit as a Wrangler config change and fixed forward. It now deepens the clone by one commit, or asks the GitHub API with `AUTOMATION_TOKEN`, and only falls back to "no rollback" (with a warning) when it can do neither. A missing `remote.origin.url` no longer stops the script under `set -e`. Found by web-baseline's review of Cocoon, the first live site.
+
 ## v3.9.0 — 2026-10-02
 
 Each Actions minute is spent once, a failed deploy can roll itself back, and a

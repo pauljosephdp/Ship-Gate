@@ -131,7 +131,7 @@ failed post-deploy check runs `wrangler rollback` with the API token Workers Bui
 already gives the deploy command, then still fails the build. It does not roll
 back a commit that changed `wrangler.jsonc`/`wrangler.toml` or a migration: a
 rollback cannot cross a binding change, and a D1 migration only goes forward, so
-those fix forward. With the optional build secret `AUTOMATION_TOKEN` (a
+those fix forward. Workers Builds may clone with depth 1, so the script deepens the clone by one commit to see what changed (or asks the GitHub API with `AUTOMATION_TOKEN`); when it can do neither, it treats the commit as a binding change and does not roll back. With the optional build secret `AUTOMATION_TOKEN` (a
 fine-grained token with Contents: write on the site repo, which repository
 dispatch requires), the script then sends a `deploy-failed` `repository_dispatch` carrying the
 commit SHA, so the site can open a revert pull request and `main` matches
@@ -914,11 +914,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.9.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.9.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.9.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.9.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

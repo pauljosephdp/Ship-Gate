@@ -903,6 +903,19 @@ rm -f "$rb/npx.log"
 deploy_hook
 if [ -e "$rb/npx.log" ]; then bad "deploy hook never rolls back a Wrangler config change" "it called wrangler rollback" ""
 else ok "deploy hook never rolls back a Wrangler config change"; fi
+# A depth-1 clone (as Workers Builds may make): the hook deepens by one to see the parent, then rolls back.
+src="$rb/site" shallow="$(mktemp -d)/site"
+git clone -q --depth 1 "file://$src" "$shallow" 2>/dev/null
+( cd "$shallow" && git checkout -q -- . ) ; rm -f "$rb/npx.log"
+( cd "$shallow" && git config remote.origin.url "file://$src" )
+# The last commit in $src changed wrangler.jsonc; add a plain commit on top so a rollback is allowed.
+( cd "$src" && echo c > c && git add c && git -c user.email=t@t -c user.name=t commit -qm 4 )
+rm -rf "$shallow"; git clone -q --depth 1 "file://$src" "$shallow" 2>/dev/null
+( cd "$shallow" && PATH="$rb/bin:$PATH" WORKERS_CI=1 WORKERS_CI_COMMIT_SHA=def5678 SHIP_GATE_HOME="$rb/home" \
+  SHIP_GATE_ROLLBACK=1 env -u AUTOMATION_TOKEN bash "$HERE/../templates/caller/scripts/ship-gate-after-deploy.sh" ) >/dev/null 2>&1
+if grep -qF 'wrangler rollback --message' "$rb/npx.log" 2>/dev/null; then ok "deploy hook deepens a shallow clone and rolls back"
+else bad "deploy hook deepens a shallow clone and rolls back" "no wrangler rollback call" ""; fi
+rm -rf "$(dirname "$shallow")"
 rm -rf "$rb"
 n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/workflows/self-test.yml")"
 m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"

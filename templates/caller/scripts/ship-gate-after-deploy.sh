@@ -32,9 +32,20 @@ fi
 echo "::error::Ship Gate post-deploy check failed for $sha."
 [ "${SHIP_GATE_ROLLBACK:-}" = 1 ] || { echo "Roll back (wrangler rollback), then fix forward."; exit 1; }
 
-# The files this commit changed. Workers Builds clones shallow; with no parent to diff
-# against, play safe and treat it as a binding change.
-changed="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo wrangler.jsonc)"
+# The files this commit changed. Workers Builds may clone with depth 1, so the parent can
+# be missing: deepen by one, else ask the GitHub API (AUTOMATION_TOKEN); only when neither
+# works, play safe and treat it as a binding change (no rollback, and say why).
+repo="$(git config --get remote.origin.url | sed -E 's#^(https://[^/]+/|git@[^:]+:)##; s#\.git$##' || true)"
+git rev-parse -q --verify HEAD~1 >/dev/null 2>&1 || git fetch -q --deepen=1 origin 2>/dev/null || true
+if git rev-parse -q --verify HEAD~1 >/dev/null 2>&1; then
+  changed="$(git diff --name-only HEAD~1 HEAD)"
+elif [ -n "${AUTOMATION_TOKEN:-}" ] && changed="$(curl -fsS -H "Authorization: Bearer $AUTOMATION_TOKEN" -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$repo/commits/$sha" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{for(const f of JSON.parse(d).files||[])console.log(f.filename)})')"; then
+  :
+else
+  echo "::warning::Cannot list this commit's files (shallow clone, no AUTOMATION_TOKEN): treating it as a binding change."
+  changed="wrangler.jsonc"
+fi
 if printf '%s\n' "$changed" | grep -qE '(^|/)(wrangler\.(jsonc?|toml)|migrations/)'; then
   echo "::error::Not rolling back: this commit changed the Wrangler config or a migration, which a rollback cannot undo. Fix forward."
   exit 1
@@ -43,7 +54,6 @@ echo "Rolling production back to the previous version."
 if npx --no-install wrangler rollback --message "ship-gate post-deploy failed (${sha:0:7})"; then
   echo "Rolled back. Production is on the previous version; main still holds $sha until it is reverted."
   if [ -n "${AUTOMATION_TOKEN:-}" ]; then
-    repo="$(git config --get remote.origin.url | sed -E 's#^(https://[^/]+/|git@[^:]+:)##; s#\.git$##')"
     if curl -fsS -o /dev/null -X POST "https://api.github.com/repos/$repo/dispatches" \
       -H "Authorization: Bearer $AUTOMATION_TOKEN" -H "Accept: application/vnd.github+json" \
       -d "{\"event_type\":\"deploy-failed\",\"client_payload\":{\"sha\":\"$sha\",\"rolled_back\":true}}"; then

@@ -1,15 +1,4 @@
 version: 2
-registries:
-  # Ship-Gate is a private repo, so Dependabot needs a token to see its release tags
-  # and raise the pin. SHIP_GATE_READ_TOKEN is a Dependabot secret (Settings → Secrets
-  # and variables → Dependabot): a fine-grained token with read-only Contents on
-  # pauljosephdp/Ship-Gate. Without it the github-actions update job fails with
-  # "Repository not found" and the pin never moves.
-  ship-gate:
-    type: git
-    url: https://github.com
-    username: x-access-token
-    password: ${{secrets.SHIP_GATE_READ_TOKEN}}
 updates:
   - package-ecosystem: npm
     directory: /   # the site directory if it is not the repo root, e.g. /site
@@ -35,7 +24,6 @@ updates:
   # Monthly, so a site takes Ship Gate releases in one batch, through that site's own PR gate.
   - package-ecosystem: github-actions
     directory: /   # always the repo root: workflows live there
-    registries: [ship-gate]
     schedule:
       interval: monthly
     rebase-strategy: disabled

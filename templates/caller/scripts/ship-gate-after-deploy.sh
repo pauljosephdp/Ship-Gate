@@ -18,12 +18,14 @@ set -euo pipefail
 # SHIP_GATE_HOME: a local Ship-Gate checkout, for testing this script.
 dir="${SHIP_GATE_HOME:-}"
 if [ -z "$dir" ]; then
-  if [ -z "${SHIP_GATE_READ_TOKEN:-}" ]; then
-    echo "::error::SHIP_GATE_READ_TOKEN build secret not set; the post-deploy check cannot run."; exit 1
-  fi
-  tag="$(grep -m1 -oE 'pauljosephdp/Ship-Gate@v[0-9]+\.[0-9]+\.[0-9]+' .github/workflows/ci.yml | cut -d@ -f2)"
+  # Ship-Gate is public (v3.10.0): no token needed. A leftover SHIP_GATE_READ_TOKEN is still used.
+  tag="$(grep -m1 -oE 'pauljosephdp/Ship-Gate@v[0-9]+\.[0-9]+\.[0-9]+' .github/workflows/ci.yml 2>/dev/null | cut -d@ -f2 || true)"
+  url="https://github.com/pauljosephdp/Ship-Gate.git"
+  [ -z "${SHIP_GATE_READ_TOKEN:-}" ] || url="https://x-access-token:${SHIP_GATE_READ_TOKEN}@github.com/pauljosephdp/Ship-Gate.git"
   dir="$(mktemp -d)"
-  git clone -q --depth 1 --branch "$tag" "https://x-access-token:${SHIP_GATE_READ_TOKEN}@github.com/pauljosephdp/Ship-Gate.git" "$dir"
+  if [ -z "$tag" ] || ! git clone -q --depth 1 --branch "$tag" "$url" "$dir" 2>/dev/null; then
+    echo "::error::Ship Gate ${tag:-<no pin in .github/workflows/ci.yml>} could not be fetched; the post-deploy check cannot run."; exit 1
+  fi
 fi
 sha="${WORKERS_CI_COMMIT_SHA:?}"
 if SHA="$sha" WAIT_MINUTES="${SHIP_GATE_WAIT_MINUTES:-5}" bash "$dir/scripts/post-deploy.sh" ship-gate.config.json; then

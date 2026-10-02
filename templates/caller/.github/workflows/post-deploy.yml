@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: pauljosephdp/Ship-Gate/post-deploy@v3.9.2
+      - uses: pauljosephdp/Ship-Gate/post-deploy@v3.10.0
         # with:
         #   working-directory: site
         #   crux-api-key: ${{ secrets.CRUX_API_KEY }}   # optional: field Core Web Vitals

@@ -30,7 +30,7 @@ and the post-deploy check.
 | `.github/workflows/post-deploy.yml` | Manual fallback: `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` on demand |
 | `.github/workflows/full-sweep.yml` | Monthly: the gate against every page (`"all"`), which pull requests only sample |
 | `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
-| `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs; reads this private repo with the `SHIP_GATE_READ_TOKEN` Dependabot secret (step 14) |
+| `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs; Ship Gate is public, so no token or registry (step 14) |
 | `.github/workflows/dependabot-auto-merge.yml` | Queues Dependabot's minor or patch Ship Gate bump to squash-merge once `verify` passes; majors and npm updates wait for a person (step 15) |
 | `.github/pull_request_template.md` | The review checklist |
 
@@ -113,7 +113,7 @@ preview build for the same commit, so `verify` need not repeat it:
   own checks, build, the browser suite and Lighthouse still run. It is only
   sound while the `main` ruleset also requires the **"Workers Builds: <worker>"**
   check and Workers Builds sets the build variable **`SHIP_GATE_REQUIRE_FAST=1`**:
-  that variable fails the preview build when `SHIP_GATE_READ_TOKEN` is missing,
+  that variable fails the preview build when Ship Gate cannot be fetched,
   so a green Workers Builds check always means the fast stage ran. Without both,
   set `skip-fast: false`. As a backstop (v3.9.2), `verify` looks for a
   "Workers Builds" check run on the commit, waiting up to 90 s, and skips the
@@ -163,10 +163,12 @@ production again before the next deploy ships the same commit.
   then any after-deploy step the site had in `post-deploy.yml` (IndexNow, live
   checks). A failure marks the production build red: roll back, then fix forward
   (or set `SHIP_GATE_ROLLBACK=1`, above).
-- **Build variables and secrets:** `SHIP_GATE_READ_TOKEN`, as a secret: the same
-  fine-grained token as step 14 (Contents read-only on `pauljosephdp/Ship-Gate`).
-  Without it the fast stage is skipped with a notice, and the after-deploy check
-  fails.
+- **Build variables and secrets:** none for Ship Gate itself. It is public
+  (v3.10.0), so both hooks clone the pinned tag anonymously. A
+  `SHIP_GATE_READ_TOKEN` build secret left from the private days is still used
+  if set, and can be deleted. If the clone fails, the fast stage is skipped
+  with a notice (a failure with `SHIP_GATE_REQUIRE_FAST=1`) and the after-deploy
+  check fails.
 
 **What a run costs.** Actions bills a private repo's runner by the minute,
 rounded up per job, and PR `verify` time is dominated by the browser suite and
@@ -815,7 +817,10 @@ The v1 form `{ "category": "performance", ... }` is still accepted.
 
 ## One-time setup of this repo
 
-1. **Allow the site repos to use it** (only while this repo is private).
+1. **Make it public** (v3.10.0) so sites, Workers Builds and Dependabot read it
+   with no token. Settings → Danger zone → Change visibility. While it was
+   private, sites needed this instead:
+   **Allow the site repos to use it**.
    Settings → Actions → General → Access → *Accessible from repositories
    owned by* this account or organisation. Without this, every site's `verify`
    fails to download the action.
@@ -899,22 +904,17 @@ belong in `post-deploy.yml` or a scheduled workflow.
     two separately green PRs make together. Required approvals: 0 while one
     person is the only committer.
 12. Workers Builds: production branch `main`, non-production branch builds on,
-    preview URLs on. Then set the build command, deploy command and
-    `SHIP_GATE_READ_TOKEN` build secret as in "Where the gate runs", plus the
+    preview URLs on. Then set the build command and deploy command as in
+    "Where the gate runs", plus the
     build variables `SHIP_GATE_REQUIRE_FAST=1` (needed for `skip-fast`) and,
     to roll back on a failed post-deploy check, `SHIP_GATE_ROLLBACK=1` with the
     optional `AUTOMATION_TOKEN` build secret.
 13. Turn on secret scanning, push protection and Dependabot alerts.
-14. Let Dependabot see Ship Gate's releases. This repo is private, so the
-    template's `dependabot.yml` reads it through a `git` registry whose token is
-    the Dependabot secret `SHIP_GATE_READ_TOKEN`. Create one fine-grained
-    personal access token (resource owner `pauljosephdp`, only
-    `pauljosephdp/Ship-Gate`, permission Contents: read-only), then add it to
-    each site under Settings → Secrets and variables → **Dependabot** (not
-    Actions) as `SHIP_GATE_READ_TOKEN`. Without it, Dependabot's
-    `github_actions` job fails with "Repository not found" and never raises the
-    Ship Gate pin. When the token expires, renew it and update the secret in
-    every site.
+14. Nothing to do for Dependabot: Ship Gate is public (v3.10.0), so the
+    template's `dependabot.yml` sees its release tags without a registry or a
+    token. A site still carrying a `ship-gate` registry and a
+    `SHIP_GATE_READ_TOKEN` Dependabot secret can drop both when it next
+    re-copies the template.
 15. Let Ship Gate bumps merge themselves. Turn on Settings → General → **Allow
     auto-merge** and **Automatically delete head branches**. `dependabot-auto-merge.yml` then queues each Dependabot PR
     that raises the Ship Gate pin by a minor or patch version (`gh pr merge
@@ -927,11 +927,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.9.2 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.10.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.9.2". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.10.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,
@@ -1050,9 +1050,6 @@ is left out for a reason:
 
 ## Open items
 
-- **[TO CONFIRM]** Dependabot can open Ship Gate bump PRs from a private repo
-  in a personal account. If it can't, bump the pinned version by hand in each
-  site's two workflow files.
 - **[TO CONFIRM]** `WORKERS_CI_COMMIT_SHA` and `WORKERS_CI_BRANCH` are present
   in production builds, so the post-deploy SHA check and environment tagging
   both work.

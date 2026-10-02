@@ -861,8 +861,8 @@ ok "post-deploy.sh covers the live checks"
 cost_case "each run prunes its branch's older reports"   action.yml 'select(.workflow_run.head_branch == env.BRANCH and (.workflow_run.id | tostring) != env.RUN_ID)'
 cost_case "caller CI may delete its older reports"      templates/caller/.github/workflows/ci.yml 'actions: write'
 cost_case "caller full sweep may delete its older reports" templates/caller/.github/workflows/full-sweep.yml 'actions: write'
-cost_case "caller Dependabot reads Ship Gate with a token" templates/caller/.github/dependabot.yml 'password: ${{secrets.SHIP_GATE_READ_TOKEN}}'
-cost_case "caller Dependabot uses it for action updates"  templates/caller/.github/dependabot.yml 'registries: [ship-gate]'
+if grep -q 'registries' "$HERE/../templates/caller/.github/dependabot.yml"; then bad "caller Dependabot needs no registry (Ship-Gate is public)" "a registries block is left" ""
+else ok "caller Dependabot needs no registry (Ship-Gate is public)"; fi
 cost_case "caller Dependabot does not rebase open PRs"   templates/caller/.github/dependabot.yml 'rebase-strategy: disabled'
 cost_case "caller auto-merge runs from main, not the PR"  templates/caller/.github/workflows/dependabot-auto-merge.yml 'pull_request_target:'
 cost_case "caller auto-merge acts on Dependabot PRs only" templates/caller/.github/workflows/dependabot-auto-merge.yml "if: github.event.pull_request.user.login == 'dependabot[bot]'"
@@ -898,11 +898,19 @@ fs_case() { # name, fake gh body (empty = gh fails), expected skip value
 fs_case "fast stage: Workers Builds check present, verify skips it" 1 true
 fs_case "fast stage: no Workers Builds check, verify runs it"      0 false
 fs_case "fast stage: check runs unreadable, ruleset is trusted"    '' true
-# SHIP_GATE_REQUIRE_FAST fails a preview build that cannot run the fast stage.
+# SHIP_GATE_REQUIRE_FAST fails a preview build that cannot fetch Ship Gate; without it the stage is skipped.
 if ( cd "$(mktemp -d)" && WORKERS_CI=1 WORKERS_CI_BRANCH=feature SHIP_GATE_REQUIRE_FAST=1 \
      env -u SHIP_GATE_READ_TOKEN -u SHIP_GATE_HOME bash "$HERE/../templates/caller/scripts/ship-gate-workers.sh" ) >/dev/null 2>&1; then
-  bad "Workers build hook fails without the token when the fast stage is required" "it passed" ""
-else ok "Workers build hook fails without the token when the fast stage is required"; fi
+  bad "Workers build hook fails when Ship Gate cannot be fetched and the fast stage is required" "it passed" ""
+else ok "Workers build hook fails when Ship Gate cannot be fetched and the fast stage is required"; fi
+if ( cd "$(mktemp -d)" && WORKERS_CI=1 WORKERS_CI_BRANCH=feature \
+     env -u SHIP_GATE_READ_TOKEN -u SHIP_GATE_HOME -u SHIP_GATE_REQUIRE_FAST bash "$HERE/../templates/caller/scripts/ship-gate-workers.sh" ) >/dev/null 2>&1; then
+  ok "Workers build hook skips the fast stage when Ship Gate cannot be fetched and it is optional"
+else bad "Workers build hook skips the fast stage when Ship Gate cannot be fetched and it is optional" "it failed" ""; fi
+if grep -qF 'https://github.com/pauljosephdp/Ship-Gate.git' "$HERE/../templates/caller/scripts/ship-gate-workers.sh" \
+  && grep -qF 'https://github.com/pauljosephdp/Ship-Gate.git' "$HERE/../templates/caller/scripts/ship-gate-after-deploy.sh"; then
+  ok "Workers hooks clone public Ship Gate without a token"
+else bad "Workers hooks clone public Ship Gate without a token" "no anonymous clone URL" ""; fi
 # The deploy hook rolls back on a failed check, but never across a Wrangler config change.
 rb="$(mktemp -d)"; mkdir -p "$rb/home/scripts" "$rb/bin" "$rb/site"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$rb/home/scripts/post-deploy.sh"

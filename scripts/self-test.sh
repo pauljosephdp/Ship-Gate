@@ -868,8 +868,10 @@ cost_case "caller auto-merge runs from main, not the PR"  templates/caller/.gith
 cost_case "caller auto-merge acts on Dependabot PRs only" templates/caller/.github/workflows/dependabot-auto-merge.yml "if: github.event.pull_request.user.login == 'dependabot[bot]'"
 cost_case "caller auto-merge only for Ship Gate bumps"   templates/caller/.github/workflows/dependabot-auto-merge.yml "contains(steps.meta.outputs.dependency-names, 'pauljosephdp/Ship-Gate')"
 cost_case "caller auto-merge never for a major"          templates/caller/.github/workflows/dependabot-auto-merge.yml "steps.meta.outputs.update-type == 'version-update:semver-minor'"
-cost_case "action takes a skip-fast input"               action.yml "if: inputs.skip-fast != 'true'"
+cost_case "action takes a skip-fast input"               action.yml "if: inputs.skip-fast == 'true'"
+cost_case "skip-fast skips only on a Workers Builds check" action.yml "if: steps.fast.outputs.skip != 'true'"
 cost_case "action takes a lighthouse-runs input"         action.yml 'SHIP_GATE_LIGHTHOUSE_RUNS: ${{ inputs.lighthouse-runs }}'
+cost_case "action restores Astro's image cache after install" action.yml 'path: ${{ inputs.working-directory }}/node_modules/.astro'
 cost_case "caller CI leaves the fast stage to Workers"  templates/caller/.github/workflows/ci.yml 'skip-fast: true'
 cost_case "caller CI runs Lighthouse once per URL"      templates/caller/.github/workflows/ci.yml 'lighthouse-runs: 1'
 cost_case "caller CI passes docs-only PRs"              templates/caller/.github/workflows/ci.yml "if: steps.scope.outputs.docs_only != 'true'"
@@ -877,11 +879,25 @@ cost_case "Workers build hook can require the fast stage" templates/caller/scrip
 cost_case "Workers deploy hook can roll back"             templates/caller/scripts/ship-gate-after-deploy.sh 'wrangler rollback --message'
 # skip-fast only skips steps gate-fast.sh runs: never the contract, guards, the site's own checks, build or browser.
 for id in prepare guards prebuild build afterbuild postbuild tools browser e2e lighthouse; do
-  if awk -v id="$id" '$0 ~ "^      id: "id"$" {f=1; next} f && /^    - / {f=0} f && /inputs.skip-fast/ {found=1} END {exit !found}' "$HERE/../action.yml"; then
+  if awk -v id="$id" '$0 ~ "^      id: "id"$" {f=1; next} f && /^    - / {f=0} f && /steps.fast.outputs.skip/ {found=1} END {exit !found}' "$HERE/../action.yml"; then
     bad "skip-fast leaves $id alone" "the $id step is skipped by skip-fast" ""
   fi
 done
 ok "skip-fast skips only checks the fast stage runs"
+# fast-stage-source.sh: skip only when the commit carries a "Workers Builds" check run.
+fs_case() { # name, fake gh body (empty = gh fails), expected skip value
+  local d out; d="$(mktemp -d)"
+  if [ -n "$2" ]; then printf '#!/usr/bin/env bash\necho %s\n' "$2" > "$d/gh"; else printf '#!/usr/bin/env bash\nexit 1\n' > "$d/gh"; fi
+  chmod +x "$d/gh"
+  : > "$d/out"
+  PATH="$d:$PATH" GH_TOKEN=x GITHUB_REPOSITORY=o/r GITHUB_OUTPUT="$d/out" SHIP_GATE_HEAD_SHA=abc SHIP_GATE_FAST_WAIT=0 \
+    bash "$HERE/fast-stage-source.sh" >/dev/null 2>&1
+  out="$(cat "$d/out")"; rm -rf "$d"
+  if [ "$out" = "skip=$3" ]; then ok "$1"; else bad "$1" "skip=$3" "$out"; fi
+}
+fs_case "fast stage: Workers Builds check present, verify skips it" 1 true
+fs_case "fast stage: no Workers Builds check, verify runs it"      0 false
+fs_case "fast stage: check runs unreadable, ruleset is trusted"    '' true
 # SHIP_GATE_REQUIRE_FAST fails a preview build that cannot run the fast stage.
 if ( cd "$(mktemp -d)" && WORKERS_CI=1 WORKERS_CI_BRANCH=feature SHIP_GATE_REQUIRE_FAST=1 \
      env -u SHIP_GATE_READ_TOKEN -u SHIP_GATE_HOME bash "$HERE/../templates/caller/scripts/ship-gate-workers.sh" ) >/dev/null 2>&1; then

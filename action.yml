@@ -28,6 +28,8 @@ inputs:
       checks, build, the browser suite and Lighthouse. Only safe when the site's
       ruleset requires the "Workers Builds" check and SHIP_GATE_REQUIRE_FAST=1 is
       set in Workers Builds, so a green build always means the fast stage ran.
+      verify also checks the commit carries a "Workers Builds" check run (needs
+      `checks: read`); without one it runs the fast stage itself.
     default: "false"
   lighthouse-runs:
     description: >
@@ -118,9 +120,30 @@ runs:
         if [ "$REUSE" = true ]; then echo "Fixture mode: reusing node_modules from the previous variant."; exit 0; fi
         npm ci
 
+    # Astro keeps its optimised images in node_modules/.astro (Workers Builds' build cache keeps the same
+    # directory). Restored after npm ci, which wipes node_modules, so the build re-encodes only new or changed
+    # images instead of every image on every run. A pull request also reads the cache saved on main by the
+    # monthly full sweep; restores keep it alive past GitHub's 7-day idle eviction. Output is unchanged: Astro
+    # keys each cached image by its source and transform.
+    - uses: actions/cache@v6
+      with:
+        path: ${{ inputs.working-directory }}/node_modules/.astro
+        key: ship-gate-astro-${{ runner.os }}-${{ hashFiles(format('{0}/src/**/*.jpg', inputs.working-directory), format('{0}/src/**/*.jpeg', inputs.working-directory), format('{0}/src/**/*.png', inputs.working-directory), format('{0}/src/**/*.webp', inputs.working-directory), format('{0}/src/**/*.avif', inputs.working-directory), format('{0}/src/**/*.gif', inputs.working-directory), format('{0}/src/**/*.tiff', inputs.working-directory), format('{0}/package-lock.json', inputs.working-directory)) }}
+        restore-keys: ship-gate-astro-${{ runner.os }}-
+
+    # skip-fast only when Workers Builds really built this commit (scripts/fast-stage-source.sh).
+    - name: Fast stage ran in Workers Builds?
+      id: fast
+      if: inputs.skip-fast == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SHIP_GATE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/fast-stage-source.sh"
+
     - name: astro check
       id: check
-      if: inputs.skip-fast != 'true'
+      if: steps.fast.outputs.skip != 'true'
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -128,7 +151,7 @@ runs:
 
     - name: Lint
       id: lint
-      if: inputs.skip-fast != 'true' && (env.SHIP_GATE_HAS_LINT != '')
+      if: steps.fast.outputs.skip != 'true' && (env.SHIP_GATE_HAS_LINT != '')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -136,7 +159,7 @@ runs:
 
     - name: Unit tests
       id: test
-      if: inputs.skip-fast != 'true' && (env.SHIP_GATE_HAS_TEST != '')
+      if: steps.fast.outputs.skip != 'true' && (env.SHIP_GATE_HAS_TEST != '')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -170,7 +193,7 @@ runs:
 
     - name: Client bundle is PostHog-free
       id: dist
-      if: inputs.skip-fast != 'true' && (steps.build.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only '))
+      if: steps.fast.outputs.skip != 'true' && (steps.build.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only '))
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -178,7 +201,7 @@ runs:
 
     - name: PostHog on every page (posthog-hybrid)
       id: posthog
-      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-hybrid '))
+      if: steps.fast.outputs.skip != 'true' && (steps.afterbuild.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-hybrid '))
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -186,7 +209,7 @@ runs:
 
     - name: Structure scan
       id: structure
-      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success')
+      if: steps.fast.outputs.skip != 'true' && (steps.afterbuild.outcome == 'success')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -194,7 +217,7 @@ runs:
 
     - name: Discovery scan (SEO, AEO, GEO, AIO)
       id: discovery
-      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success')
+      if: steps.fast.outputs.skip != 'true' && (steps.afterbuild.outcome == 'success')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -202,7 +225,7 @@ runs:
 
     - name: Placeholder copy scan
       id: copy
-      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success')
+      if: steps.fast.outputs.skip != 'true' && (steps.afterbuild.outcome == 'success')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -210,7 +233,7 @@ runs:
 
     - name: Market scan (market-cn, rtl-logical-css)
       id: market
-      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success' && (contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' market-cn ') || contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' rtl-logical-css ')))
+      if: steps.fast.outputs.skip != 'true' && (steps.afterbuild.outcome == 'success' && (contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' market-cn ') || contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' rtl-logical-css ')))
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -296,7 +319,8 @@ runs:
       shell: bash
       env:
         STAGE: ${{ steps.site.outputs.stage }}
-        SKIP_FAST: ${{ inputs.skip-fast }}
+        SKIP_FAST: ${{ steps.fast.outputs.skip }}
+        SKIP_FAST_ASKED: ${{ inputs.skip-fast }}
         OUTCOMES: >-
           Node version pinned=${{ steps.site.outcome }}
           |Contract and config=${{ steps.prepare.outcome }}
@@ -339,6 +363,9 @@ runs:
         esac
         if [ "$SKIP_FAST" = true ]; then
           note+=$'\n'"\`skip-fast\`: astro check, lint, unit tests and the post-build scans ran in the Workers Builds fast stage for this commit (the required \"Workers Builds\" check), so they show as not run here."$'\n'
+        fi
+        if [ "$SKIP_FAST_ASKED" = true ] && [ "$SKIP_FAST" != true ]; then
+          note+=$'\n'"\`skip-fast\` was asked for, but this commit has no \"Workers Builds\" check, so the fast stage ran here. Turn on preview builds in Workers Builds (Settings → Build → Branch control)."$'\n'
         fi
         printf '## Ship Gate\n%s\n%s\n' "$note" "$table" >> "$GITHUB_STEP_SUMMARY"
         echo "$table"

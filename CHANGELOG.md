@@ -1,5 +1,39 @@
 # Changelog
 
+## v3.9.0 — 2026-10-02
+
+Each Actions minute is spent once, a failed deploy can roll itself back, and a
+green pull request can merge itself (README → Where the gate runs). No site fails
+because of this release: the new inputs default to the old behaviour. To adopt,
+re-copy `templates/caller/`, then follow steps 11, 12 and 15 (the ruleset also
+requires the "Workers Builds" check and no longer requires an up-to-date branch;
+Workers Builds sets `SHIP_GATE_REQUIRE_FAST=1`, and optionally
+`SHIP_GATE_ROLLBACK=1` with an `AUTOMATION_TOKEN` build secret; auto-merge and
+"Automatically delete head branches" are on).
+
+**Added**
+- `skip-fast` input: `verify` skips `astro check`, lint, unit tests and the
+  post-build scans, which the Workers Builds fast stage already ran on the same
+  commit. Contract, guards, the site's own checks, build, the browser suite and
+  Lighthouse still run. The caller template turns it on.
+- `lighthouse-runs` input (1–5): Lighthouse runs per URL. The caller template
+  passes 1 on pull requests; performance only warns and the other categories
+  are deterministic.
+- `SHIP_GATE_REQUIRE_FAST=1` in `ship-gate-workers.sh`: a preview build that
+  cannot run the fast stage (no `SHIP_GATE_READ_TOKEN`) fails instead of passing.
+- `SHIP_GATE_ROLLBACK=1` in `ship-gate-after-deploy.sh`: a failed post-deploy
+  check runs `wrangler rollback`, except for a commit that changed the Wrangler
+  config or a migration, and still fails the build. With an `AUTOMATION_TOKEN`
+  build secret it then sends a `deploy-failed` `repository_dispatch` so the site
+  can open a revert pull request.
+
+**Changed**
+- Caller `ci.yml`: passes a pull request that changes only `docs/` or root
+  Markdown without running the gate, in the same `verify` job.
+- README steps 11 and 15: the ruleset requires the "Workers Builds" check and
+  not an up-to-date branch; turn on "Automatically delete head branches".
+- Caller `dependabot-auto-merge.yml`: no `@dependabot rebase` needed any more.
+
 ## v3.8.0 — 2026-09-27
 
 The gate is split between Cloudflare Workers Builds and GitHub Actions, so both

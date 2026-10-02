@@ -5,8 +5,14 @@
 #   Builds preview build (scripts/ship-gate-workers.sh): guards, astro check, tests,
 #   the site's checks and the post-build scans, for no Actions minutes.
 # - This job adds the browser suite and Lighthouse, and runs only on a pull request
-#   that is ready for review. A draft skips it (a draft cannot merge), so open a PR as
-#   a draft while you iterate, run the browser suite locally, and mark it ready once.
+#   that is ready for review. A draft skips it (a draft cannot merge). Run the gate and
+#   the browser suite locally first, then open the PR ready, so verify runs once.
+# - skip-fast: true leaves astro check, lint, tests and the post-build scans to the
+#   Workers Builds fast stage. Keep it only while the main ruleset requires the
+#   "Workers Builds: <worker>" check and Workers Builds sets SHIP_GATE_REQUIRE_FAST=1.
+# - A pull request that changes only docs/ or root Markdown passes verify without
+#   running the gate: nothing the gate checks changed, and one job named "verify"
+#   (not a second workflow) keeps the required check unambiguous.
 name: CI
 
 on:
@@ -21,6 +27,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
   # Ship Gate deletes this branch's older report artifacts, keeping one run's at most.
   actions: write
 
@@ -31,11 +38,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Docs-only change?
+        id: scope
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          files="$(gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[].filename')"
+          if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(docs/.*|[^/]+\.md)$'; then
+            echo "Only docs/ and root Markdown changed: the gate has nothing to check."
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
+        if: steps.scope.outputs.docs_only != 'true'
         # Full history, only if a site check needs git dates (e.g. sitemap lastmod).
         # with:
         #   fetch-depth: 0
-      - uses: pauljosephdp/Ship-Gate@v3.8.0
-        # Only if the site is not at the repo root, e.g. "site".
-        # with:
-        #   working-directory: site
+      - uses: pauljosephdp/Ship-Gate@v3.9.0
+        if: steps.scope.outputs.docs_only != 'true'
+        with:
+          skip-fast: true
+          lighthouse-runs: 1
+          # Only if the site is not at the repo root, e.g. "site".
+          # working-directory: site

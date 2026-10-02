@@ -24,9 +24,9 @@ and the post-deploy check.
 
 | File | Purpose |
 |---|---|
-| `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify`; skips drafts |
+| `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify` with `skip-fast` and one Lighthouse run; skips drafts, and passes docs-only PRs without running the gate |
 | `scripts/ship-gate-workers.sh` | Called at the end of the Workers Builds build command: the fast stage on every non-production push |
-| `scripts/ship-gate-after-deploy.sh` | Appended to the Workers Builds deploy command: the post-deploy check after every production deploy |
+| `scripts/ship-gate-after-deploy.sh` | Appended to the Workers Builds deploy command: the post-deploy check after every production deploy; with `SHIP_GATE_ROLLBACK=1` a failed check rolls production back and asks the repo for a revert PR |
 | `.github/workflows/post-deploy.yml` | Manual fallback: `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` on demand |
 | `.github/workflows/full-sweep.yml` | Monthly: the gate against every page (`"all"`), which pull requests only sample |
 | `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
@@ -86,8 +86,8 @@ repos; Cloudflare Workers Builds: 3,000 build minutes, one build at a time,
 | Work | Runs in | When |
 |---|---|---|
 | Fast stage: contract, guards, `astro check`, lint and tests, the site's checks, every post-build scan (`scripts/gate-fast.sh`) | **Cloudflare Workers Builds**, inside the preview build it already runs | every push to a non-production branch, drafts included |
-| Browser suite (smoke, axe, keyboard, reflow, CSP, consent, edge) and Lighthouse, plus the fast stage again as the merge authority (the verify action) | **GitHub Actions** | once a pull request is ready for review, and on each push to it after that |
-| Post-deploy check (`scripts/post-deploy.sh`) and the site's own after-deploy steps | **Cloudflare Workers Builds**, in the deploy command | every production deploy |
+| Browser suite (smoke, axe, keyboard, reflow, CSP, consent, edge) and Lighthouse (the verify action; with `skip-fast` the fast stage's generic checks are left to Workers Builds) | **GitHub Actions** | once a pull request is ready for review, and on each push to it after that |
+| Post-deploy check (`scripts/post-deploy.sh`), the optional rollback, and the site's own after-deploy steps | **Cloudflare Workers Builds**, in the deploy command | every production deploy |
 | Full sweep of every page | **GitHub Actions** | monthly, and on demand |
 
 The fast stage takes about 15 seconds on top of a site's build and needs no
@@ -105,6 +105,38 @@ With three sites of about 40 PRs and 40 merges a month each, the split comes to
 about 1,100 Workers Builds minutes and 1,500 Actions minutes. The biggest
 variable is pushes to a PR after it is ready.
 
+**Spending each minute once (v3.9.0).** The fast stage already ran in the
+preview build for the same commit, so `verify` need not repeat it:
+
+- `skip-fast: true` (the caller template's default) skips `astro check`, lint,
+  unit tests and the post-build scans in `verify`. Contract, guards, the site's
+  own checks, build, the browser suite and Lighthouse still run. It is only
+  sound while the `main` ruleset also requires the **"Workers Builds: <worker>"**
+  check and Workers Builds sets the build variable **`SHIP_GATE_REQUIRE_FAST=1`**:
+  that variable fails the preview build when `SHIP_GATE_READ_TOKEN` is missing,
+  so a green Workers Builds check always means the fast stage ran. Without both,
+  set `skip-fast: false`.
+- `lighthouse-runs: 1` on pull requests. Performance only warns (runner noise),
+  and accessibility, SEO and best practices are deterministic, so one run per URL
+  gives the same verdict as three. The full sweep (`"all"`) runs once per URL too.
+- A pull request that changes only `docs/` or root Markdown passes `verify`
+  without running the gate. The check stays one job named `verify`; a second
+  workflow with the same check name would make the required check ambiguous.
+- `[skip ci]` in a commit message skips GitHub Actions only. Workers Builds
+  builds every push (it drops only superseded queued builds), so push once per
+  pull request, not once per commit.
+
+**Rolling back automatically.** With the build variable `SHIP_GATE_ROLLBACK=1`, a
+failed post-deploy check runs `wrangler rollback` with the API token Workers Builds
+already gives the deploy command, then still fails the build. It does not roll
+back a commit that changed `wrangler.jsonc`/`wrangler.toml` or a migration: a
+rollback cannot cross a binding change, and a D1 migration only goes forward, so
+those fix forward. With the optional build secret `AUTOMATION_TOKEN` (a
+fine-grained token with Contents: write on the site repo, which repository
+dispatch requires), the script then sends a `deploy-failed` `repository_dispatch` carrying the
+commit SHA, so the site can open a revert pull request and `main` matches
+production again before the next deploy ships the same commit.
+
 **Set up Workers Builds** (dashboard → the Worker → Settings → Build):
 - **Build command:** the site's existing build, with `scripts/ship-gate-workers.sh`
   at its end, in `package.json` (`"build": "astro build && bash scripts/ship-gate-workers.sh"`,
@@ -116,7 +148,8 @@ variable is pushes to a PR after it is ready.
   The summary lists it as not run.
 - **Deploy command:** the existing one, then `&& bash scripts/ship-gate-after-deploy.sh`,
   then any after-deploy step the site had in `post-deploy.yml` (IndexNow, live
-  checks). A failure marks the production build red: roll back, then fix forward.
+  checks). A failure marks the production build red: roll back, then fix forward
+  (or set `SHIP_GATE_ROLLBACK=1`, above).
 - **Build variables and secrets:** `SHIP_GATE_READ_TOKEN`, as a secret: the same
   fine-grained token as step 14 (Contents read-only on `pauljosephdp/Ship-Gate`).
   Without it the fast stage is skipped with a notice, and the after-deploy check
@@ -774,7 +807,9 @@ The v1 form `{ "category": "performance", ... }` is still accepted.
    owned by* this account or organisation. Without this, every site's `verify`
    fails to download the action.
 2. **Protect `main`.** Settings → Rules → Rulesets: require a pull request,
-   require the `self-test` check, block force pushes and deletions.
+   require the `self-test` check, block force pushes and deletions. Settings →
+   General: turn on **Allow auto-merge** and **Automatically delete head
+   branches**, so a green PR merges itself and its branch goes away.
 3. **Releases are automatic.** The `release` job in `self-test.yml` publishes
    the tag and GitHub release for the newest `CHANGELOG.md` version on the first
    green push to `main` that carries it (see Changing Ship Gate). Nothing to do
@@ -843,11 +878,19 @@ belong in `post-deploy.yml` or a scheduled workflow.
 10. With `posthog-server-only` or `posthog-hybrid`, in the site's PostHog project, add *`environment` is not `production`* to
    the internal and test account filter, applied by default.
 11. Ruleset on the site's `main`: require a pull request, require the `verify`
-    check, require the branch to be up to date, block force pushes and
-    deletions. Required approvals: 0 while one person is the only committer.
+    check and the "Workers Builds: <worker>" check (the fast stage, which
+    `skip-fast` relies on), block force pushes and deletions. Leave "require
+    the branch to be up to date" off: with it, every push to `main` stalls
+    each open auto-merge until someone updates the branch and `verify` runs
+    again. The post-deploy check and the rollback catch the rare break that
+    two separately green PRs make together. Required approvals: 0 while one
+    person is the only committer.
 12. Workers Builds: production branch `main`, non-production branch builds on,
     preview URLs on. Then set the build command, deploy command and
-    `SHIP_GATE_READ_TOKEN` build secret as in "Where the gate runs".
+    `SHIP_GATE_READ_TOKEN` build secret as in "Where the gate runs", plus the
+    build variables `SHIP_GATE_REQUIRE_FAST=1` (needed for `skip-fast`) and,
+    to roll back on a failed post-deploy check, `SHIP_GATE_ROLLBACK=1` with the
+    optional `AUTOMATION_TOKEN` build secret.
 13. Turn on secret scanning, push protection and Dependabot alerts.
 14. Let Dependabot see Ship Gate's releases. This repo is private, so the
     template's `dependabot.yml` reads it through a `git` registry whose token is
@@ -860,23 +903,22 @@ belong in `post-deploy.yml` or a scheduled workflow.
     Ship Gate pin. When the token expires, renew it and update the secret in
     every site.
 15. Let Ship Gate bumps merge themselves. Turn on Settings → General → **Allow
-    auto-merge**. `dependabot-auto-merge.yml` then queues each Dependabot PR
+    auto-merge** and **Automatically delete head branches**. `dependabot-auto-merge.yml` then queues each Dependabot PR
     that raises the Ship Gate pin by a minor or patch version (`gh pr merge
     --auto --squash`); it merges when `verify` passes. A major Ship Gate
     release, a group that also carries another action's major, and npm
     updates wait for a person. The workflow runs on `pull_request_target` from
-    `main` and never checks out the PR. The ruleset requires an up-to-date
-    branch and Dependabot doesn't rebase here, so if `main` moved since the PR
-    opened, comment `@dependabot rebase` on it. If the site's ruleset allows
+    `main` and never checks out the PR. The ruleset does not require an up-to-date
+    branch (step 11), so a bump merges even after `main` moved. If the site's ruleset allows
     only merge commits, change `--squash` to `--merge`.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.8.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.9.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.8.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.9.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

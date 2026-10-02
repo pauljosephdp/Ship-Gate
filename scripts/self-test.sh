@@ -335,7 +335,7 @@ lh_case() {
   mkdir -p dist/client/about dist/client/blog dist/server
   echo '<h1>home</h1>' > dist/client/index.html; echo a > dist/client/about/index.html
   echo p > dist/client/blog/post.html; echo nf > dist/client/404.html; echo s > dist/server/entry.html
-  GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" node "$PREPARE" lighthouse >/dev/null 2>&1
+  GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" SHIP_GATE_LIGHTHOUSE_RUNS="${LH_RUNS:-}" node "$PREPARE" lighthouse >/dev/null 2>&1
   out="$(node -e "const c=require('$d/.sg/lighthouserc.json').ci;const a=c.assert.assertions;
     console.log(c.collect.url.map(u=>u.replace('http://localhost:4321','')).join(' '),'|runs',c.collect.numberOfRuns,
     '|perf',JSON.stringify(a['categories:performance']),'|seo-category',a['categories:seo']===undefined?'absent':'present',
@@ -348,6 +348,12 @@ lh_case "listed pages: median of 3 runs"             "/ |runs 3"                
 lh_case "performance warns at 0.9 by default"         '|perf ["warn",{"minScore":0.9,"aggregationMethod":"median-run"}]' ''
 lh_case "site can raise performance to error"         '|perf ["error",{"minScore":0.9' '"thresholdOverrides":[{"audit":"categories:performance","level":"error"}]'
 lh_case "SEO category not asserted; reports private"  "|seo-category absent |upload filesystem" ''
+LH_RUNS=1 lh_case "lighthouse-runs 1: one run, no median" '/ |runs 1 |perf ["warn",{"minScore":0.9}]' ''
+LH_RUNS=2 lh_case "lighthouse-runs 2 on a listed page"   "/ |runs 2"                    ''
+lh_bad="$(d="$(baseline)"; cd "$d" && cfg '' && mkdir -p dist/client && echo x > dist/client/index.html \
+  && GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" SHIP_GATE_LIGHTHOUSE_RUNS=9 node "$PREPARE" lighthouse 2>&1; echo "exit=$?")"
+if grep -qF 'lighthouse-runs must be a number from 1 to 5' <<<"$lh_bad" && grep -qF 'exit=1' <<<"$lh_bad"; then ok "lighthouse-runs out of range fails"
+else bad "lighthouse-runs out of range fails" "expected an error" "$lh_bad"; fi
 
 # serve_case NAME "PATH=CODE[:HEADER]..." — the server answers as Cloudflare would.
 serve_setup() {
@@ -862,6 +868,42 @@ cost_case "caller auto-merge runs from main, not the PR"  templates/caller/.gith
 cost_case "caller auto-merge acts on Dependabot PRs only" templates/caller/.github/workflows/dependabot-auto-merge.yml "if: github.event.pull_request.user.login == 'dependabot[bot]'"
 cost_case "caller auto-merge only for Ship Gate bumps"   templates/caller/.github/workflows/dependabot-auto-merge.yml "contains(steps.meta.outputs.dependency-names, 'pauljosephdp/Ship-Gate')"
 cost_case "caller auto-merge never for a major"          templates/caller/.github/workflows/dependabot-auto-merge.yml "steps.meta.outputs.update-type == 'version-update:semver-minor'"
+cost_case "action takes a skip-fast input"               action.yml "if: inputs.skip-fast != 'true'"
+cost_case "action takes a lighthouse-runs input"         action.yml 'SHIP_GATE_LIGHTHOUSE_RUNS: ${{ inputs.lighthouse-runs }}'
+cost_case "caller CI leaves the fast stage to Workers"  templates/caller/.github/workflows/ci.yml 'skip-fast: true'
+cost_case "caller CI runs Lighthouse once per URL"      templates/caller/.github/workflows/ci.yml 'lighthouse-runs: 1'
+cost_case "caller CI passes docs-only PRs"              templates/caller/.github/workflows/ci.yml "if: steps.scope.outputs.docs_only != 'true'"
+cost_case "Workers build hook can require the fast stage" templates/caller/scripts/ship-gate-workers.sh 'SHIP_GATE_REQUIRE_FAST'
+cost_case "Workers deploy hook can roll back"             templates/caller/scripts/ship-gate-after-deploy.sh 'wrangler rollback --message'
+# skip-fast only skips steps gate-fast.sh runs: never the contract, guards, the site's own checks, build or browser.
+for id in prepare guards prebuild build afterbuild postbuild tools browser e2e lighthouse; do
+  if awk -v id="$id" '$0 ~ "^      id: "id"$" {f=1; next} f && /^    - / {f=0} f && /inputs.skip-fast/ {found=1} END {exit !found}' "$HERE/../action.yml"; then
+    bad "skip-fast leaves $id alone" "the $id step is skipped by skip-fast" ""
+  fi
+done
+ok "skip-fast skips only checks the fast stage runs"
+# SHIP_GATE_REQUIRE_FAST fails a preview build that cannot run the fast stage.
+if ( cd "$(mktemp -d)" && WORKERS_CI=1 WORKERS_CI_BRANCH=feature SHIP_GATE_REQUIRE_FAST=1 \
+     env -u SHIP_GATE_READ_TOKEN -u SHIP_GATE_HOME bash "$HERE/../templates/caller/scripts/ship-gate-workers.sh" ) >/dev/null 2>&1; then
+  bad "Workers build hook fails without the token when the fast stage is required" "it passed" ""
+else ok "Workers build hook fails without the token when the fast stage is required"; fi
+# The deploy hook rolls back on a failed check, but never across a Wrangler config change.
+rb="$(mktemp -d)"; mkdir -p "$rb/home/scripts" "$rb/bin" "$rb/site"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$rb/home/scripts/post-deploy.sh"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s/npx.log"\n' "$rb" > "$rb/bin/npx"; chmod +x "$rb/bin/npx"
+( cd "$rb/site" && git init -q && echo a > a && git add a && git -c user.email=t@t -c user.name=t commit -qm 1 \
+  && echo b > b && git add b && git -c user.email=t@t -c user.name=t commit -qm 2 )
+deploy_hook() { ( cd "$rb/site" && PATH="$rb/bin:$PATH" WORKERS_CI=1 WORKERS_CI_COMMIT_SHA=abc1234 SHIP_GATE_HOME="$rb/home" \
+  SHIP_GATE_ROLLBACK=1 env -u AUTOMATION_TOKEN bash "$HERE/../templates/caller/scripts/ship-gate-after-deploy.sh" ) >/dev/null 2>&1; }
+if deploy_hook; then bad "deploy hook stays red after a rollback" "it passed" ""; else ok "deploy hook stays red after a rollback"; fi
+if grep -qF 'wrangler rollback --message' "$rb/npx.log" 2>/dev/null; then ok "deploy hook rolls back a failed deploy"
+else bad "deploy hook rolls back a failed deploy" "no wrangler rollback call" ""; fi
+rm -f "$rb/npx.log"
+( cd "$rb/site" && echo '{}' > wrangler.jsonc && git add . && git -c user.email=t@t -c user.name=t commit -qm 3 )
+deploy_hook
+if [ -e "$rb/npx.log" ]; then bad "deploy hook never rolls back a Wrangler config change" "it called wrangler rollback" ""
+else ok "deploy hook never rolls back a Wrangler config change"; fi
+rm -rf "$rb"
 n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/workflows/self-test.yml")"
 m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"
 if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi

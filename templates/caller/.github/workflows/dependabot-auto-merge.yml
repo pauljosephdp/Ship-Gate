@@ -6,9 +6,8 @@
 # npm updates are left alone. Auto-merge never skips the required "verify" check:
 # a bump that fails the gate stays open.
 #
-# Needs Settings → General → "Allow auto-merge" on. The ruleset requires the branch
-# to be up to date and Dependabot does not rebase open PRs here, so if main moved
-# after the PR opened, comment "@dependabot rebase" on it.
+# Needs Settings → General → "Allow auto-merge" on. The ruleset does not require an
+# up-to-date branch (README step 11), so a queued bump still merges after main moved.
 #
 # pull_request_target runs this file from main and never checks out the PR, so the
 # write token never touches the PR's code.

@@ -9,7 +9,7 @@ Every time, without asking:
 3. Add a `CHANGELOG.md` entry when the change affects site repos (see README → Changing Ship Gate for major/minor/patch).
 4. Commit, push the working branch, and open a **draft** pull request against `main`. Keep pushing to the draft while you iterate: only `self-test` runs there (about a minute), the fixture jobs don't. Mark it ready for review once the work is final and the local checks in step 1 pass; the fixture jobs then run once. Each ready-PR push costs a full run (about 12 minutes), so batch fixes into one push.
 5. Watch the PR. Fix any red check (`self-test`, `fixture (browser)`, `fixture (scans)`) and push again until all are green.
-6. When every check is green and there is no merge conflict, merge the PR (squash). The `release` job then publishes the version automatically.
+6. Enable auto-merge (squash) on the PR once it is ready, so it merges itself when every check is green; the branch is deleted on merge. If auto-merge is not available on the repo, merge it (squash) yourself as soon as every check is green and there is no merge conflict. The `release` job then publishes the version automatically.
 7. Confirm the release when the merge adds a new `## vX.Y.Z` heading to `CHANGELOG.md`. Wait for the Self-test run on `main` for the merge commit, then check that tag `vX.Y.Z` and its GitHub release exist at that commit. If they are missing:
    - If the run was cancelled, or the `release` job was skipped, run the Self-test workflow on `main` by hand (workflow_dispatch). It re-runs every check, then releases.
    - If a check or the `release` job failed, find the cause in the job log. Fix it through a PR (steps 1–6), then check again.

@@ -19,6 +19,11 @@ if [ -z "$dir" ]; then
   # The Ship-Gate repo is private: a build secret (Settings → Build → Variables and
   # secrets) holds a fine-grained token with read-only Contents on pauljosephdp/Ship-Gate.
   if [ -z "${SHIP_GATE_READ_TOKEN:-}" ]; then
+    # SHIP_GATE_REQUIRE_FAST=1 (a Workers Builds build variable): a site whose verify runs
+    # with skip-fast relies on this stage, so a build that cannot run it must not go green.
+    if [ "${SHIP_GATE_REQUIRE_FAST:-}" = 1 ]; then
+      echo "::error::SHIP_GATE_READ_TOKEN build secret not set and SHIP_GATE_REQUIRE_FAST=1: the fast stage must run."; exit 1
+    fi
     echo "Ship Gate: SHIP_GATE_READ_TOKEN build secret not set; fast stage skipped."; exit 0
   fi
   tag="$(grep -m1 -oE 'pauljosephdp/Ship-Gate@v[0-9]+\.[0-9]+\.[0-9]+' .github/workflows/ci.yml | cut -d@ -f2)"

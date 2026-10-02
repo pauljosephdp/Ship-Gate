@@ -519,7 +519,11 @@ if (mode === 'after-build') {
     return all;
   };
   const lhUrls = resolvePages(lighthouseUrls, 'lighthouseUrls');
-  const runs = lighthouseUrls === 'all' ? 1 : 3;
+  // SHIP_GATE_LIGHTHOUSE_RUNS (the action's lighthouse-runs input) overrides the count: pull
+  // requests use 1, since performance only warns and the other categories are deterministic.
+  const runsEnv = process.env.SHIP_GATE_LIGHTHOUSE_RUNS ?? '';
+  if (runsEnv !== '' && !/^[1-5]$/.test(runsEnv)) { console.log(`::error::lighthouse-runs must be a number from 1 to 5, got "${runsEnv}".`); process.exit(1); }
+  const runs = runsEnv !== '' ? Number(runsEnv) : lighthouseUrls === 'all' ? 1 : 3;
   const lh = {};
   for (const [id, a] of Object.entries(assertions)) {
     const opts = {};

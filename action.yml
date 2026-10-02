@@ -20,6 +20,21 @@ inputs:
       caller template passes "scans" for draft pull requests; a draft can't merge,
       and marking it ready runs the full gate.
     default: full
+  skip-fast:
+    description: >
+      "true" skips the generic checks that Ship Gate's fast stage already ran on
+      the same commit inside Cloudflare Workers Builds (astro check, lint, unit
+      tests and the post-build scans), keeping contract, guards, the site's own
+      checks, build, the browser suite and Lighthouse. Only safe when the site's
+      ruleset requires the "Workers Builds" check and SHIP_GATE_REQUIRE_FAST=1 is
+      set in Workers Builds, so a green build always means the fast stage ran.
+    default: "false"
+  lighthouse-runs:
+    description: >
+      Lighthouse runs per URL (1-5). Empty keeps the default: 3 for a page list,
+      1 for "all". Performance only warns, and the other categories are
+      deterministic, so the caller template passes 1 on pull requests.
+    default: ""
 runs:
   using: composite
   steps:
@@ -105,6 +120,7 @@ runs:
 
     - name: astro check
       id: check
+      if: inputs.skip-fast != 'true'
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -112,7 +128,7 @@ runs:
 
     - name: Lint
       id: lint
-      if: env.SHIP_GATE_HAS_LINT != ''
+      if: inputs.skip-fast != 'true' && (env.SHIP_GATE_HAS_LINT != '')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -120,7 +136,7 @@ runs:
 
     - name: Unit tests
       id: test
-      if: env.SHIP_GATE_HAS_TEST != ''
+      if: inputs.skip-fast != 'true' && (env.SHIP_GATE_HAS_TEST != '')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -148,11 +164,13 @@ runs:
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        SHIP_GATE_LIGHTHOUSE_RUNS: ${{ inputs.lighthouse-runs }}
       run: node "$GITHUB_ACTION_PATH/scripts/prepare.mjs" after-build "${{ inputs.config }}"
 
     - name: Client bundle is PostHog-free
       id: dist
-      if: steps.build.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only ')
+      if: inputs.skip-fast != 'true' && (steps.build.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-server-only '))
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -160,7 +178,7 @@ runs:
 
     - name: PostHog on every page (posthog-hybrid)
       id: posthog
-      if: steps.afterbuild.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-hybrid ')
+      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success' && contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' posthog-hybrid '))
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -168,7 +186,7 @@ runs:
 
     - name: Structure scan
       id: structure
-      if: steps.afterbuild.outcome == 'success'
+      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -176,7 +194,7 @@ runs:
 
     - name: Discovery scan (SEO, AEO, GEO, AIO)
       id: discovery
-      if: steps.afterbuild.outcome == 'success'
+      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -184,7 +202,7 @@ runs:
 
     - name: Placeholder copy scan
       id: copy
-      if: steps.afterbuild.outcome == 'success'
+      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success')
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -192,7 +210,7 @@ runs:
 
     - name: Market scan (market-cn, rtl-logical-css)
       id: market
-      if: steps.afterbuild.outcome == 'success' && (contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' market-cn ') || contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' rtl-logical-css '))
+      if: inputs.skip-fast != 'true' && (steps.afterbuild.outcome == 'success' && (contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' market-cn ') || contains(format(' {0} ', env.SHIP_GATE_POLICIES), ' rtl-logical-css ')))
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -278,6 +296,7 @@ runs:
       shell: bash
       env:
         STAGE: ${{ steps.site.outputs.stage }}
+        SKIP_FAST: ${{ inputs.skip-fast }}
         OUTCOMES: >-
           Node version pinned=${{ steps.site.outcome }}
           |Contract and config=${{ steps.prepare.outcome }}
@@ -318,6 +337,9 @@ runs:
           scans) note=$'\n'"Stage \`scans\`: browser tests and Lighthouse run when the pull request is ready for review."$'\n' ;;
           browser) note=$'\n'"Stage \`browser\`: Lighthouse did not run."$'\n' ;;
         esac
+        if [ "$SKIP_FAST" = true ]; then
+          note+=$'\n'"\`skip-fast\`: astro check, lint, unit tests and the post-build scans ran in the Workers Builds fast stage for this commit (the required \"Workers Builds\" check), so they show as not run here."$'\n'
+        fi
         printf '## Ship Gate\n%s\n%s\n' "$note" "$table" >> "$GITHUB_STEP_SUMMARY"
         echo "$table"
         # Machine-readable copy for callers (and Ship Gate's own fixture tests).

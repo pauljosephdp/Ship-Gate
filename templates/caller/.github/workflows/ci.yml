@@ -56,7 +56,7 @@ jobs:
         # Full history, only if a site check needs git dates (e.g. sitemap lastmod).
         # with:
         #   fetch-depth: 0
-      - uses: pauljosephdp/Ship-Gate@v3.9.0
+      - uses: pauljosephdp/Ship-Gate@v3.9.1
         if: steps.scope.outputs.docs_only != 'true'
         with:
           skip-fast: true

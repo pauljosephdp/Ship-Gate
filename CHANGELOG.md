@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.10.0 — 2026-10-02
+
+Ship Gate is public, so sites need no token to use it. Re-copy
+`templates/caller/scripts/` and `templates/caller/.github/dependabot.yml`; nothing
+else changes, and an old token keeps working until it is removed.
+
+**Changed**
+- `ship-gate-workers.sh` and `ship-gate-after-deploy.sh` clone the pinned tag from
+  `https://github.com/pauljosephdp/Ship-Gate.git` without a token. A
+  `SHIP_GATE_READ_TOKEN` build secret is still used when set. When the clone
+  fails, the fast stage is skipped (a failure with `SHIP_GATE_REQUIRE_FAST=1`)
+  and the after-deploy check fails, as before.
+- The caller `dependabot.yml` drops the `ship-gate` git registry and its
+  Dependabot secret: Dependabot reads public release tags directly.
+- README steps 12 and 14 and "Where the gate runs" no longer ask for
+  `SHIP_GATE_READ_TOKEN`.
+
 ## v3.9.2 — 2026-10-02
 
 **Changed**

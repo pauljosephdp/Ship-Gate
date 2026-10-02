@@ -122,6 +122,14 @@ preview build for the same commit, so `verify` need not repeat it:
 - A pull request that changes only `docs/` or root Markdown passes `verify`
   without running the gate. The check stays one job named `verify`; a second
   workflow with the same check name would make the required check ambiguous.
+- Optimised images are cached (v3.9.2). Astro re-encodes every image on a cold
+  build (on Cocoon, 365 AVIFs took 5 m 22 s of an 11.5-minute `verify`). The
+  action restores `node_modules/.astro` after `npm ci`, keyed on the site's
+  `src/` images and lockfile, so a build encodes only new or changed images. A
+  pull request also reads the cache the monthly full sweep saves on `main`. No
+  check changes: Astro keys each cached image by its source and transform. Turn
+  on **Settings → Build → Build cache** in Workers Builds too: it caches the
+  same directory for preview and production builds, which shortens plan→deploy.
 - `[skip ci]` in a commit message skips GitHub Actions only. Workers Builds
   builds every push (it drops only superseded queued builds), so push once per
   pull request, not once per commit.
@@ -914,11 +922,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.9.1 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.9.2 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.9.1". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.9.2". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.9.2 — 2026-10-02
+
+**Changed**
+- `verify` restores Astro's optimised-image cache (`node_modules/.astro`) after `npm ci`, so a build re-encodes only new or changed images. On Cocoon this was 5 m 22 s of an 11.5-minute run; with the cache warm the image step takes about a second. No check is added, removed or weakened. The cache key covers the site's `src/` images and lockfile; a pull request also reads the cache the monthly full sweep saves on `main`. Sites get it from the Dependabot pin bump alone; no caller file changes.
+
 ## v3.9.1 — 2026-10-02
 
 **Fixed**

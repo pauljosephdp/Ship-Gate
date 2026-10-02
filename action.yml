@@ -118,6 +118,17 @@ runs:
         if [ "$REUSE" = true ]; then echo "Fixture mode: reusing node_modules from the previous variant."; exit 0; fi
         npm ci
 
+    # Astro keeps its optimised images in node_modules/.astro (Workers Builds' build cache keeps the same
+    # directory). Restored after npm ci, which wipes node_modules, so the build re-encodes only new or changed
+    # images instead of every image on every run. A pull request also reads the cache saved on main by the
+    # monthly full sweep; restores keep it alive past GitHub's 7-day idle eviction. Output is unchanged: Astro
+    # keys each cached image by its source and transform.
+    - uses: actions/cache@v6
+      with:
+        path: ${{ inputs.working-directory }}/node_modules/.astro
+        key: ship-gate-astro-${{ runner.os }}-${{ hashFiles(format('{0}/src/**/*.jpg', inputs.working-directory), format('{0}/src/**/*.jpeg', inputs.working-directory), format('{0}/src/**/*.png', inputs.working-directory), format('{0}/src/**/*.webp', inputs.working-directory), format('{0}/src/**/*.avif', inputs.working-directory), format('{0}/src/**/*.gif', inputs.working-directory), format('{0}/src/**/*.tiff', inputs.working-directory), format('{0}/package-lock.json', inputs.working-directory)) }}
+        restore-keys: ship-gate-astro-${{ runner.os }}-
+
     - name: astro check
       id: check
       if: inputs.skip-fast != 'true'

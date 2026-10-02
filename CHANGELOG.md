@@ -3,7 +3,8 @@
 ## v3.9.2 — 2026-10-02
 
 **Changed**
-- `verify` restores Astro's optimised-image cache (`node_modules/.astro`) after `npm ci`, so a build re-encodes only new or changed images. On Cocoon this was 5 m 22 s of an 11.5-minute run; with the cache warm the image step takes about a second. No check is added, removed or weakened. The cache key covers the site's `src/` images and lockfile; a pull request also reads the cache the monthly full sweep saves on `main`. Sites get it from the Dependabot pin bump alone; no caller file changes.
+- `verify` restores Astro's optimised-image cache (`node_modules/.astro`) after `npm ci`, so a build re-encodes only new or changed images. On Cocoon this was 5 m 22 s of an 11.5-minute run; with the cache warm the image step takes about a second. No check is added, removed or weakened. The cache key covers the site's `src/` images and lockfile; a pull request also reads the cache the monthly full sweep saves on `main`. Sites get it from the Dependabot pin bump alone.
+- `skip-fast` now checks that Workers Builds built the commit. `verify` waits up to 90 s for a "Workers Builds" check run on the PR head and skips the fast stage only when one exists. Otherwise it runs `astro check`, lint, unit tests and the scans itself and notes it in the summary. Cocoon had preview builds off, so with `skip-fast` those checks ran nowhere. The caller `ci.yml` adds `checks: read`; without it, `verify` warns and keeps the old behaviour.
 
 ## v3.9.1 — 2026-10-02
 

@@ -115,7 +115,12 @@ preview build for the same commit, so `verify` need not repeat it:
   check and Workers Builds sets the build variable **`SHIP_GATE_REQUIRE_FAST=1`**:
   that variable fails the preview build when `SHIP_GATE_READ_TOKEN` is missing,
   so a green Workers Builds check always means the fast stage ran. Without both,
-  set `skip-fast: false`.
+  set `skip-fast: false`. As a backstop (v3.9.2), `verify` looks for a
+  "Workers Builds" check run on the commit, waiting up to 90 s, and skips the
+  fast stage only when it finds one. With none (preview builds off, as Cocoon
+  found), it runs the fast stage itself and says so in the summary. It needs
+  `checks: read` in the caller workflow; without it, it warns and trusts the
+  ruleset.
 - `lighthouse-runs: 1` on pull requests. Performance only warns (runner noise),
   and accessibility, SEO and best practices are deterministic, so one run per URL
   gives the same verdict as three. The full sweep (`"all"`) runs once per URL too.

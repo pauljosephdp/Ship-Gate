@@ -872,7 +872,9 @@ cost_case "action takes a skip-fast input"               action.yml "if: inputs.
 cost_case "skip-fast skips only on a Workers Builds check" action.yml "if: steps.fast.outputs.skip != 'true'"
 cost_case "action takes a lighthouse-runs input"         action.yml 'SHIP_GATE_LIGHTHOUSE_RUNS: ${{ inputs.lighthouse-runs }}'
 cost_case "action restores Astro's image cache after install" action.yml 'path: ${{ inputs.working-directory }}/node_modules/.astro'
-cost_case "caller CI leaves the fast stage to Workers"  templates/caller/.github/workflows/ci.yml 'skip-fast: true'
+cost_case "caller CI runs the whole gate (production-only)" templates/caller/.github/workflows/ci.yml 'skip-fast: false'
+if grep -q 'checks: read' "$HERE/../templates/caller/.github/workflows/ci.yml"; then bad "caller CI needs no checks: read (no skip-fast)" "checks: read is left" ""
+else ok "caller CI needs no checks: read (no skip-fast)"; fi
 cost_case "caller CI runs Lighthouse once per URL"      templates/caller/.github/workflows/ci.yml 'lighthouse-runs: 1'
 cost_case "caller CI passes docs-only PRs"              templates/caller/.github/workflows/ci.yml "if: steps.scope.outputs.docs_only != 'true'"
 cost_case "Workers build hook can require the fast stage" templates/caller/scripts/ship-gate-workers.sh 'SHIP_GATE_REQUIRE_FAST'

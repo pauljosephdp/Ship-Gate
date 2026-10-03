@@ -24,8 +24,8 @@ and the post-deploy check.
 
 | File | Purpose |
 |---|---|
-| `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify` with `skip-fast` and one Lighthouse run; skips drafts, and passes docs-only PRs without running the gate |
-| `scripts/ship-gate-workers.sh` | Called at the end of the Workers Builds build command: the fast stage on every non-production push |
+| `.github/workflows/ci.yml` | Calls `pauljosephdp/Ship-Gate@vX.Y.Z` in a job named `verify` with `skip-fast: false` (the whole gate runs on the pull request) and one Lighthouse run; skips drafts, and passes docs-only PRs without running the gate |
+| `scripts/ship-gate-workers.sh` | Called at the end of the Workers Builds build command: the fast stage on every non-production push (a no-op on `main`; unused when Workers Builds builds only `main`) |
 | `scripts/ship-gate-after-deploy.sh` | Appended to the Workers Builds deploy command: the post-deploy check after every production deploy; with `SHIP_GATE_ROLLBACK=1` a failed check rolls production back and asks the repo for a revert PR |
 | `.github/workflows/post-deploy.yml` | Manual fallback: `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` on demand |
 | `.github/workflows/full-sweep.yml` | Monthly: the gate against every page (`"all"`), which pull requests only sample |
@@ -79,6 +79,19 @@ stops after step 4, with no browser, in about two minutes. Skipped checks read
 
 ### Where the gate runs: Cloudflare vs GitHub
 
+**Production-only delivery (v3.11.0, the caller template's default).** Workers
+Builds builds `main` and nothing else: non-production branch builds are off, so a
+pull request has no preview build and no "Workers Builds" check. `verify` then runs
+the **whole gate** on the pull request (`skip-fast: false`): contract, guards,
+`astro check`, lint, tests, the site's checks, the build, the post-build scans, the
+browser suite and Lighthouse. The `main` ruleset requires only `verify`; auto-merge
+lands the PR when it is green, Workers Builds builds and deploys production, and the
+post-deploy check (with `SHIP_GATE_ROLLBACK=1`, the rollback) is the safety net. The
+table below describes the other layout, previews on, which `skip-fast: true` and the
+"Workers Builds" required check still support. A site on production-only delivery that
+leaves `skip-fast: true` waits 90 s on every PR for a check that never comes, warns,
+and runs the fast stage anyway, so set it to `false`.
+
 Both free tiers are small (GitHub Actions: 2,000 minutes a month on private
 repos; Cloudflare Workers Builds: 3,000 build minutes, one build at a time,
 20 minutes per build), so the gate is split by what each does best:
@@ -108,7 +121,7 @@ variable is pushes to a PR after it is ready.
 **Spending each minute once (v3.9.0).** The fast stage already ran in the
 preview build for the same commit, so `verify` need not repeat it:
 
-- `skip-fast: true` (the caller template's default) skips `astro check`, lint,
+- `skip-fast: true` (opt-in since v3.11.0, for sites that build previews) skips `astro check`, lint,
   unit tests and the post-build scans in `verify`. Contract, guards, the site's
   own checks, build, the browser suite and Lighthouse still run. It is only
   sound while the `main` ruleset also requires the **"Workers Builds: <worker>"**
@@ -896,19 +909,21 @@ belong in `post-deploy.yml` or a scheduled workflow.
 10. With `posthog-server-only` or `posthog-hybrid`, in the site's PostHog project, add *`environment` is not `production`* to
    the internal and test account filter, applied by default.
 11. Ruleset on the site's `main`: require a pull request, require the `verify`
-    check and the "Workers Builds: <worker>" check (the fast stage, which
-    `skip-fast` relies on), block force pushes and deletions. Leave "require
+    check (only that, with production-only delivery; a site that builds previews
+    and sets `skip-fast: true` also requires "Workers Builds: <worker>", the fast
+    stage `skip-fast` relies on), block force pushes and deletions. Leave "require
     the branch to be up to date" off: with it, every push to `main` stalls
     each open auto-merge until someone updates the branch and `verify` runs
     again. The post-deploy check and the rollback catch the rare break that
     two separately green PRs make together. Required approvals: 0 while one
     person is the only committer.
-12. Workers Builds: production branch `main`, non-production branch builds on,
-    preview URLs on. Then set the build command and deploy command as in
-    "Where the gate runs", plus the
-    build variables `SHIP_GATE_REQUIRE_FAST=1` (needed for `skip-fast`) and,
-    to roll back on a failed post-deploy check, `SHIP_GATE_ROLLBACK=1` with the
-    optional `AUTOMATION_TOKEN` build secret.
+12. Workers Builds: production branch `main`, non-production branch builds
+    **off** (production-only delivery; turn them on, with preview URLs, only for a
+    site that uses `skip-fast: true`). Then set the build command and deploy
+    command as in "Where the gate runs", plus, with previews on, the build variable
+    `SHIP_GATE_REQUIRE_FAST=1` (needed for `skip-fast`) and, to roll back on a
+    failed post-deploy check, `SHIP_GATE_ROLLBACK=1` with the optional
+    `AUTOMATION_TOKEN` build secret.
 13. Turn on secret scanning, push protection and Dependabot alerts.
 14. Nothing to do for Dependabot: Ship Gate is public (v3.10.0), so the
     template's `dependabot.yml` sees its release tags without a registry or a
@@ -927,11 +942,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.10.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.11.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.10.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.11.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan locally after `npm run build`, from the site directory,

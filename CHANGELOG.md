@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.11.0 — 2026-10-03
+
+Production-only delivery is the caller template's default: Cloudflare Workers
+Builds builds `main` and nothing else, and `verify` runs the whole gate on the
+pull request. Re-copy `templates/caller/.github/workflows/ci.yml` and
+`pull_request_template.md`; a site that keeps building previews keeps working
+by leaving `skip-fast: true` in its own `ci.yml`.
+
+**Changed**
+- `templates/caller/.github/workflows/ci.yml`: `skip-fast: false`, and the
+  `checks: read` permission is gone (only `skip-fast` read check runs). With
+  `skip-fast: true` and no "Workers Builds" check on the commit, `verify` waited
+  90 s on every pull request, warned that preview builds look off, and ran the
+  fast stage anyway; production-only sites no longer pay the wait or see the
+  warning. Workers Builds also posts its check late when builds queue (8 to 14
+  minutes seen on a busy account), so a short wait for it is unreliable.
+- `pull_request_template.md`: the "Preview URL" section becomes "How it was
+  checked", and the preview checklist lines say what is checked locally and after
+  the deploy.
+- README: "Where the gate runs" describes production-only delivery first; the
+  ruleset step requires `verify` only (previews-on sites also require "Workers
+  Builds: <worker>"); the Workers Builds step turns non-production branch builds
+  off. The action, `skip-fast` and `scripts/fast-stage-source.sh` are unchanged,
+  so sites on previews are unaffected.
+- `self-test.sh`: asserts the caller template runs the whole gate and needs no
+  `checks: read`.
+
 ## v3.10.0 — 2026-10-02
 
 Ship Gate is public, so sites need no token to use it. Re-copy

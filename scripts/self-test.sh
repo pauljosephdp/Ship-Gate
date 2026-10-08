@@ -334,8 +334,8 @@ lh_case() {
   cfg "$fragment"
   mkdir -p dist/client/about dist/client/blog dist/server
   echo '<h1>home</h1>' > dist/client/index.html; echo a > dist/client/about/index.html
-  echo p > dist/client/blog/post.html; echo nf > dist/client/404.html; echo s > dist/server/entry.html
-  GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" SHIP_GATE_LIGHTHOUSE_RUNS="${LH_RUNS:-}" node "$PREPARE" lighthouse >/dev/null 2>&1
+  echo p > dist/client/blog/post.html; echo q > dist/client/blog/post2.html; echo nf > dist/client/404.html; echo s > dist/server/entry.html
+  GITHUB_ENV= GITHUB_EVENT_NAME="${LH_EVENT:-}" SHIP_GATE_DIR="$d/.sg" SHIP_GATE_LIGHTHOUSE_RUNS="${LH_RUNS:-}" node "$PREPARE" lighthouse >/dev/null 2>&1
   out="$(node -e "const c=require('$d/.sg/lighthouserc.json').ci;const a=c.assert.assertions;
     console.log(c.collect.url.map(u=>u.replace('http://localhost:4321','')).join(' '),'|runs',c.collect.numberOfRuns,
     '|perf',JSON.stringify(a['categories:performance']),'|seo-category',a['categories:seo']===undefined?'absent':'present',
@@ -343,7 +343,9 @@ lh_case() {
   if grep -qF -- "$expect" <<<"$out"; then ok "$name"; else bad "$name" "expected: $expect" "$out"; fi
   rm -rf "$d"
 }
-lh_case "all: every emitted page, not 404 or server" "/ /about/ /blog/post |runs 1" '"lighthouseUrls":"all"'
+lh_case "all: every emitted page, not 404 or server" "/ /about/ /blog/post /blog/post2 |runs 1" '"lighthouseUrls":"all"'
+LH_EVENT=pull_request lh_case "all on a pull request: one URL per route" "/ /about/ /blog/post |runs 1" '"lighthouseUrls":"all"'
+LH_EVENT=pull_request lh_case "listed pages on a pull request: never sampled" "/ |runs 3" ''
 lh_case "listed pages: median of 3 runs"             "/ |runs 3"                     ''
 lh_case "performance warns at 0.9 by default"         '|perf ["warn",{"minScore":0.9,"aggregationMethod":"median-run"}]' ''
 lh_case "site can raise performance to error"         '|perf ["error",{"minScore":0.9' '"thresholdOverrides":[{"audit":"categories:performance","level":"error"}]'

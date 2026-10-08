@@ -247,10 +247,29 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: bash "$GITHUB_ACTION_PATH/scripts/run-checks.sh" $SHIP_GATE_CHECKS_POSTBUILD
 
+    # Fail fast: the browser suite and Lighthouse are the slow part, so they run only on a gate
+    # that is still green. Every cheaper check above has run, so all of its failures show together.
+    - name: Earlier checks green?
+      id: green
+      if: always()
+      shell: bash
+      env:
+        OUTCOMES: >-
+          ${{ steps.prepare.outcome }} ${{ steps.guards.outcome }} ${{ steps.check.outcome }}
+          ${{ steps.lint.outcome }} ${{ steps.test.outcome }} ${{ steps.prebuild.outcome }}
+          ${{ steps.build.outcome }} ${{ steps.afterbuild.outcome }} ${{ steps.dist.outcome }}
+          ${{ steps.posthog.outcome }} ${{ steps.structure.outcome }} ${{ steps.discovery.outcome }}
+          ${{ steps.copy.outcome }} ${{ steps.market.outcome }} ${{ steps.postbuild.outcome }}
+      run: |
+        case " $OUTCOMES " in
+          *" failure "*) echo "green=false" >> "$GITHUB_OUTPUT"; echo "An earlier check failed: the browser suite and Lighthouse are skipped." ;;
+          *) echo "green=true" >> "$GITHUB_OUTPUT" ;;
+        esac
+
     # The Playwright browser download is the slowest install; cache it per Playwright version.
     - name: Playwright version
       id: pw
-      if: steps.afterbuild.outcome == 'success' && steps.site.outputs.stage != 'scans'
+      if: steps.afterbuild.outcome == 'success' && steps.site.outputs.stage != 'scans' && steps.green.outputs.green == 'true'
       shell: bash
       run: echo "version=$(node -p "require(process.argv[1]).packages['node_modules/playwright-core']?.version ?? ''" "$SHIP_GATE_DIR/package-lock.json")" >> "$GITHUB_OUTPUT"
 
@@ -262,7 +281,7 @@ runs:
 
     - name: Install Ship Gate test tools
       id: tools
-      if: steps.afterbuild.outcome == 'success' && steps.site.outputs.stage != 'scans'
+      if: steps.afterbuild.outcome == 'success' && steps.site.outputs.stage != 'scans' && steps.green.outputs.green == 'true'
       shell: bash
       env:
         REUSE: ${{ steps.site.outputs.reuse }}
@@ -307,7 +326,7 @@ runs:
 
     - name: Lighthouse CI
       id: lighthouse
-      if: steps.tools.outcome == 'success' && steps.site.outputs.stage == 'full'
+      if: steps.tools.outcome == 'success' && steps.site.outputs.stage == 'full' && steps.browser.outcome != 'failure' && steps.e2e.outcome != 'failure'
       continue-on-error: true
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -321,6 +340,8 @@ runs:
         STAGE: ${{ steps.site.outputs.stage }}
         SKIP_FAST: ${{ steps.fast.outputs.skip }}
         SKIP_FAST_ASKED: ${{ inputs.skip-fast }}
+        GREEN: ${{ steps.green.outputs.green }}
+        BROWSER_RED: ${{ steps.browser.outcome == 'failure' || steps.e2e.outcome == 'failure' }}
         OUTCOMES: >-
           Node version pinned=${{ steps.site.outcome }}
           |Contract and config=${{ steps.prepare.outcome }}
@@ -361,6 +382,11 @@ runs:
           scans) note=$'\n'"Stage \`scans\`: browser tests and Lighthouse run when the pull request is ready for review."$'\n' ;;
           browser) note=$'\n'"Stage \`browser\`: Lighthouse did not run."$'\n' ;;
         esac
+        if [ "$STAGE" != scans ] && [ "$GREEN" = false ]; then
+          note+=$'\n'"An earlier check failed, so the browser suite and Lighthouse did not run. They run once it is fixed."$'\n'
+        elif [ "$STAGE" = full ] && [ "$BROWSER_RED" = true ]; then
+          note+=$'\n'"A browser check failed, so Lighthouse did not run. It runs once the browser suite is green."$'\n'
+        fi
         if [ "$SKIP_FAST" = true ]; then
           note+=$'\n'"\`skip-fast\`: astro check, lint, unit tests and the post-build scans ran in the Workers Builds fast stage for this commit (the required \"Workers Builds\" check), so they show as not run here."$'\n'
         fi

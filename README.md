@@ -55,12 +55,33 @@ Sites on `analytics-always-on` also follow `templates/caller/analytics/` and
    edge files)
 6. Lighthouse CI (mobile)
 
+Everything runs in the cloud: the action on GitHub-hosted runners, the fast stage
+and deploys in Cloudflare Workers Builds. Steps 5 and 6 start a static server
+for the build inside the runner (`http://localhost:4321`, the runner talking to
+itself) and point Chromium at it; nothing runs on anyone's computer. "Desktop"
+and "mobile" are browser viewports (1440×900 and an emulated Pixel 7), not machines.
+
+The Playwright suite uses every core of the runner (two workers on GitHub's
+2-vCPU runners). Each page is loaded once on desktop for one test that runs
+smoke, axe, consent, CSP and keyboard, then resizes to each `reflowWidths`
+width for the reflow check; 200% zoom gets its own test, since it needs a
+2× device scale. Every check is a soft assertion, so the test lists every
+failing check and width for the page.
+
+**Fail fast.** Steps 1–4 always all run, so a PR shows every failure among
+them at once. The browser suite and Lighthouse, the slow part, run only when
+steps 1–4 are green, and Lighthouse only when the browser suite is green too;
+the summary says why they show "not run". A broken PR goes red in a few
+minutes instead of running into the job timeout.
+
 The action's steps use Node 24 actions (`setup-node@v7`, `setup-python@v7`,
 `cache@v6`, `upload-artifact@v7`). GitHub-hosted runners, which the caller
 templates use, need nothing; a self-hosted runner must be v2.327.1 or later.
 
-Every check runs even after another fails, so a PR shows all its failures at
-once; checks that need the build skip when the build fails. A summary table at
+Every check up to the browser suite runs even after another fails, so a PR
+shows all those failures at once; checks that need the build skip when the
+build fails, and the browser suite and Lighthouse skip when an earlier check
+failed (fail fast, above). A summary table at
 the end names each check's result, and the job fails if any check failed.
 When a check fails, the reports (Playwright traces, Lighthouse HTML, the
 discovery table) upload as a build artifact for 5 days, never to public
@@ -110,8 +131,8 @@ image has no documented way to install Chromium's system packages.
 
 A draft runs no Actions job at all; the "Workers Builds: <worker>" check shows
 the fast stage's result. So: open a PR as a draft, iterate on it, run the
-browser suite locally before you mark it ready (a Claude Code cloud session has
-Chromium), and mark it ready once. Each push after that costs a full `verify`,
+browser suite in a Claude Code cloud session (it has Chromium) before you mark
+it ready, and mark it ready once. Each push after that costs a full `verify`,
 roughly ten Actions minutes.
 
 With three sites of about 40 PRs and 40 merges a month each, the split comes to
@@ -230,8 +251,12 @@ Third-party code is blocked during measurement (PostHog, HubSpot, Clarity,
 Google tags, Zaraz, Turnstile), so a vendor's release never moves a site's
 score. `"lighthouseUrls": "all"` tests every indexable page the build emits
 (not 404, noindex, meta-refresh stubs or verification files), one run each,
-so a new page is gated the day it ships. A list of paths runs three times each
-and takes the median.
+so a new page is gated the day it ships. On a pull request, `"all"` checks one
+URL per route: every top-level page and the first page under each deeper parent
+(`/syllabus/icse/` stands for `/syllabus/*/`), since pages under one parent
+share a template and Lighthouse is the slowest step. Scheduled and manual runs,
+the monthly full sweep among them, check every URL. A list of paths is never
+sampled; it runs three times each and takes the median.
 
 ### Browser checks
 
@@ -255,7 +280,9 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   (1280px at 2x), WCAG 1.4.10 and 1.4.4. Content inside its own `overflow-x`
   scroller or clipper passes; the failure names the elements past the edge.
   The page runs with its motion as shipped (Ship Gate never emulates reduced
-  motion) and is measured after scrolling and letting animations finish.
+  motion) and is measured after scrolling and letting animations finish. The
+  narrow widths resize the already-loaded desktop page, so CSS breakpoints apply
+  but script that reads the width only at load sees 1440.
 - **CSP:** a page that sends a Content-Security-Policy (enforced or Report-Only)
   must load with zero violations.
 - **Consent** (`consent-before-tracking` policy, desktop): before any
@@ -774,7 +801,7 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `smokePaths` | `/`, `/robots.txt`, `/sitemap-index.xml` | Checked on production after deploy |
 | `server` | `static` | `static` serves the built files (handles `dist/client` from the Cloudflare adapter); `preview` runs `npm run preview` |
 | `distDir` | `dist` | The build output folder |
-| `lighthouseUrls` | same as `pages` | A list of paths, or `"all"` for every indexable page the build emits |
+| `lighthouseUrls` | same as `pages` | A list of paths, or `"all"` for every indexable page the build emits (one URL per route on pull requests) |
 | `e2ePages` | same as `pages` | Pages for smoke, axe, reflow and CSP; a list or `"all"` |
 | `lighthouseBlockedUrls` | `[]` | Extra URL patterns to block during Lighthouse, e.g. `"*/relay/*"` |
 | `structure` | `{ "titleMax": 75 }` | Title and description bands: `titleMin`, `titleMax` (≤ 75), `descMin`, `descMax` |
@@ -942,14 +969,14 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.11.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.12.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
-> locally, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.11.0". Do not change deploy configuration
+> in the session, then the discovery scan, and fix or list every failure. Open a PR
+> titled "chore: adopt ship gate v3.12.0". Do not change deploy configuration
 > or Cloudflare settings.
 
-Run the discovery scan locally after `npm run build`, from the site directory,
+Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,
 with a checkout of Ship Gate beside it:
 
 ```sh

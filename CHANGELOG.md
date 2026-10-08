@@ -1,5 +1,37 @@
 # Changelog
 
+## v3.12.0 — 2026-10-08
+
+`verify` is faster, and it fails fast. The checks are the same ones. On the
+portfolio's largest site, 38 pages, `verify` took 28–30 minutes and timed out
+three times inside Lighthouse. Bump the pin; no site change is needed.
+
+**Changed**
+- **Playwright uses every core** of the runner (`workers: '100%'` on CI). On
+  GitHub's 2-vCPU runners that is 2 workers instead of 1.
+- **One page load per page on desktop.** `e2e/page.spec.ts` runs smoke, axe,
+  consent, CSP and keyboard in a single test. That test then resizes the same
+  page to each `reflowWidths` width for the reflow check. This replaces
+  `smoke`, `consent`, `csp`, `keyboard` and `reflow.spec.ts`, which each loaded
+  and settled the page again. 200% zoom stays a separate test, and mobile
+  (Pixel 7) keeps its own smoke and axe pass. Checks are soft assertions, so
+  every failing check and width is still listed. The narrow widths now resize
+  a page loaded at 1440, so script that reads the width only at load sees 1440.
+- **Lighthouse on a pull request with `"all"`** checks one URL per route:
+  every top-level page, and the first page under each deeper parent.
+  Scheduled and manual runs check every URL, and so does the monthly full
+  sweep. Explicit lists are never sampled.
+- **Fail fast.** The browser suite and Lighthouse run only when every earlier
+  check passed, and Lighthouse runs only when the browser suite passed too.
+  The summary says why they did not run. A broken PR now goes red in a few
+  minutes instead of running into the 30-minute timeout and showing
+  "cancelled".
+- **Cloud-only wording.** The README, the caller `ci.yml` comment and
+  `pull_request_template.md` now say to check in a cloud session, not
+  locally. The README says the gate runs entirely on GitHub-hosted runners and
+  in Workers Builds. `localhost` there is the runner serving the build to
+  itself.
+
 ## v3.11.0 — 2026-10-03
 
 Production-only delivery is the caller template's default: Cloudflare Workers

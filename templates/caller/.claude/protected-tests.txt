@@ -1,0 +1,7 @@
+# Existing tests an agent may not change without a person's approval (.claude/hooks/protect-tests.sh).
+# Bash globs relative to the repo root, ** included. New test files need no approval.
+tests/**
+test/**
+e2e/**
+**/*.test.*
+**/*.spec.*

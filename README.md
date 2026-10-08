@@ -33,8 +33,13 @@ and the post-deploy check.
 | `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs; Ship Gate is public, so no token or registry (step 14) |
 | `.github/workflows/dependabot-auto-merge.yml` | Queues Dependabot's minor or patch Ship Gate bump to squash-merge once `verify` passes; majors and npm updates wait for a person (step 15) |
 | `.github/pull_request_template.md` | The review checklist |
+| `.github/workflows/claude.yml` | Claude reviews each ready pull request against `REVIEW.md`, and answers `@claude` from collaborators (AI-native SDLC, below) |
+| `.github/workflows/ci-health.yml` | Weekly control bands over `verify`'s duration and failure rate (`pauljosephdp/Ship-Gate/ci-health@vX.Y.Z`) |
+| `REVIEW.md`, `.github/CODEOWNERS` | The review policy, and the person who approves |
+| `.claude/` | Hooks (guard-bash, protect-tests, lint-shell), `protected-tests.txt`, and the `verifier` subagent |
+| `docs/changes/` | One folder per change: `intent.md`, `spec.md`, `plan.md` |
 
-Templates for all of them are in `templates/caller/`. Sites on the `posthog-hybrid`
+Templates for all of them are in `templates/caller/`; `CLAUDE.playbook.md` holds the sections to merge into the site's own `CLAUDE.md`. Sites on the `posthog-hybrid`
 policy also copy `templates/caller/posthog/` (see PostHog in the browser and on the server).
 Sites on `analytics-always-on` also follow `templates/caller/analytics/` and
 `templates/caller/legal/` (see Analytics on every page).
@@ -890,6 +895,54 @@ remote D1 migrations, R2 or KV writes, Worker secrets, IndexNow submissions,
 content syncs that commit, and paid API calls. Checks against production
 belong in `post-deploy.yml` or a scheduled workflow.
 
+## AI-native SDLC
+
+Ship Gate and every site work the way Anthropic's *AI-Native SDLC Playbook*
+describes (Louis Claxton, Anthropic). Each stage commits an artifact the next
+stage reads, guardrails run as code, and Claude works up to the production gate
+and never past it. Since v3.13.0 the pieces ship in `templates/caller/`, and
+Ship Gate uses the same ones on itself.
+
+| Play | Here | Sites |
+|---|---|---|
+| Plan: `intent.md` | `docs/changes/<date>-<name>/intent.md`, from `_template/` | same |
+| Design: requirements and design | `spec.md` beside it, with flagged concerns | same; brand and UX skills apply |
+| Build: plan mode | `plan.md`, committed before code and updated with it | same |
+| Build: `CLAUDE.md` | Commands with healthy output, conventions, "Things Claude gets wrong" | merge `CLAUDE.playbook.md` |
+| Build: hooks as guardrails | `.claude/settings.json`: `guard-bash.sh`, `protect-tests.sh` (asks before an existing test changes), `lint-shell.sh` | same hooks |
+| Build: subagents | `.claude/agents/verifier.md` runs the checks and reports, never fixes | same |
+| Test: feedback loop | `self-test`, ShellCheck, README check and the fixture suite, run before a task is done | `npm run check`, build, the scans |
+| Test: continuous evals | `evals/*.json` (real Ship Gate tasks, deterministic checks), `agent-evals.yml` on configuration changes and weekly; fails below `evals/threshold` | — (sites inherit hooks and rules tested here) |
+| Deploy: AI in PR review | `claude.yml` reviews against `REVIEW.md`; `@claude` addresses comments; `CODEOWNERS` approves | same |
+| Deploy: hooks as approval gates | `guard-bash.sh` blocks pushes to main, force pushes, `--no-verify`, tags, releases, `gh pr merge --admin` and wrangler production writes | same |
+| Deploy: CI/CD | `triage` job: read-only `claude -p` diagnosis of a failed run, posted on the PR (`triage/`) | `triage` job after a failed `verify` |
+| Maintain: closing the loop | `ci-health.yml` + `ci-health/` (`scripts/ci-health.mjs`) | same, on `verify` |
+
+**CI health.** `scripts/ci-health.mjs` is deterministic and unit tested
+(`test/ci-health.test.mjs`). Over the last 30 completed runs it takes the
+baseline mean and σ of duration (σ at least 0.5 min) and applies Western Electric
+rule 1 (one of the latest 3 runs beyond 3σ) and rule 2 (two of three beyond 2σ),
+a near-timeout rule (a run within 20% of the job timeout), and a failure-rate
+band (the latest 10 runs against the rest, beyond 3 binomial σ and at least 30%).
+Tier 1 logs; tier 2 adds a read-only Claude diagnosis to the job summary; tier 3
+also opens one issue (or comments on the open one) written as an `intent.md`, which
+the owner accepts into `docs/changes/`, schedules or closes. Playway's creep to
+28–30 minutes would have opened that issue at the first 24-minute run.
+
+**Claude in CI** needs the `ANTHROPIC_API_KEY` repository secret. Without it,
+triage and the review note that and pass, evals warn and pass, and CI health runs its bands without a diagnosis. Cost
+stays bounded: reviews run only on ready pull requests and their pushes, triage
+only after a failure, evals only when the agent's configuration changes and
+weekly, the diagnosis only at tier 2 or above. The CLI is pinned
+(`claude-code-version`, default 2.1.293).
+
+**Not adopted, on purpose.** Rehearsing rollback in staging: the sites deploy
+production only, and `workers-builds-only` keeps Cloudflare tokens out of
+workflows. The rollback path (`SHIP_GATE_ROLLBACK=1`) is exercised by
+`self-test` against a stub `wrangler` on every Ship Gate change instead.
+Org-wide managed settings (the playbook's regulated-enterprise example),
+Claude Tag and OpenTelemetry export are account-admin steps outside this repo.
+
 ## Adopting it in a site repo
 
 1. Copy `templates/caller/` into the repo. The workflows and `dependabot.yml`
@@ -908,8 +961,8 @@ belong in `post-deploy.yml` or a scheduled workflow.
 6. Make the site discoverable, or the discovery scan lists what is missing: a
    `robots.txt` with a `Sitemap:` line, a sitemap (`@astrojs/sitemap`), one
    canonical, Open Graph tags and `lang` in the base layout, and Organization or
-   Person JSON-LD on the home page. Run the scan locally (below) before the
-   first PR.
+   Person JSON-LD on the home page. Run the scan in a Claude Code cloud
+   session (below) before the first PR.
 7. Keep the standard script names `check` and `build`, and `preview` if
    `server` is `preview`. Ship Gate installs its own Playwright, axe and
    Lighthouse CI; the site needs none of them for the gate.
@@ -967,13 +1020,23 @@ belong in `post-deploy.yml` or a scheduled workflow.
     branch (step 11), so a bump merges even after `main` moved. If the site's ruleset allows
     only merge commits, change `--squash` to `--merge`.
 
-Claude Code prompt for steps 1–9:
+16. AI-native SDLC (v3.13.0): copy `.claude/`, `REVIEW.md`,
+    `.github/CODEOWNERS`, `docs/changes/`, `.github/workflows/claude.yml` and
+    `ci-health.yml` from `templates/caller/`, merge `CLAUDE.playbook.md` into the
+    site's `CLAUDE.md` (keeping the site's own rules), list the site's test
+    paths in `.claude/protected-tests.txt`, and add the `ANTHROPIC_API_KEY`
+    repository secret (Settings → Secrets and variables → Actions). Install the
+    Claude GitHub app for the review (`/install-github-app` in Claude Code).
+    Turn on "Require review from Code Owners" in the ruleset only once a second
+    person can approve; until then `CODEOWNERS` only requests the review.
 
-> Adopt Ship Gate v3.12.0 in this repo following pauljosephdp/Ship-Gate README
+Claude Code prompt for steps 1–9 (and 16):
+
+> Adopt Ship Gate v3.13.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.12.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.13.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,

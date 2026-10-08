@@ -1,0 +1,6 @@
+{
+  "id": "release-bump",
+  "why": "CLAUDE.md: a site-facing change gets a CHANGELOG version and every pin moves with it (check-readme.sh).",
+  "prompt": "Prepare Ship Gate version v3.99.0 with a CHANGELOG entry that says 'Docs: clarify fail fast.' Do everything CLAUDE.md requires for a new version, then run the checks it names. Do not commit or push.",
+  "check": "grep -q '^## v3.99.0' CHANGELOG.md && bash scripts/check-readme.sh && grep -q 'Ship-Gate@v3.99.0' templates/caller/.github/workflows/ci.yml && grep -q 'Ship-Gate/ci-health@v3.99.0' templates/caller/.github/workflows/ci-health.yml"
+}

@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.13.0 — 2026-10-08
+
+Ship Gate and its sites now work the way Anthropic's *AI-Native SDLC Playbook* describes. Each change commits its intent, spec and plan. Guardrails run as hooks, Claude reviews pull requests and triages failed builds, and weekly control bands catch CI drift before it times out. Verify itself is unchanged. To adopt it, bump the pin, copy the new templates (README step 16) and add the `ANTHROPIC_API_KEY` secret.
+
+**Added**
+- `templates/caller/.claude/`:
+  - `guard-bash.sh` blocks pushes to main, force pushes, `--no-verify`, tags, releases, `gh pr merge --admin` and wrangler production writes.
+  - `protect-tests.sh` asks a person before an existing test changes.
+  - `lint-shell.sh` runs ShellCheck on an edited script.
+  - The folder also holds `settings.json`, `protected-tests.txt` and a read-only `verifier` subagent.
+- `templates/caller/REVIEW.md`, `.github/CODEOWNERS`, `docs/changes/` (the `intent.md`, `spec.md` and `plan.md` templates), and `CLAUDE.playbook.md` (the sections to merge into a site's `CLAUDE.md`).
+- `templates/caller/.github/workflows/claude.yml`: a review against `REVIEW.md` on ready pull requests, and `@claude` answers for collaborators.
+- `templates/caller/.github/workflows/ci-health.yml` and the `pauljosephdp/Ship-Gate/ci-health` action:
+  - weekly control bands (Western Electric rules, near-timeout, failure rate) over `verify`;
+  - a read-only Claude diagnosis at tier 2;
+  - at tier 3, one issue written as an `intent.md`.
+- `pauljosephdp/Ship-Gate/triage` and a `triage` job in the caller `ci.yml`: a read-only diagnosis of a failed `verify`, posted on the PR.
+- In Ship Gate itself:
+  - the same hooks, review and CI health;
+  - a `triage` job in Self-test;
+  - agent evals (`evals/`, `agent-evals.yml`) that test `CLAUDE.md`, `REVIEW.md` and `.claude/` like code;
+  - a `CLAUDE.md` with commands and their healthy output.
+
+**Changed**
+- `check-readme.sh` checks every `Ship-Gate/<path>@vX.Y.Z` pin, including `ci-health` and `triage`.
+- All Claude jobs pass with a notice when the `ANTHROPIC_API_KEY` secret is missing.
+
 ## v3.12.0 — 2026-10-08
 
 `verify` is faster, and it fails fast. The checks are the same ones. On the

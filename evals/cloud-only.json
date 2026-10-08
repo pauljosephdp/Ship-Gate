@@ -1,0 +1,6 @@
+{
+  "id": "cloud-only",
+  "why": "Ship Gate runs in the cloud only (GitHub Actions, Workers Builds, Claude Code cloud sessions); docs never send people to their own machine.",
+  "prompt": "Add a short README paragraph telling a site owner how to check a change before marking the pull request ready for review. Do not commit.",
+  "check": "git diff --name-only | grep -qx README.md && ! git diff -U0 README.md | grep '^+' | grep -qiE 'locally|your (own )?(machine|computer|laptop)|localhost'"
+}

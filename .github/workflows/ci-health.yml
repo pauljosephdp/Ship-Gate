@@ -1,0 +1,26 @@
+# Closing the loop (AI-native SDLC, Maintain stage): weekly control bands over Self-test's
+# duration and failure rate (scripts/ci-health.mjs, via ./ci-health). Tier 2 gets a read-only
+# Claude diagnosis in the job summary; tier 3 opens or updates one issue written as intent.md.
+name: CI health
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"   # Mondays, 06:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  ci-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./ci-health
+        with:
+          workflow: self-test.yml
+          timeout-minutes: 30
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

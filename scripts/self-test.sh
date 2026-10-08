@@ -949,8 +949,68 @@ n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/work
 m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"
 if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi
 
+echo "AI-native SDLC: hooks, review, triage, CI health"
+HOOKS="$HERE/../templates/caller/.claude/hooks"
+hook_case() {
+  local want=$1 cmd=$2 got
+  printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | bash "$HOOKS/guard-bash.sh" >/dev/null 2>&1; got=$?
+  if [ "$got" = "$want" ]; then ok "guard-bash: $( [ "$want" = 2 ] && echo blocks || echo allows ) $cmd"
+  else bad "guard-bash: $cmd" "exit $got, expected $want" ""; fi
+}
+hook_case 2 'git push origin main'
+hook_case 2 'git push origin HEAD:main'
+hook_case 2 'cd site && git push -f origin feature'
+hook_case 2 'git push --tags'
+hook_case 2 'git tag v9.9.9'
+hook_case 2 'gh release create v9.9.9'
+hook_case 2 'gh pr merge 7 --admin'
+hook_case 2 'git commit --no-verify -m wip'
+hook_case 2 'npx wrangler deploy'
+hook_case 2 'wrangler secret put API_KEY'
+hook_case 2 'wrangler d1 migrations apply db --remote'
+hook_case 2 'wrangler r2 object put bucket/key --file x'
+hook_case 0 'git push -u origin claude/feature'
+hook_case 0 'git push --force-with-lease origin claude/feature'
+hook_case 0 'git push origin main-docs'
+hook_case 0 'git tag -l'
+hook_case 0 'gh release view v3.12.0'
+hook_case 0 'npx wrangler dev'
+hook_case 0 'wrangler d1 execute db --local --command "select 1"'
+hook_case 0 'git log origin/main..HEAD'
+protect_case() {
+  local name=$1 want=$2 file=$3 d out; d="$(mktemp -d)"
+  mkdir -p "$d/.claude" "$d/tests" && printf 'tests/**\n**/*.spec.*\n' > "$d/.claude/protected-tests.txt"
+  echo x > "$d/tests/a.test.ts"; echo x > "$d/src.spec.ts"
+  out="$(jq -n --arg f "$d/$file" '{tool_input:{file_path:$f}}' | CLAUDE_PROJECT_DIR="$d" bash "$HOOKS/protect-tests.sh")"
+  if grep -q '"permissionDecision": "ask"' <<<"$out"; then got=ask; else got=allow; fi
+  if [ "$got" = "$want" ]; then ok "protect-tests: $name"; else bad "protect-tests: $name" "got $got, expected $want" "$out"; fi
+  rm -rf "$d"
+}
+protect_case "asks before changing an existing test" ask tests/a.test.ts
+protect_case "asks for a matching glob anywhere"    ask src.spec.ts
+protect_case "a new test needs no approval"          allow tests/new.test.ts
+protect_case "other files need no approval"          allow README.md
+for f in REVIEW.md .github/CODEOWNERS .claude/settings.json .claude/protected-tests.txt .claude/agents/verifier.md \
+         .github/workflows/claude.yml .github/workflows/ci-health.yml docs/changes/README.md \
+         docs/changes/_template/intent.md docs/changes/_template/spec.md docs/changes/_template/plan.md CLAUDE.playbook.md; do
+  if [ -s "$HERE/../templates/caller/$f" ]; then ok "caller template ships $f"; else bad "caller template ships $f" "missing" ""; fi
+done
+if jq -e '.hooks.PreToolUse[0].hooks[0].command | test("guard-bash.sh")' "$HERE/../templates/caller/.claude/settings.json" >/dev/null \
+  && jq -e '.hooks.PreToolUse[0].hooks[0].command | test("guard-bash.sh")' "$HERE/../.claude/settings.json" >/dev/null; then
+  ok "Ship Gate and the caller template wire the guard-bash hook"
+else bad "guard-bash hook wired" "settings.json does not run it" ""; fi
+cost_case "caller CI triages a failed verify"           templates/caller/.github/workflows/ci.yml 'pauljosephdp/Ship-Gate/triage@'
+cost_case "caller CI triage only after a failure"       templates/caller/.github/workflows/ci.yml "if: failure() && github.event_name == 'pull_request'"
+cost_case "caller review skips drafts"                  templates/caller/.github/workflows/claude.yml 'github.event.pull_request.draft == false'
+cost_case "caller review skips Dependabot (no secrets)" templates/caller/.github/workflows/claude.yml "github.event.pull_request.user.login != 'dependabot[bot]'"
+cost_case "caller @claude only for collaborators"       templates/caller/.github/workflows/claude.yml 'OWNER","MEMBER","COLLABORATOR'
+cost_case "caller CI health watches verify weekly"      templates/caller/.github/workflows/ci-health.yml 'workflow: ci.yml'
+cost_case "triage skips without an API key"             triage/action.yml 'No ANTHROPIC_API_KEY secret'
+cost_case "triage is read-only"                         triage/action.yml '--allowedTools "Read,Grep,Glob"'
+cost_case "CI health opens one issue, not many"         ci-health/action.yml 'gh issue comment'
+
 echo "Template unit tests (node --test test/*.test.mjs)"
-if out="$(node --test "$HERE"/../test/*.test.mjs 2>&1)"; then ok "posthog-proxy and other template tests pass"
+if out="$(node --test "$HERE"/../test/*.test.mjs 2>&1)"; then ok "posthog-proxy, ci-health and other unit tests pass"
 else bad "template unit tests" "node --test failed" "$(grep -E '^not ok|Error|expected|actual' <<<"$out" | head -20)"; fi
 
 echo

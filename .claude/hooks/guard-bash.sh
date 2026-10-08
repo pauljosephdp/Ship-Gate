@@ -31,14 +31,16 @@ strip_messages() {
 }
 check() { # $1: one piece of the command
   local seg="$1" push args w branch
-  if [[ $seg =~ (^|[^[:alnum:]_./-])git([[:space:]]+[^[:space:]]+)*[[:space:]]+push([[:space:]]|$) ]]; then
+  # Searching or printing text runs nothing.
+  [[ $seg =~ ^[[:space:]]*(grep|egrep|rg|ag|cat|less|head|tail|wc)([[:space:]]|$) ]] && return 0
+  if [[ ! $seg =~ git([[:space:]]+[^[:space:]]+)*[[:space:]]+stash[[:space:]]+push ]] && [[ $seg =~ (^|[^[:alnum:]_./-])git([[:space:]]+[^[:space:]]+)*[[:space:]]+push([[:space:]]|$) ]]; then
     push="$(sed -E 's/.*[[:space:]]push([[:space:]]|$)//; s/[0-9]*[<>]+&?[^[:space:]]*//g' <<<"$seg" | tr -d "\"'(){}\`")"
     grep -qE -- '--no-verify' <<<"$push" && block "git push --no-verify skips the repository's checks."
     grep -qE -- '(^|[[:space:]])(--force|-f)([[:space:]]|$)|(^|[[:space:]])\+[^[:space:]]' <<<"$push" \
       && block "force-push rewrites history. Use --force-with-lease on your own branch, never on main."
     grep -qE -- '(^|[[:space:]:+])(refs/heads/)?(main|master)([[:space:]]|$)' <<<"$push" \
       && block "pushing to main or master. Push a branch and open a pull request; main changes only through a merged PR."
-    grep -qE -- '(^|[[:space:]])--(tags|follow-tags|mirror)([[:space:]]|$)|refs/tags/|(^|[[:space:]:])v[0-9]+\.[0-9]+\.[0-9]+([[:space:]]|$)' <<<"$push" \
+    grep -qE -- '(^|[[:space:]])--(tags|follow-tags|mirror|all)([[:space:]]|$)|refs/tags/|(^|[[:space:]:])v[0-9]+\.[0-9]+\.[0-9]+([[:space:]]|$)' <<<"$push" \
       && block "pushing tags. Only the release job tags, and only green commits on main."
     # No destination of its own ("git push", "git push origin", "git push origin HEAD"): git
     # pushes the current branch, so check which branch that is.
@@ -55,7 +57,7 @@ check() { # $1: one piece of the command
   fi
   if [[ $seg =~ (^|[^[:alnum:]_./-])git([[:space:]]+[^[:space:]]+)*[[:space:]]+tag([[:space:]]|$) ]]; then
     w="$(sed -E 's/.*[[:space:]]tag([[:space:]]|$)/tag /; s/[)}]+[[:space:]]*$//' <<<"$seg")"
-    grep -qE '^tag[[:space:]]*$|^tag[[:space:]]+(-l|--list|-n[0-9]*|--contains|--points-at|--merged|--no-merged|-v|--verify)([[:space:]]|$)' <<<"$w" \
+    grep -qE '^tag[[:space:]]*$|^tag[[:space:]]+(-l|--list|-n[0-9]*|--contains|--points-at|--merged|--no-merged|-v|--verify|--sort(=[^[:space:]]*)?|--format(=[^[:space:]]*)?|--column)([[:space:]]|$)' <<<"$w" \
       || block "creating or moving a tag. Only the release job tags, and only green commits on main."
   fi
   grep -qE '(^|[^[:alnum:]_./-])gh[[:space:]]+release[[:space:]]+(create|delete|edit|upload)' <<<"$seg" \
@@ -79,5 +81,5 @@ check() { # $1: one piece of the command
 
 while IFS= read -r seg; do
   [ -n "${seg//[[:space:]]/}" ] && check "$seg"
-done < <(strip_messages <<<"$cmd" | sed -E 's/(&&|\|\||;|\||\$\(|`|\(|\)|\{|\})/\n/g')
+done < <(strip_messages <<<"$cmd" | sed -E 's/(&&|\|\||;|\||&|\$\(|`|\(|\)|\{|\})/\n/g')
 exit 0

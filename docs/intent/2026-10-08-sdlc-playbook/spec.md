@@ -44,7 +44,7 @@
 
 **Proposed to web-baseline** (owner: Paul; not done by hand in the sites):
 1. Add CI-duration bands to `maintain-loop.yml`. It samples production today, not `verify`. Ship Gate's `ci-health` action does this. On real history it flags Playway, with three runs at 27.8–30.4 minutes.
-2. Add a failed-`verify` triage step (`triage` action). It needs an API key, and web-baseline deliberately runs no model in CI. So it should be opt-in, the way `MAINTAIN_LOOP` is.
+2. There is no second proposal: web-baseline already ships failed-build triage and agent evals as opt-in workflows (`agent-triage.yml`, `agent-evals.yml`, `tests/evals/`). A site turns them on through its standard.
 
 **Rollback rehearsal**
 - Ship Gate's `self-test` exercises the rollback path against a stub `wrangler`.

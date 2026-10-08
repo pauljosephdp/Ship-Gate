@@ -934,9 +934,11 @@ The `ci-health` and `triage` actions take any workflow, so a repo outside
 web-baseline can call them, for example
 `uses: pauljosephdp/Ship-Gate/ci-health@vX.Y.Z` with `workflow: ci.yml`. On the
 sites' real run history the bands flag Playway, with three runs at 27.8–30.4
-minutes, and pass Cocoon and MinuJoseph. CI-duration bands and failed-build
-triage are proposed to web-baseline, so the sites get them through their
-standard rather than as hand-added files.
+minutes, and pass Cocoon and MinuJoseph. web-baseline already offers
+failed-build triage and agent evals as opt-in workflows (`agent-triage.yml`,
+`agent-evals.yml`). CI-duration bands, which `maintain-loop.yml` lacks because
+it samples production, are proposed to web-baseline, so the sites get them
+through their standard rather than as hand-added files.
 
 **Claude in CI** needs the `ANTHROPIC_API_KEY` repository secret. Without it:
 - the review and triage note that and pass;

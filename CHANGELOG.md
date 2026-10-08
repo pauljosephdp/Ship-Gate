@@ -12,7 +12,7 @@ Ship Gate now works the way Anthropic's *AI-Native SDLC Playbook* describes, usi
 - `pauljosephdp/Ship-Gate/triage`: a read-only `claude -p` diagnosis of a failed run, posted on the PR. It passes with a notice when there is no API key.
 - In Ship Gate itself:
   - `docs/intent/` for each change's intent, spec and plan;
-  - `.claude/` hooks: `guard-bash` (no pushes to main, force pushes, `--no-verify`, tags, releases, `--admin` merges or wrangler production writes), `protect-tests` and `lint-shell`;
+  - `.claude/` hooks: `guard-bash` (no pushes to main, including a bare `git push origin` on main; no force pushes, `--no-verify`, tags, releases, `--admin` merges, wrangler production writes, or creating or deleting Cloudflare resources), `protect-tests` (also catches shell edits) and `lint-shell`;
   - a read-only `verifier` subagent;
   - `REVIEW.md`, `CODEOWNERS` and `claude.yml` (review on ready PRs, and `@claude` for collaborators);
   - a `triage` job in Self-test, and a weekly `ci-health.yml`;

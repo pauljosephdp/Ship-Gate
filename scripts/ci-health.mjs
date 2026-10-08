@@ -20,13 +20,13 @@ const SIGMA_FLOOR_MIN = 0.5; // minutes: identical runs must not make every wobb
 const minutes = (r) => (Date.parse(r.updated_at) - Date.parse(r.run_started_at ?? r.created_at)) / 60000;
 
 // Completed runs worth measuring, oldest first. Short runs are docs-only passes or superseded
-// cancellations; a cancelled run near the timeout is a timeout, and counts as a failure.
+// cancellations; a timed_out run, or a cancelled one near the timeout, counts as a failure.
 export function usableRuns(runs, timeoutMinutes) {
   return runs
     .filter((r) => r.status === 'completed')
     .map((r) => ({ id: r.id, url: r.html_url, at: r.run_started_at ?? r.created_at, min: minutes(r), conclusion: r.conclusion }))
     .filter((r) => r.min >= 1)
-    .filter((r) => r.conclusion === 'success' || r.conclusion === 'failure'
+    .filter((r) => r.conclusion === 'success' || r.conclusion === 'failure' || r.conclusion === 'timed_out'
       || (r.conclusion === 'cancelled' && r.min >= 0.9 * timeoutMinutes))
     .map((r) => ({ ...r, failed: r.conclusion !== 'success' }))
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));

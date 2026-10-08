@@ -909,12 +909,12 @@ one way.
 |---|---|
 | Plan, Design, Build: `intent.md`, `spec.md`, `plan.md` | `docs/intent/<date>-<name>/`, from `_template/`. `plan.md` is committed before code and updated with it |
 | Build: `CLAUDE.md` | Commands with their healthy output, how a change starts, conventions, and "Things Claude gets wrong" |
-| Build: hooks as guardrails | `.claude/settings.json` runs three hooks: `guard-bash.sh`, `protect-tests.sh` (asks before an existing test in `.claude/protected-tests.txt` changes) and `lint-shell.sh` (ShellCheck on edit). Self-test covers every rule |
+| Build: hooks as guardrails | `.claude/settings.json` runs three hooks: `guard-bash.sh`, `protect-tests.sh` (asks before an existing test in `.claude/protected-tests.txt` changes, whether through an edit or a shell command such as `sed -i`, a redirect or `rm`) and `lint-shell.sh` (ShellCheck on edit). Self-test covers every rule |
 | Build: subagents | `.claude/agents/verifier.md` runs the checks and reports; it never fixes |
 | Test: feedback loop | `self-test`, ShellCheck, the README check and the fixture suite, all run before a task is done |
 | Test: continuous evals | `evals/*.json` are real Ship Gate tasks with deterministic checks. `agent-evals.yml` runs them when `CLAUDE.md`, `REVIEW.md` or `.claude/` change, and weekly, and fails below `evals/threshold` |
 | Deploy: AI in PR review | `claude.yml` reviews ready pull requests against `REVIEW.md` and answers `@claude` from collaborators. `CODEOWNERS` names the approver |
-| Deploy: hooks as approval gates | `guard-bash.sh` blocks pushes to main, force pushes, `--no-verify`, tags, releases, `gh pr merge --admin` and wrangler production writes. Only the release job tags |
+| Deploy: hooks as approval gates | `guard-bash.sh` blocks pushes to main (including a bare `git push origin` while on main), force pushes, `--no-verify`, tags, releases, `gh pr merge --admin`, wrangler production writes, and creating or deleting Cloudflare buckets, namespaces and databases. Only the release job tags |
 | Deploy: CI/CD | The `triage` job in Self-test (`triage/`): a read-only `claude -p` diagnosis of a failed run, posted on the PR |
 | Maintain: closing the loop | `ci-health.yml` with `ci-health/` (`scripts/ci-health.mjs`): weekly control bands over Self-test |
 
@@ -924,7 +924,7 @@ mean and σ of the earlier ones as the baseline (σ at least 0.5 min). It then
 applies:
 - Western Electric rule 1: one of the latest 3 runs beyond 3σ;
 - Western Electric rule 2: two of the latest 3 beyond 2σ;
-- a near-timeout rule: a run within 20% of the job timeout;
+- a near-timeout rule: a run within 20% of the job timeout (a `timed_out` run counts as a failure too);
 - a failure-rate band: the latest 10 runs against the rest, beyond 3 binomial σ and at least 30%.
 
 Tier 1 logs. Tier 2 adds a read-only Claude diagnosis to the job summary. Tier 3

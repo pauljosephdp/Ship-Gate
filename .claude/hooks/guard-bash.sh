@@ -6,7 +6,8 @@
 #   - creating, pushing or publishing tags and releases: only Ship Gate's release job
 #     tags, and only green commits;
 #   - wrangler commands that deploy, roll back or write to production (deploy, rollback,
-#     secrets, remote D1, R2 and KV writes): Cloudflare Workers Builds deploys main, and
+#     secrets, remote D1, R2 and KV writes, and creating or deleting buckets, namespaces and
+#     databases): Cloudflare Workers Builds deploys main, and
 #     production changes are made by a person in the dashboard.
 # Exit 2 blocks the command; the message on stderr goes to Claude. Reads the hook JSON on stdin.
 set -uo pipefail
@@ -24,9 +25,12 @@ if has '(^|[;&|[:space:]])git[[:space:]]+([^;&|]*[[:space:]])?push([[:space:]]|$
     && block "pushing to main or master. Push a branch and open a pull request; main changes only through a merged PR."
   grep -qE -- '(^|[[:space:]])--(tags|follow-tags|mirror)([[:space:]]|$)|refs/tags/|(^|[[:space:]:])v[0-9]+\.[0-9]+\.[0-9]+([[:space:]]|$)' <<<"$push" \
     && block "pushing tags. Only the release job tags, and only green commits on main."
-  # A bare "git push" (no refspec) pushes the current branch.
-  if ! grep -qE 'push[[:space:]]+([^-[:space:]][^[:space:]]*[[:space:]]+)?[^-[:space:]]' <<<"$push"; then
-    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  # No destination of its own ("git push", "git push origin", "git push origin HEAD"): git pushes
+  # the current branch, so check which branch that is.
+  read -ra words <<<"${push#*push}"
+  args=(); for w in "${words[@]}"; do case "$w" in -*) ;; *) args+=("$w") ;; esac; done
+  if [ "${#args[@]}" -le 1 ] || { [ "${#args[@]}" -eq 2 ] && [ "${args[1]}" = HEAD ]; }; then
+    branch="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
     case "$branch" in main|master) block "you are on $branch; a bare git push would push to it. Work on a branch and open a pull request." ;; esac
   fi
 fi
@@ -46,5 +50,7 @@ if has '(^|[;&|[:space:]/])wrangler([[:space:]]|$)'; then
   has 'wrangler[[:space:]]+secret[[:space:]]+(put|delete|bulk)' && block "Worker secrets are set by a person in the dashboard, never by an agent."
   has 'wrangler[[:space:]]+d1[[:space:]][^;&|]*--remote' && block "a remote D1 command writes to or reads production data. Use --local."
   has 'wrangler[[:space:]]+(r2[[:space:]]+object|kv[[:space:]]+(key|bulk))[[:space:]]+(put|delete)' && block "R2 and KV writes change production data."
+  has 'wrangler[[:space:]]+(r2[[:space:]]+bucket|kv[[:space:]]+namespace|d1|queues|vectorize|hyperdrive)[[:space:]]+(create|delete|update)' \
+    && block "creating, changing or deleting a Cloudflare resource is a person's call in the dashboard."
 fi
 exit 0

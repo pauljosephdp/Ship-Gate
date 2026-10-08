@@ -40,6 +40,13 @@ test('timed-out cancellations count; superseded short cancellations do not', () 
   assert.equal(used[0].failed, true);
 });
 
+test('timed_out runs count as failures and near-timeouts', () => {
+  const used = usableRuns([run(0, 30.1, 'timed_out')], 30);
+  assert.equal(used.length, 1);
+  assert.equal(used[0].failed, true);
+  assert.equal(evaluate([run(0, 10), run(1, 10), run(2, 30.1, 'timed_out')], { timeoutMinutes: 30 }).tier, 3);
+});
+
 test('a run of failures: tier 2', () => {
   const runs = [...steady(20), ...Array.from({ length: 10 }, (_, i) => run(20 + i, 10, i % 2 ? 'failure' : 'success'))];
   const r = evaluate(runs, { timeoutMinutes: 30 });

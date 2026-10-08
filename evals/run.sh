@@ -3,7 +3,8 @@
 # run against the agent's configuration (CLAUDE.md, REVIEW.md, .claude/). Each eval runs
 # `claude -p` in a fresh worktree of HEAD, then its check there; $RESULT holds Claude's answer.
 #   evals/run.sh [eval.json ...]     (default: every evals/*.json)
-# Fails when the pass rate is below evals/threshold. Needs ANTHROPIC_API_KEY and claude on PATH.
+# Fails when the pass rate is below evals/threshold. Runs in a Claude Code cloud session (claude on
+# PATH, the session's own subscription); no CI job runs it and no API key is needed, like web-baseline.
 set -uo pipefail
 root="$(git rev-parse --show-toplevel)"; cd "$root" || exit 1
 files=("$@"); [ ${#files[@]} -gt 0 ] || files=(evals/*.json)
@@ -17,7 +18,7 @@ for f in "${files[@]}"; do
     export CLAUDE_PROJECT_DIR="$wt" RESULT="$work/$id.out"
     timeout 900 claude -p "$(jq -r .prompt "$root/$f")" \
       --permission-mode acceptEdits \
-      --allowedTools "Read,Edit,Write,Grep,Glob,Bash(bash scripts/self-test.sh),Bash(bash scripts/check-readme.sh:*),Bash(shellcheck:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git tag:*),Bash(gh release:*),Bash(node --test:*)" \
+      --allowedTools "Read,Edit,Write,Grep,Glob,Bash(bash scripts/self-test.sh),Bash(bash scripts/check-readme.sh:*),Bash(shellcheck:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(node --test:*)" \
       --output-format text > "$RESULT" 2>&1
     bash -c "$(jq -r .check "$root/$f")"
   ) > "$work/$id.check" 2>&1

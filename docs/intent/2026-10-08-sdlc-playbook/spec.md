@@ -18,23 +18,24 @@
 
 **Test: evals**
 - `evals/*.json` hold real tasks, each with a deterministic check.
-- `agent-evals.yml` runs them when the configuration changes, and weekly. It fails below `evals/threshold`.
+- `bash evals/run.sh` runs them in a cloud session when the configuration changes. The pass rate must reach `evals/threshold`.
+- No CI job runs the evals, as in web-baseline.
 
 **Deploy: PR review**
 - `REVIEW.md`, with a `TALLY:` line like web-baseline's.
-- `claude.yml` reviews ready PRs and answers `@claude`.
+- The session's `reviewer` subagent runs the passes before the first push, and the push waits for `important=0`.
 - `CODEOWNERS` names the approver.
 
 **Deploy: CI/CD**
-- The `triage/` action, and a `triage` job in Self-test.
+- A red run is fixed from a cloud session. No model runs in CI.
 
 **Maintain**
-- The `ci-health/` action, with `scripts/ci-health.mjs`.
+- The `ci-health/` action, with `scripts/ci-health.mjs`. Tier 2 and 3 open an `intent.md` issue, and no model runs.
 - A weekly `ci-health.yml` over Self-test.
 
 **Sites**
-- Each site moves its Ship Gate pins to v3.13.0, which also brings v3.12.0's faster `verify`.
-- That is one PR per site, following its `CLAUDE.md` (web-baseline's release policy).
+- The pins are web-baseline template lines, so conformance fails a hand-made bump; this was confirmed on MinuJoseph. Sites therefore move to v3.13.0 through a web-baseline release in `pauljosephdp/Skills`, rolled out by `ops/upgrade-all.yml`.
+- Every site fails `audit:deps` on `main` (GHSA-wq5f-xc86-pv6w, `sharp` <0.35.5, pulled in through miniflare). Each site gets one PR adding `"overrides": {"sharp": "0.35.5"}`. This passes conformance.
 
 ## Areas of concern
 **web-baseline already implements the playbook in every site.** Found during the build.
@@ -43,19 +44,18 @@
 - **Decision (owner, 2026-10-08):** sites get a pin bump only, and Ship Gate drops its site templates.
 
 **Proposed to web-baseline** (owner: Paul; not done by hand in the sites):
-1. Add CI-duration bands to `maintain-loop.yml`. It samples production today, not `verify`. Ship Gate's `ci-health` action does this. On real history it flags Playway, with three runs at 27.8–30.4 minutes.
-2. There is no second proposal: web-baseline already ships failed-build triage and agent evals as opt-in workflows (`agent-triage.yml`, `agent-evals.yml`, `tests/evals/`). A site turns them on through its standard.
+1. Add CI-duration bands to `maintain-loop.yml`. It already bands production and the CI failure rate, but not how long `verify` takes. Ship Gate's `ci-health` action does this. On real history it flags Playway, with three runs at 27.8–30.4 minutes.
+2. Adopt Ship Gate v3.13.0 (`sync-ship-gate.mjs`) and fix the `sharp` advisory in the standard. The per-site `sharp` override PRs are the stopgap.
 
 **Rollback rehearsal**
 - Ship Gate's `self-test` exercises the rollback path against a stub `wrangler`.
 - web-baseline's `revert-on-red.yml` is the runbook.
 - There is no staging, and no Cloudflare tokens may sit in workflows.
 
-**Cost**
-- Reviews run only on ready PRs.
-- Evals run on configuration change, and weekly.
-- Triage runs only on failure.
-- The diagnosis runs only at tier 2 or above.
+**No model in CI** (owner, 2026-10-08)
+- web-baseline removed the Anthropic key from the delivery chain.
+- Ship Gate follows it: no `claude.yml`, no triage action, and no CI eval job.
+- Self-test fails if a workflow calls Claude.
 
 ## Out of scope
 - Org-wide managed settings.

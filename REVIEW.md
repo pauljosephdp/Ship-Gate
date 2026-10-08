@@ -1,6 +1,6 @@
 # Review instructions
 
-Read by the Claude review (`.github/workflows/claude.yml`) on every pull request that is ready for review. A person reviewing the PR can use it too. The findings inform the code owner, who approves; the review neither approves nor blocks a PR on its own.
+Read by the session's fresh-context `reviewer` subagent (`.claude/agents/reviewer.md`) before the first push, the same way web-baseline sites work; no model runs in CI. Codex and people reviewing the PR use it too. The findings inform the code owner, who approves; the review neither approves nor blocks a PR on its own.
 
 ## Passes
 Run three passes, and tag each finding with the pass it came from.
@@ -23,7 +23,7 @@ Reserve **Important** for findings that would:
 Style, naming and wording are nits.
 
 ## Tally
-End every review with one machine-readable line, the same one web-baseline sites use:
+End every review with one machine-readable line, the same one web-baseline sites use. The push waits until `important=0`:
 
 `TALLY: important=<n> nits=<n> passes=bugs,security,compliance`
 

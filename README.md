@@ -901,22 +901,25 @@ Claxton, Anthropic):
 The sites get the same playbook from **web-baseline**: `docs/intent/`,
 `REVIEW.md`, `.claude/` hooks, agents and skills, `maintain-loop.yml`,
 `revert-on-red.yml` and `critical-gate.yml`. Those are web-baseline's standard
-files, so the caller templates here never ship them. Ship Gate uses the same
-layout (`docs/intent/`, a `TALLY:` line in `REVIEW.md`), so the portfolio reads
-one way.
+files, so the caller templates here never ship them.
+
+Ship Gate follows web-baseline's rules too:
+- the same layout (`docs/intent/`, a `TALLY:` line in `REVIEW.md`);
+- **no model in CI and no Anthropic key**. Review, failed-run triage and evals
+  are cloud-session work. Self-test fails if a workflow or action calls Claude.
 
 | Play | In Ship Gate (v3.13.0) |
 |---|---|
 | Plan, Design, Build: `intent.md`, `spec.md`, `plan.md` | `docs/intent/<date>-<name>/`, from `_template/`. `plan.md` is committed before code and updated with it |
 | Build: `CLAUDE.md` | Commands with their healthy output, how a change starts, conventions, and "Things Claude gets wrong" |
-| Build: hooks as guardrails | `.claude/settings.json` runs three hooks: `guard-bash.sh`, `protect-tests.sh` (asks before an existing test in `.claude/protected-tests.txt` changes, whether through an edit or a shell command such as `sed -i`, a redirect or `rm`) and `lint-shell.sh` (ShellCheck on edit). Self-test covers every rule |
-| Build: subagents | `.claude/agents/verifier.md` runs the checks and reports; it never fixes |
+| Build: hooks as guardrails | `.claude/settings.json` wires three hooks: `guard-bash.sh`, `protect-tests.sh` and `lint-shell.sh`. `protect-tests.sh` asks before an existing test in `.claude/protected-tests.txt` changes, through an edit or a shell command such as `sed -i`, a redirect or `rm`. `lint-shell.sh` runs ShellCheck on edit |
+| Build: subagents | `verifier` runs the checks and reports. `reviewer` runs the `REVIEW.md` passes, and adversarially on a risky change. Neither edits anything |
 | Test: feedback loop | `self-test`, ShellCheck, the README check and the fixture suite, all run before a task is done |
-| Test: continuous evals | `evals/*.json` are real Ship Gate tasks with deterministic checks. `agent-evals.yml` runs them when `CLAUDE.md`, `REVIEW.md` or `.claude/` change, and weekly, and fails below `evals/threshold` |
-| Deploy: AI in PR review | `claude.yml` reviews ready pull requests against `REVIEW.md` and answers `@claude` from collaborators. `CODEOWNERS` names the approver |
-| Deploy: hooks as approval gates | `guard-bash.sh` blocks pushes to main (including a bare `git push origin` while on main), force pushes, `--no-verify`, tags, releases, `gh pr merge --admin`, wrangler production writes, and creating or deleting Cloudflare buckets, namespaces and databases. Only the release job tags |
-| Deploy: CI/CD | The `triage` job in Self-test (`triage/`): a read-only `claude -p` diagnosis of a failed run, posted on the PR |
-| Maintain: closing the loop | `ci-health.yml` with `ci-health/` (`scripts/ci-health.mjs`): weekly control bands over Self-test |
+| Test: evals | `evals/*.json` are real Ship Gate tasks with deterministic checks. `bash evals/run.sh` runs them in a cloud session when `CLAUDE.md`, `REVIEW.md` or `.claude/` change, and the pass rate must reach `evals/threshold` |
+| Deploy: PR review | The `reviewer` subagent runs before the first push, and the push waits for `TALLY: important=0`. Codex reviews the PR. `CODEOWNERS` names the approver |
+| Deploy: hooks as approval gates | `guard-bash.sh` blocks pushes to main (including a bare `git push origin` while on main), force pushes, `--no-verify`, tags, releases and `gh pr merge --admin`. It also blocks wrangler production writes and creating or deleting Cloudflare buckets, namespaces and databases. Only the release job tags |
+| Deploy: CI/CD | A red run is fixed from a cloud session, as on the sites (`/babysit-pr`) |
+| Maintain: closing the loop | `ci-health.yml` runs `ci-health/` (`scripts/ci-health.mjs`) weekly: control bands over Self-test |
 
 **CI health.** `scripts/ci-health.mjs` is deterministic and unit tested
 (`test/ci-health.test.mjs`). It reads the last 30 completed runs and takes the
@@ -927,31 +930,24 @@ applies:
 - a near-timeout rule: a run within 20% of the job timeout (a `timed_out` run counts as a failure too);
 - a failure-rate band: the latest 10 runs against the rest, beyond 3 binomial σ and at least 30%.
 
-Tier 1 logs. Tier 2 adds a read-only Claude diagnosis to the job summary. Tier 3
-also opens one issue, or comments on the open one, written as an `intent.md`.
+Tier 1 logs. Tier 2 and 3 open one issue, or comment on the open one, written as
+an `intent.md`. A cloud session then diagnoses the issue read-only. No model runs
+in the workflow.
 
-The `ci-health` and `triage` actions take any workflow, so a repo outside
-web-baseline can call them, for example
-`uses: pauljosephdp/Ship-Gate/ci-health@vX.Y.Z` with `workflow: ci.yml`. On the
-sites' real run history the bands flag Playway, with three runs at 27.8–30.4
-minutes, and pass Cocoon and MinuJoseph. web-baseline already offers
-failed-build triage and agent evals as opt-in workflows (`agent-triage.yml`,
-`agent-evals.yml`). CI-duration bands, which `maintain-loop.yml` lacks because
-it samples production, are proposed to web-baseline, so the sites get them
-through their standard rather than as hand-added files.
+Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
 
-**Claude in CI** needs the `ANTHROPIC_API_KEY` repository secret. Without it:
-- the review and triage note that and pass;
-- the evals warn and pass;
-- CI health runs its bands without a diagnosis.
+```yaml
+- uses: pauljosephdp/Ship-Gate/ci-health@v3.13.0
+  with:
+    workflow: ci.yml        # the workflow to watch
+    timeout-minutes: 30     # its job timeout
+    event: pull_request     # only runs of this event (push for a main-only workflow)
+```
 
-Cost stays bounded:
-- reviews run only on ready pull requests and their pushes;
-- triage runs only after a failure;
-- evals run only when the agent's configuration changes, and weekly;
-- the diagnosis runs only at tier 2 or above.
-
-The Claude Code CLI is pinned (`claude-code-version`, default 2.1.293).
+On the sites' real run history the bands flag Playway, with three runs at
+27.8–30.4 minutes, and pass Cocoon and MinuJoseph. web-baseline's
+`maintain-loop.yml` already bands the CI failure rate, but not CI duration. The
+duration bands are proposed to web-baseline, alongside adopting this release.
 
 **Not adopted, on purpose.**
 - **Rollback rehearsal in staging.** The sites deploy production only, and

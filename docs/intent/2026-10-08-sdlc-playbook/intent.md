@@ -23,7 +23,7 @@ The sites already follow the playbook through web-baseline 6.1.1. This was found
 - Nothing in CI writes to production.
 - Only the release job tags.
 - No test is weakened.
-- Claude in CI uses the repo's `ANTHROPIC_API_KEY` secret, which the owner adds.
+- No model in CI and no Anthropic key, as in web-baseline. Review, triage and evals are cloud-session work. The owner decided this on 2026-10-08.
 
 ## Open questions
 - Rollback rehearsal: the playbook rehearses rollback in staging. The sites have no staging environment, and their policy keeps Cloudflare tokens out of workflows. See spec.md.

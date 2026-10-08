@@ -331,23 +331,6 @@ jobs:
           path: ${{ runner.temp }}/fixtures-passed.txt
           retention-days: 7
 
-  # A failed pull request run gets a read-only Claude diagnosis on the PR (./triage).
-  triage:
-    name: triage
-    needs: [self-test, fixture]
-    if: failure() && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./triage
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-
   # Every push to main that passes every check above publishes the version named by
   # the newest CHANGELOG.md heading, once. Sites pin these tags, so a release never
   # tags a red commit. A manual run on main re-runs every check, then releases.

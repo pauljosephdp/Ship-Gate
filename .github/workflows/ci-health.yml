@@ -1,6 +1,6 @@
 # Closing the loop (AI-native SDLC, Maintain stage): weekly control bands over Self-test's
-# duration and failure rate (scripts/ci-health.mjs, via ./ci-health). Tier 2 gets a read-only
-# Claude diagnosis in the job summary; tier 3 opens or updates one issue written as intent.md.
+# duration and failure rate (scripts/ci-health.mjs, via ./ci-health). No model runs: tier 2 and 3
+# open or update one issue written as intent.md, which a cloud session diagnoses.
 name: CI health
 
 on:
@@ -23,4 +23,4 @@ jobs:
         with:
           workflow: self-test.yml
           timeout-minutes: 30
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          event: push

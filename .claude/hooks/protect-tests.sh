@@ -28,7 +28,9 @@ ask() {
 }
 cmd="$(jq -r '.tool_input.command // ""' <<<"$input" 2>/dev/null)"
 if [ -n "$cmd" ]; then
-  grep -qE '(sed|perl)[[:space:]]+(-[a-zA-Z]*i|--in-place)|>|(^|[;&|[:space:]])(tee|rm|mv|cp|truncate)[[:space:]]|git[[:space:]]+(checkout|restore)[[:space:]]' <<<"$cmd" || exit 0
+  # Redirects that only move a stream (2>&1, >/dev/null) write no file.
+  writes="$(sed -E 's/[0-9]*>&[0-9-]+//g; s#[0-9]*>>?[[:space:]]*/dev/null##g' <<<"$cmd")"
+  grep -qE '(sed|perl)[[:space:]]+(-[a-zA-Z]*i|--in-place)|>|(^|[;&|[:space:]])(tee|rm|mv|cp|truncate)[[:space:]]|git[[:space:]]+(checkout|restore)[[:space:]]' <<<"$writes" || exit 0
   for w in $cmd; do
     w="${w#\"}"; w="${w%\"}"; w="${w#\'}"; w="${w%\'}"; w="${w#>}"; w="${w#"$root"/}"; w="${w#./}"
     [ -n "$w" ] && [ -f "$root/$w" ] && protected "$w" && ask "$w"

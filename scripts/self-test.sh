@@ -949,7 +949,7 @@ n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/work
 m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"
 if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi
 
-echo "AI-native SDLC: hooks, review, triage, CI health"
+echo "AI-native SDLC: hooks, review, CI health"
 HOOKS="$HERE/../.claude/hooks"
 hook_case() {
   local want=$1 cmd=$2 got
@@ -984,6 +984,16 @@ on_main_case() {
   rm -rf "$d"
 }
 on_main_case
+hook_case 2 'git push -u origin claude/x && git push origin main'
+hook_case 2 'git push origin claude/x; git push origin v3.13.0'
+hook_case 2 $'git status\ngit push origin main'
+hook_case 2 'git tag -l && git tag v9.9.9'
+hook_case 2 'git push origin +claude/x'
+hook_case 2 "git push origin 'main'"
+hook_case 2 'git -C site push origin HEAD:main'
+hook_case 2 'npx wrangler pages deploy dist'
+hook_case 0 'git commit -m "guard: block git push origin main for agents"'
+hook_case 0 'gh pr create --title x --body "never git push origin main here"'
 hook_case 0 'git push -u origin claude/feature'
 hook_case 0 'git push --force-with-lease origin claude/feature'
 hook_case 0 'git push origin main-docs'
@@ -1018,7 +1028,9 @@ protect_bash_case "asks before overwriting a test"       ask   "echo ok > tests/
 protect_bash_case "asks before deleting a test"          ask   "rm tests/a.test.ts"
 protect_bash_case "reading a test needs no approval"     allow "cat tests/a.test.ts"
 protect_bash_case "running the tests needs no approval"  allow "npx vitest run tests/a.test.ts"
-for f in REVIEW.md .github/CODEOWNERS .claude/protected-tests.txt .claude/agents/verifier.md \
+protect_bash_case "a test run with 2>&1 needs no approval" allow "npx vitest run tests/a.test.ts 2>&1 | tail"
+protect_bash_case "a test run to /dev/null needs no approval" allow "bash tests/a.test.ts > /dev/null"
+for f in REVIEW.md .github/CODEOWNERS .claude/protected-tests.txt .claude/agents/verifier.md .claude/agents/reviewer.md \
          docs/intent/README.md docs/intent/_template/intent.md docs/intent/_template/spec.md docs/intent/_template/plan.md; do
   if [ -s "$HERE/../$f" ]; then ok "Ship Gate has $f"; else bad "Ship Gate has $f" "missing" ""; fi
 done
@@ -1028,15 +1040,11 @@ else bad "guard-bash hook wired" ".claude/settings.json does not run it" ""; fi
 if [ -e "$HERE/../templates/caller/.claude" ] || [ -e "$HERE/../templates/caller/REVIEW.md" ]; then
   bad "no playbook files in the caller templates" "web-baseline owns the sites' .claude/ and REVIEW.md" ""
 else ok "no playbook files in the caller templates (web-baseline owns them)"; fi
-cost_case "review skips drafts"                         .github/workflows/claude.yml 'github.event.pull_request.draft == false'
-cost_case "review skips Dependabot (no secrets)"        .github/workflows/claude.yml "github.event.pull_request.user.login != 'dependabot[bot]'"
-cost_case "@claude only for collaborators"              .github/workflows/claude.yml 'OWNER","MEMBER","COLLABORATOR'
-cost_case "review passes without an API key"            .github/workflows/claude.yml "if: steps.key.outputs.present == 'true'"
-cost_case "self-test triages a failed run"              .github/workflows/self-test.yml 'uses: ./triage'
 cost_case "CI health watches self-test weekly"          .github/workflows/ci-health.yml 'workflow: self-test.yml'
-cost_case "triage skips without an API key"             triage/action.yml 'No ANTHROPIC_API_KEY secret'
-cost_case "triage is read-only"                         triage/action.yml '--allowedTools "Read,Grep,Glob"'
 cost_case "CI health opens one issue, not many"         ci-health/action.yml 'gh issue comment'
+if grep -rqiE 'ANTHROPIC_API_KEY|anthropics/claude-code-action|claude -p' "$HERE/../.github" "$HERE/../ci-health" "$HERE/../action.yml" "$HERE/../post-deploy" "$HERE/../templates"; then
+  bad "no model in CI (web-baseline policy)" "a workflow or action calls Claude or reads ANTHROPIC_API_KEY" ""
+else ok "no model in CI (web-baseline policy)"; fi
 
 echo "Template unit tests (node --test test/*.test.mjs)"
 if out="$(node --test "$HERE"/../test/*.test.mjs 2>&1)"; then ok "posthog-proxy, ci-health and other unit tests pass"

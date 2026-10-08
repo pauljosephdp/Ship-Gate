@@ -1,0 +1,59 @@
+name: Ship Gate — CI health
+description: >
+  Control bands over a workflow's recent runs (duration and failure rate). Detection is
+  deterministic (scripts/ci-health.mjs) and no model runs: tier 1 logs to the job summary; tier 2
+  and 3 (a 2σ drift, a 3σ breach or a run near the timeout) open or update one issue, written as
+  an intent.md, that a Claude Code cloud session diagnoses read-only. Needs actions: read and
+  issues: write.
+author: Ship Gate
+inputs:
+  workflow:
+    description: The workflow file to watch, e.g. ci.yml.
+    default: ci.yml
+  timeout-minutes:
+    description: That workflow's job timeout, in minutes.
+    default: "30"
+  event:
+    description: >
+      Only runs triggered by this event, so short runs of another kind (drafts, docs-only passes)
+      don't widen the bands. pull_request for a site's ci.yml; push for Ship Gate's Self-test on main.
+    default: pull_request
+runs:
+  using: composite
+  steps:
+    - name: Recent runs
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        WORKFLOW: ${{ inputs.workflow }}
+        EVENT: ${{ inputs.event }}
+      run: |
+        gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW/runs?status=completed&event=$EVENT&per_page=30" > "$RUNNER_TEMP/runs.json"
+
+    - name: Control bands
+      id: bands
+      shell: bash
+      env:
+        TIMEOUT: ${{ inputs.timeout-minutes }}
+        WORKFLOW: ${{ inputs.workflow }}
+      run: |
+        node "$GITHUB_ACTION_PATH/../scripts/ci-health.mjs" "$RUNNER_TEMP/runs.json" --timeout "$TIMEOUT" | tee "$RUNNER_TEMP/bands.json"
+        { echo "## CI health: $WORKFLOW"; echo; echo '```json'; cat "$RUNNER_TEMP/bands.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Open or update the CI health issue (tier 2 and 3)
+      if: steps.bands.outputs.tier >= 2
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        WORKFLOW: ${{ inputs.workflow }}
+      run: |
+        title="CI health: $WORKFLOW breached its control band"
+        body="$RUNNER_TEMP/issue.md"
+        { echo "# Intent: $WORKFLOW is outside its control band"; echo "Author: CI health (scripts/ci-health.mjs). Status: draft."; echo
+          echo "## Problem"; echo; echo "The band result (latest runs, mean, σ, the rules that fired):"; echo; echo '```json'; cat "$RUNNER_TEMP/bands.json"; echo '```'; echo
+          echo "## Proposed outcome"; echo; echo "Bring $WORKFLOW back inside its band, so no run comes near the job timeout."; echo
+          echo "## Next step"; echo; echo "A Claude Code cloud session diagnoses this read-only: compare the latest runs' step timings and failures with earlier runs (\`gh run view <id> --json jobs\`), then rewrite this as a full intent.md (affected systems, constraints, open questions)."; } > "$body"
+        printf '\n---\nTriage: accept by committing this as docs/intent/<date>-<name>/intent.md, schedule, or close it (a close tunes the bands). Run: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> "$body"
+        n="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+        if [ -n "$n" ]; then gh issue comment "$n" --repo "$GITHUB_REPOSITORY" --body-file "$body"; echo "Updated issue #$n."
+        else gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$body"; fi

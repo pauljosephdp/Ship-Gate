@@ -1,0 +1,7 @@
+# Existing tests an agent may not change without a person's approval (.claude/hooks/protect-tests.sh).
+# The fixture expectations and the browser specs are the checks on Ship Gate itself.
+test/expect-gate.sh
+test/break-fixture.sh
+test/*.test.mjs
+e2e/*.spec.ts
+evals/*.json

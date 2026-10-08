@@ -1,0 +1,6 @@
+{
+  "id": "readme-with-behaviour",
+  "why": "CLAUDE.md: every change to what Ship Gate does updates README.md where a reader would look.",
+  "prompt": "Change Ship Gate's default reflowWidths to [320, 360, 375, 390]. Do not commit.",
+  "check": "grep -q 'DEFAULT_REFLOW_WIDTHS = \\[320, 360, 375, 390\\]' scripts/prepare.mjs && git diff --name-only | grep -qx README.md && git diff README.md | grep -q '^+.*375'"
+}

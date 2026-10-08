@@ -949,8 +949,125 @@ n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/work
 m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"
 if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi
 
+echo "AI-native SDLC: hooks, review, CI health"
+HOOKS="$HERE/../.claude/hooks"
+hook_case() {
+  local want=$1 cmd=$2 got
+  printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | bash "$HOOKS/guard-bash.sh" >/dev/null 2>&1; got=$?
+  if [ "$got" = "$want" ]; then ok "guard-bash: $( [ "$want" = 2 ] && echo blocks || echo allows ) $cmd"
+  else bad "guard-bash: $cmd" "exit $got, expected $want" ""; fi
+}
+hook_case 2 'git push origin main'
+hook_case 2 'git push origin HEAD:main'
+hook_case 2 'cd site && git push -f origin feature'
+hook_case 2 'git push --tags'
+hook_case 2 'git tag v9.9.9'
+hook_case 2 'gh release create v9.9.9'
+hook_case 2 'gh pr merge 7 --admin'
+hook_case 2 'git commit --no-verify -m wip'
+hook_case 2 'npx wrangler deploy'
+hook_case 2 'wrangler secret put API_KEY'
+hook_case 2 'wrangler d1 migrations apply db --remote'
+hook_case 2 'wrangler r2 object put bucket/key --file x'
+hook_case 2 'wrangler r2 bucket delete media'
+hook_case 2 'npx wrangler kv namespace delete --namespace-id abc'
+hook_case 2 'wrangler d1 delete site-db'
+on_main_case() {
+  local d out got; d="$(mktemp -d)"; git -C "$d" init -q -b main
+  for cmd in 'git push origin' 'git push origin HEAD' 'git push'; do
+    (cd "$d" && printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | bash "$HOOKS/guard-bash.sh" >/dev/null 2>&1); got=$?
+    if [ "$got" = 2 ]; then ok "guard-bash: blocks '$cmd' while on main"; else bad "guard-bash: '$cmd' on main" "exit $got, expected 2" ""; fi
+  done
+  git -C "$d" checkout -q -b claude/x
+  (cd "$d" && printf 'git push origin HEAD' | jq -Rs '{tool_input:{command:.}}' | bash "$HOOKS/guard-bash.sh" >/dev/null 2>&1); got=$?
+  if [ "$got" = 0 ]; then ok "guard-bash: allows 'git push origin HEAD' on a branch"; else bad "guard-bash: push HEAD on a branch" "exit $got, expected 0" ""; fi
+  rm -rf "$d"
+}
+on_main_case
+hook_case 2 'git push -u origin claude/x && git push origin main'
+hook_case 2 'git push origin claude/x; git push origin v3.13.0'
+hook_case 2 $'git status\ngit push origin main'
+hook_case 2 'git tag -l && git tag v9.9.9'
+hook_case 2 'git push origin +claude/x'
+hook_case 2 "git push origin 'main'"
+hook_case 2 'git -C site push origin HEAD:main'
+hook_case 2 'npx wrangler pages deploy dist'
+hook_case 2 'if true; then git push origin main; fi'
+hook_case 2 'timeout 120 git push origin main'
+hook_case 2 'nohup git push origin main &'
+hook_case 2 'env GIT_TRACE=1 git push origin main'
+hook_case 2 '(cd ../x && git push origin main)'
+hook_case 2 'git push origin main>/dev/null'
+hook_case 2 'git --no-pager push origin main'
+hook_case 2 'bash -c "git push origin main"'
+hook_case 2 'echo $(git push origin main)'
+hook_case 2 'git commit -nm wip'
+hook_case 2 'npx --yes wrangler deploy'
+hook_case 2 'pnpm dlx wrangler@4 deploy'
+hook_case 2 'npm exec wrangler -- deploy'
+hook_case 0 'git commit -m "x; then git push origin main && git tag v1.0.0"'
+hook_case 0 $'git commit -F - <<\'EOF\'\nfix: guard\n\ngit tag v3.13.0 and git push origin main are blocked\nEOF'
+hook_case 0 'git commit -m "guard: block git push origin main for agents"'
+hook_case 0 'gh pr create --title x --body "never git push origin main here"'
+hook_case 2 'git push --all origin'
+hook_case 2 'git push origin main&'
+hook_case 0 'grep -rn "git push origin main" README.md'
+hook_case 0 "rg 'git tag v' docs"
+hook_case 0 'git tag --sort=-v:refname | head'
+hook_case 0 'git push -u origin claude/feature'
+hook_case 0 'git push --force-with-lease origin claude/feature'
+hook_case 0 'git push origin main-docs'
+hook_case 0 'git tag -l'
+hook_case 0 'gh release view v3.12.0'
+hook_case 0 'npx wrangler dev'
+hook_case 0 'wrangler d1 execute db --local --command "select 1"'
+hook_case 0 'git log origin/main..HEAD'
+protect_case() {
+  local name=$1 want=$2 file=$3 d out; d="$(mktemp -d)"
+  mkdir -p "$d/.claude" "$d/tests" && printf 'tests/**\n**/*.spec.*\n' > "$d/.claude/protected-tests.txt"
+  echo x > "$d/tests/a.test.ts"; echo x > "$d/src.spec.ts"
+  out="$(jq -n --arg f "$d/$file" '{tool_input:{file_path:$f}}' | CLAUDE_PROJECT_DIR="$d" bash "$HOOKS/protect-tests.sh")"
+  if grep -q '"permissionDecision": "ask"' <<<"$out"; then got=ask; else got=allow; fi
+  if [ "$got" = "$want" ]; then ok "protect-tests: $name"; else bad "protect-tests: $name" "got $got, expected $want" "$out"; fi
+  rm -rf "$d"
+}
+protect_case "asks before changing an existing test" ask tests/a.test.ts
+protect_case "asks for a matching glob anywhere"    ask src.spec.ts
+protect_case "a new test needs no approval"          allow tests/new.test.ts
+protect_case "other files need no approval"          allow README.md
+protect_bash_case() {
+  local name=$1 want=$2 cmd=$3 d out got; d="$(mktemp -d)"
+  mkdir -p "$d/.claude" "$d/tests" && printf 'tests/**\n' > "$d/.claude/protected-tests.txt"; echo x > "$d/tests/a.test.ts"
+  out="$(printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | CLAUDE_PROJECT_DIR="$d" bash "$HOOKS/protect-tests.sh")"
+  if grep -q '"permissionDecision": "ask"' <<<"$out"; then got=ask; else got=allow; fi
+  if [ "$got" = "$want" ]; then ok "protect-tests: $name"; else bad "protect-tests: $name" "got $got, expected $want" "$out"; fi
+  rm -rf "$d"
+}
+protect_bash_case "asks before sed -i on a test"         ask   "sed -i 's/expect/skip/' tests/a.test.ts"
+protect_bash_case "asks before overwriting a test"       ask   "echo ok > tests/a.test.ts"
+protect_bash_case "asks before deleting a test"          ask   "rm tests/a.test.ts"
+protect_bash_case "reading a test needs no approval"     allow "cat tests/a.test.ts"
+protect_bash_case "running the tests needs no approval"  allow "npx vitest run tests/a.test.ts"
+protect_bash_case "a test run with 2>&1 needs no approval" allow "npx vitest run tests/a.test.ts 2>&1 | tail"
+protect_bash_case "a test run to /dev/null needs no approval" allow "bash tests/a.test.ts > /dev/null"
+for f in REVIEW.md .github/CODEOWNERS .claude/protected-tests.txt .claude/agents/verifier.md .claude/agents/reviewer.md \
+         docs/intent/README.md docs/intent/_template/intent.md docs/intent/_template/spec.md docs/intent/_template/plan.md; do
+  if [ -s "$HERE/../$f" ]; then ok "Ship Gate has $f"; else bad "Ship Gate has $f" "missing" ""; fi
+done
+if jq -e '.hooks.PreToolUse[0].hooks[0].command | test("guard-bash.sh")' "$HERE/../.claude/settings.json" >/dev/null; then
+  ok "Ship Gate wires the guard-bash hook"
+else bad "guard-bash hook wired" ".claude/settings.json does not run it" ""; fi
+if [ -e "$HERE/../templates/caller/.claude" ] || [ -e "$HERE/../templates/caller/REVIEW.md" ]; then
+  bad "no playbook files in the caller templates" "web-baseline owns the sites' .claude/ and REVIEW.md" ""
+else ok "no playbook files in the caller templates (web-baseline owns them)"; fi
+cost_case "CI health watches self-test weekly"          .github/workflows/ci-health.yml 'workflow: self-test.yml'
+cost_case "CI health opens one issue, not many"         ci-health/action.yml 'gh issue comment'
+if grep -rqiE 'ANTHROPIC_API_KEY|anthropics/claude-code-action|claude -p' "$HERE/../.github" "$HERE/../ci-health" "$HERE/../action.yml" "$HERE/../post-deploy" "$HERE/../templates"; then
+  bad "no model in CI (web-baseline policy)" "a workflow or action calls Claude or reads ANTHROPIC_API_KEY" ""
+else ok "no model in CI (web-baseline policy)"; fi
+
 echo "Template unit tests (node --test test/*.test.mjs)"
-if out="$(node --test "$HERE"/../test/*.test.mjs 2>&1)"; then ok "posthog-proxy and other template tests pass"
+if out="$(node --test "$HERE"/../test/*.test.mjs 2>&1)"; then ok "posthog-proxy, ci-health and other unit tests pass"
 else bad "template unit tests" "node --test failed" "$(grep -E '^not ok|Error|expected|actual' <<<"$out" | head -20)"; fi
 
 echo

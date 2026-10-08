@@ -1,5 +1,27 @@
 # Changelog
 
+## v3.13.0 — 2026-10-08
+
+Ship Gate now works the way Anthropic's *AI-Native SDLC Playbook* describes. It follows web-baseline's layout and policy: `docs/intent/`, a `TALLY:` line in `REVIEW.md`, and no model in CI. The `verify` action and the caller templates are unchanged apart from the version pins. Sites take this release through web-baseline (`references/ship-gate.json`), which also brings v3.12.0's faster `verify`.
+
+**Added**
+- `pauljosephdp/Ship-Gate/ci-health`: weekly control bands over a workflow's duration and failure rate, computed by `scripts/ci-health.mjs` (unit tested).
+  - The rules are Western Electric 1 and 2, a run within 20% of the timeout, and a failure-rate band. `timed_out` runs count as failures.
+  - Tier 2 and 3 open one issue, written as an `intent.md`, for a cloud session to diagnose.
+  - No model runs and no key is needed.
+- In Ship Gate itself:
+  - `docs/intent/` for each change's intent, spec and plan;
+  - `.claude/` hooks: `guard-bash` (no pushes to main, including a bare `git push origin` on main; no force pushes, `--no-verify`, tags, releases, `--admin` merges, wrangler production writes, or creating or deleting Cloudflare resources), `protect-tests` (also catches shell edits) and `lint-shell`;
+  - read-only `verifier` and `reviewer` subagents;
+  - `REVIEW.md` and `CODEOWNERS`;
+  - a weekly `ci-health.yml`;
+  - session-run agent evals (`evals/`);
+  - a `CLAUDE.md` with commands and their healthy output.
+
+**Changed**
+- `check-readme.sh` checks every `Ship-Gate/<path>@vX.Y.Z` pin.
+- Self-test fails if any workflow or action calls Claude or reads `ANTHROPIC_API_KEY`.
+
 ## v3.12.0 — 2026-10-08
 
 `verify` is faster, and it fails fast. The checks are the same ones. On the

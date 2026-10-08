@@ -16,7 +16,7 @@ if [[ "$(grep -m1 -E '^## v' CHANGELOG.md)" != *"not released"* ]]; then
   while IFS= read -r hit; do
     v="$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' <<<"${hit#*:*:}" | head -1)"
     [ "$v" = "$latest" ] || { echo "::error::${hit%%:*} (line $(cut -d: -f2 <<<"$hit")) pins $v; the newest release is $latest. Update it."; fail=1; }
-  done < <(grep -nE 'Ship-Gate(/post-deploy)?@v[0-9]|Ship Gate v[0-9]+\.[0-9]+\.[0-9]+ in this repo|adopt ship gate v[0-9]' \
+  done < <(grep -nE 'Ship-Gate(/[a-z-]+)?@v[0-9]|Ship Gate v[0-9]+\.[0-9]+\.[0-9]+ in this repo|adopt ship gate v[0-9]' \
     README.md templates/caller/.github/workflows/*.yml 2>/dev/null)
 fi
 

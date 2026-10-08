@@ -72,7 +72,7 @@ jobs:
           touches_fixtures() {
             git diff --name-only "$1" HEAD \
               | grep -E '^(action\.yml|scripts/|e2e/|tools/|test/|playwright\.config\.ts|lighthouserc|\.github/workflows/self-test\.yml)' \
-              | grep -vE '^scripts/(self-test\.sh|release\.sh|check-readme\.sh|check(-[a-z]+)*-live\.mjs)$' \
+              | grep -vE '^scripts/(self-test\.sh|release\.sh|check-readme\.sh|ci-health\.mjs|check(-[a-z]+)*-live\.mjs)$' \
               | grep -q .
           }
           if [ "$EVENT" = pull_request ]; then

@@ -890,6 +890,74 @@ remote D1 migrations, R2 or KV writes, Worker secrets, IndexNow submissions,
 content syncs that commit, and paid API calls. Checks against production
 belong in `post-deploy.yml` or a scheduled workflow.
 
+## AI-native SDLC
+
+Ship Gate works the way Anthropic's *AI-Native SDLC Playbook* describes (Louis
+Claxton, Anthropic):
+- each stage commits an artifact the next stage reads;
+- guardrails run as code;
+- Claude works up to the production gate and never past it.
+
+The sites get the same playbook from **web-baseline**: `docs/intent/`,
+`REVIEW.md`, `.claude/` hooks, agents and skills, `maintain-loop.yml`,
+`revert-on-red.yml` and `critical-gate.yml`. Those are web-baseline's standard
+files, so the caller templates here never ship them.
+
+Ship Gate follows web-baseline's rules too:
+- the same layout (`docs/intent/`, a `TALLY:` line in `REVIEW.md`);
+- **no model in CI and no Anthropic key**. Review, failed-run triage and evals
+  are cloud-session work. Self-test fails if a workflow or action calls Claude.
+
+| Play | In Ship Gate (v3.13.0) |
+|---|---|
+| Plan, Design, Build: `intent.md`, `spec.md`, `plan.md` | `docs/intent/<date>-<name>/`, from `_template/`. `plan.md` is committed before code and updated with it |
+| Build: `CLAUDE.md` | Commands with their healthy output, how a change starts, conventions, and "Things Claude gets wrong" |
+| Build: hooks as guardrails | `.claude/settings.json` wires three hooks: `guard-bash.sh`, `protect-tests.sh` and `lint-shell.sh`. `protect-tests.sh` asks before an existing test in `.claude/protected-tests.txt` changes, through an edit or a shell command such as `sed -i`, a redirect or `rm`. `lint-shell.sh` runs ShellCheck on edit |
+| Build: subagents | `verifier` runs the checks and reports. `reviewer` runs the `REVIEW.md` passes, and adversarially on a risky change. Neither edits anything |
+| Test: feedback loop | `self-test`, ShellCheck, the README check and the fixture suite, all run before a task is done |
+| Test: evals | `evals/*.json` are real Ship Gate tasks with deterministic checks. `bash evals/run.sh` runs them in a cloud session when `CLAUDE.md`, `REVIEW.md` or `.claude/` change, and the pass rate must reach `evals/threshold` |
+| Deploy: PR review | The `reviewer` subagent runs before the first push, and the push waits for `TALLY: important=0`. Codex reviews the PR. `CODEOWNERS` names the approver |
+| Deploy: hooks as approval gates | `guard-bash.sh` blocks pushes to main (including a bare `git push origin` while on main), force pushes, `--no-verify`, tags, releases and `gh pr merge --admin`. It also blocks wrangler production writes and creating or deleting Cloudflare buckets, namespaces and databases. Only the release job tags |
+| Deploy: CI/CD | A red run is fixed from a cloud session, as on the sites (`/babysit-pr`) |
+| Maintain: closing the loop | `ci-health.yml` runs `ci-health/` (`scripts/ci-health.mjs`) weekly: control bands over Self-test |
+
+**CI health.** `scripts/ci-health.mjs` is deterministic and unit tested
+(`test/ci-health.test.mjs`). It reads the last 30 completed runs and takes the
+mean and σ of the earlier ones as the baseline (σ at least 0.5 min). It then
+applies:
+- Western Electric rule 1: one of the latest 3 runs beyond 3σ;
+- Western Electric rule 2: two of the latest 3 beyond 2σ;
+- a near-timeout rule: a run within 20% of the job timeout (a `timed_out` run counts as a failure too);
+- a failure-rate band: the latest 10 runs against the rest, beyond 3 binomial σ and at least 30%.
+
+Tier 1 logs. Tier 2 and 3 open one issue, or comment on the open one, written as
+an `intent.md`. A cloud session then diagnoses the issue read-only. No model runs
+in the workflow.
+
+Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
+
+```yaml
+- uses: pauljosephdp/Ship-Gate/ci-health@v3.13.0
+  with:
+    workflow: ci.yml        # the workflow to watch
+    timeout-minutes: 30     # its job timeout
+    event: pull_request     # only runs of this event (push for a main-only workflow)
+```
+
+On the sites' real run history the bands flag Playway, with three runs at
+27.8–30.4 minutes, and pass Cocoon and MinuJoseph. web-baseline's
+`maintain-loop.yml` already bands the CI failure rate, but not CI duration. The
+duration bands are proposed to web-baseline, alongside adopting this release.
+
+**Not adopted, on purpose.**
+- **Rollback rehearsal in staging.** The sites deploy production only, and
+  `workers-builds-only` keeps Cloudflare tokens out of workflows. Instead,
+  Ship Gate's `self-test` exercises the rollback path (`SHIP_GATE_ROLLBACK=1`)
+  against a stub `wrangler` on every change, and web-baseline's
+  `revert-on-red.yml` is the runbook.
+- **Account-admin steps.** Org-wide managed settings, Claude Tag and
+  OpenTelemetry export are set at the account level, outside this repo.
+
 ## Adopting it in a site repo
 
 1. Copy `templates/caller/` into the repo. The workflows and `dependabot.yml`
@@ -908,8 +976,8 @@ belong in `post-deploy.yml` or a scheduled workflow.
 6. Make the site discoverable, or the discovery scan lists what is missing: a
    `robots.txt` with a `Sitemap:` line, a sitemap (`@astrojs/sitemap`), one
    canonical, Open Graph tags and `lang` in the base layout, and Organization or
-   Person JSON-LD on the home page. Run the scan locally (below) before the
-   first PR.
+   Person JSON-LD on the home page. Run the scan in a Claude Code cloud
+   session (below) before the first PR.
 7. Keep the standard script names `check` and `build`, and `preview` if
    `server` is `preview`. Ship Gate installs its own Playwright, axe and
    Lighthouse CI; the site needs none of them for the gate.
@@ -969,11 +1037,11 @@ belong in `post-deploy.yml` or a scheduled workflow.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.12.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.13.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.12.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.13.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,

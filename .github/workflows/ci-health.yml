@@ -1,0 +1,26 @@
+# Closing the loop (AI-native SDLC, Maintain stage): weekly control bands over Self-test's
+# duration and failure rate (scripts/ci-health.mjs, via ./ci-health). No model runs: tier 2 and 3
+# open or update one issue written as intent.md, which a cloud session diagnoses.
+name: CI health
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"   # Mondays, 06:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  ci-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./ci-health
+        with:
+          workflow: self-test.yml
+          timeout-minutes: 30
+          event: push

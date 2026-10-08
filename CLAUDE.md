@@ -2,7 +2,7 @@
 
 ## Commands (healthy output)
 - Self-test: `bash scripts/self-test.sh`. It ends with "Self-test: N passed, 0 failed."
-- ShellCheck: `shellcheck -S error scripts/*.sh test/*.sh templates/caller/.claude/hooks/*.sh`. It prints nothing.
+- ShellCheck: `shellcheck -S error scripts/*.sh test/*.sh .claude/hooks/*.sh`. It prints nothing.
 - README check: `bash scripts/check-readme.sh origin/main`. It prints "README.md is up to date."
 - Browser suite on the fixture: see `.claude/agents/verifier.md`, step 4. Conforming passes, and each broken variant fails on its own check.
 - Agent evals: `bash evals/run.sh`. This needs `ANTHROPIC_API_KEY`, and the pass rate must reach `evals/threshold`.
@@ -10,7 +10,7 @@
 Run them before reporting any task done, and paste the output. Use the `verifier` subagent for a second check in a fresh context. If a test fails, fix the code, not the test. `.claude/protected-tests.txt` lists the tests that need a person's approval to change.
 
 ## How a change starts
-1. Create `docs/changes/YYYY-MM-DD-name/` and copy the files from `_template/`.
+1. Create `docs/intent/YYYY-MM-DD-name/` and copy the files from `_template/`.
 2. Write `intent.md`.
 3. Write `spec.md` for anything a site will notice.
 4. Write `plan.md` in plan mode before writing code.
@@ -19,8 +19,8 @@ Run them before reporting any task done, and paste the output. Use the `verifier
 
 ## Conventions
 - Everything runs in the cloud: GitHub Actions, Workers Builds and Claude Code cloud sessions. Never tell anyone to run something "locally" or on their own machine.
-- Nothing in the gate, the CI or a session writes to production. The `guard-bash.sh` hook (`templates/caller/.claude/hooks/`, wired in `.claude/settings.json`) blocks this, together with pushes to main, tags and releases.
-- Sites get Ship Gate through `templates/caller/`. A template change is a site-facing change.
+- Nothing in the gate, the CI or a session writes to production. The `.claude/hooks/guard-bash.sh` hook blocks this, together with pushes to main, tags and releases.
+- Sites get Ship Gate through `templates/caller/`. A template change is a site-facing change. The sites run web-baseline, which brings their own playbook files (`docs/intent/`, `REVIEW.md`, `.claude/`); never copy Ship Gate's into a site.
 
 ## Things Claude gets wrong
 - Forgetting a version pin. `check-readme.sh` checks every `Ship-Gate…@vX.Y.Z`: in the README, in the caller workflows, and in `ci-health/` and `triage/`.

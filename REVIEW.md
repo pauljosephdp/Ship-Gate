@@ -6,7 +6,7 @@ Read by the Claude review (`.github/workflows/claude.yml`) on every pull request
 Run three passes, and tag each finding with the pass it came from.
 - **Bugs:** logic errors, broken edge cases, and regressions in the action, scripts, specs or templates. Cover a check that can no longer fail, and a step that stops running for some sites.
 - **Security:** secrets or tokens in workflows or logs, unpinned or mutable action refs, `pull_request_target` misuse, shell injection from `${{ }}` in `run:`, and anything that lets the gate write to production.
-- **Compliance:** the diff matches the change's `docs/changes/*/plan.md` and `spec.md`, and follows `CLAUDE.md`. That means:
+- **Compliance:** the diff matches the change's `docs/intent/*/plan.md` and `spec.md`, and follows `CLAUDE.md`. That means:
   - README updated for a behaviour change;
   - a CHANGELOG entry and version pins for a site-facing change;
   - no test skipped, disabled or weakened;
@@ -21,6 +21,11 @@ Reserve **Important** for findings that would:
 - break a policy in `CLAUDE.md`.
 
 Style, naming and wording are nits.
+
+## Tally
+End every review with one machine-readable line, the same one web-baseline sites use:
+
+`TALLY: important=<n> nits=<n> passes=bugs,security,compliance`
 
 ## Cap the nits
 Report at most five nits per review, and give the rest as a count.

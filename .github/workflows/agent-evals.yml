@@ -9,7 +9,7 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['CLAUDE.md', 'REVIEW.md', '.claude/**', 'templates/caller/.claude/**', 'evals/**', '.github/workflows/agent-evals.yml']
+    paths: ['CLAUDE.md', 'REVIEW.md', '.claude/**', 'evals/**', '.github/workflows/agent-evals.yml']
   schedule:
     - cron: "23 5 * * 1"   # Mondays, 05:23 UTC
   workflow_dispatch:

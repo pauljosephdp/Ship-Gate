@@ -65,7 +65,7 @@ runs:
         body="$RUNNER_TEMP/issue.md"
         if [ -s "$RUNNER_TEMP/intent.md" ]; then cp "$RUNNER_TEMP/intent.md" "$body"
         else { echo "# Intent: $WORKFLOW is drifting"; echo "Author: CI health. Status: draft."; echo; echo "## Problem"; echo; echo '```json'; cat "$RUNNER_TEMP/bands.json"; echo '```'; echo; echo "## Proposed outcome"; echo; echo "Bring $WORKFLOW back inside its band. Add ANTHROPIC_API_KEY to get a diagnosis here."; } > "$body"; fi
-        printf '\n---\nTriage: accept by committing this as docs/changes/<date>-<name>/intent.md, schedule, or close it (a close tunes the bands). Run: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> "$body"
+        printf '\n---\nTriage: accept by committing this as docs/intent/<date>-<name>/intent.md, schedule, or close it (a close tunes the bands). Run: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> "$body"
         n="$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
         if [ -n "$n" ]; then gh issue comment "$n" --body-file "$body"; echo "Updated issue #$n."
         else gh issue create --title "$title" --body-file "$body"; fi

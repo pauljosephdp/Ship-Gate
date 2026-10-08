@@ -65,21 +65,3 @@ jobs:
           lighthouse-runs: 1
           # Only if the site is not at the repo root, e.g. "site".
           # working-directory: site
-
-  # A failed verify gets a read-only Claude diagnosis on the pull request: likely cause, flaky
-  # or real, three lines. Needs the ANTHROPIC_API_KEY secret; without it this notes that and passes.
-  triage:
-    name: triage
-    needs: verify
-    if: failure() && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pauljosephdp/Ship-Gate/triage@v3.13.0
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

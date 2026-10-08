@@ -2,30 +2,25 @@
 
 ## v3.13.0 — 2026-10-08
 
-Ship Gate and its sites now work the way Anthropic's *AI-Native SDLC Playbook* describes. Each change commits its intent, spec and plan. Guardrails run as hooks, Claude reviews pull requests and triages failed builds, and weekly control bands catch CI drift before it times out. Verify itself is unchanged. To adopt it, bump the pin, copy the new templates (README step 16) and add the `ANTHROPIC_API_KEY` secret.
+Ship Gate now works the way Anthropic's *AI-Native SDLC Playbook* describes, using the same layout as the web-baseline sites (`docs/intent/`, and a `TALLY:` line in `REVIEW.md`). The `verify` action and the caller templates are unchanged apart from the version pins. To pick up v3.12.0's faster `verify`, bump the pin; nothing else is needed. The sites' own playbook files stay web-baseline's.
 
 **Added**
-- `templates/caller/.claude/`:
-  - `guard-bash.sh` blocks pushes to main, force pushes, `--no-verify`, tags, releases, `gh pr merge --admin` and wrangler production writes.
-  - `protect-tests.sh` asks a person before an existing test changes.
-  - `lint-shell.sh` runs ShellCheck on an edited script.
-  - The folder also holds `settings.json`, `protected-tests.txt` and a read-only `verifier` subagent.
-- `templates/caller/REVIEW.md`, `.github/CODEOWNERS`, `docs/changes/` (the `intent.md`, `spec.md` and `plan.md` templates), and `CLAUDE.playbook.md` (the sections to merge into a site's `CLAUDE.md`).
-- `templates/caller/.github/workflows/claude.yml`: a review against `REVIEW.md` on ready pull requests, and `@claude` answers for collaborators.
-- `templates/caller/.github/workflows/ci-health.yml` and the `pauljosephdp/Ship-Gate/ci-health` action:
-  - weekly control bands (Western Electric rules, near-timeout, failure rate) over `verify`;
-  - a read-only Claude diagnosis at tier 2;
-  - at tier 3, one issue written as an `intent.md`.
-- `pauljosephdp/Ship-Gate/triage` and a `triage` job in the caller `ci.yml`: a read-only diagnosis of a failed `verify`, posted on the PR.
+- `pauljosephdp/Ship-Gate/ci-health`: weekly control bands over a workflow's duration and failure rate, computed by `scripts/ci-health.mjs` (unit tested).
+  - The rules are Western Electric 1 and 2, a run within 20% of the timeout, and a failure-rate band.
+  - Tier 2 adds a read-only Claude diagnosis.
+  - Tier 3 opens one issue, written as an `intent.md`.
+- `pauljosephdp/Ship-Gate/triage`: a read-only `claude -p` diagnosis of a failed run, posted on the PR. It passes with a notice when there is no API key.
 - In Ship Gate itself:
-  - the same hooks, review and CI health;
-  - a `triage` job in Self-test;
-  - agent evals (`evals/`, `agent-evals.yml`) that test `CLAUDE.md`, `REVIEW.md` and `.claude/` like code;
+  - `docs/intent/` for each change's intent, spec and plan;
+  - `.claude/` hooks: `guard-bash` (no pushes to main, force pushes, `--no-verify`, tags, releases, `--admin` merges or wrangler production writes), `protect-tests` and `lint-shell`;
+  - a read-only `verifier` subagent;
+  - `REVIEW.md`, `CODEOWNERS` and `claude.yml` (review on ready PRs, and `@claude` for collaborators);
+  - a `triage` job in Self-test, and a weekly `ci-health.yml`;
+  - agent evals (`evals/`, `agent-evals.yml`);
   - a `CLAUDE.md` with commands and their healthy output.
 
 **Changed**
-- `check-readme.sh` checks every `Ship-Gate/<path>@vX.Y.Z` pin, including `ci-health` and `triage`.
-- All Claude jobs pass with a notice when the `ANTHROPIC_API_KEY` secret is missing.
+- `check-readme.sh` checks every `Ship-Gate/<path>@vX.Y.Z` pin.
 
 ## v3.12.0 — 2026-10-08
 

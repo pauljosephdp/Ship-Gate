@@ -58,12 +58,12 @@ jobs:
             Review this pull request. The PR branch is checked out.
             Follow REVIEW.md at the repo root (passes, what counts as Important, the nit cap,
             what not to report) and CLAUDE.md. If the PR adds or changes a
-            docs/changes/*/plan.md, check the diff against it (files that change, proof).
+            docs/intent/*/plan.md, check the diff against it (files that change, proof).
             Use `gh pr diff` and `gh pr view` to read the change.
             Post each specific finding as an inline comment with the inline comment tool,
             starting with "[Important]" or "[Nit]" and the pass name. Then post one
-            top-level summary with `gh pr comment`: findings per pass and the nit count, or
-            "No findings." Do not approve or request changes.
+            top-level summary with `gh pr comment`: findings per pass, the nit count, and
+            the TALLY line REVIEW.md defines. Do not approve or request changes.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 

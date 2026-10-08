@@ -10,8 +10,9 @@ Ship Gate follows some of the playbook's principles, but few of its named artifa
 
 ## Proposed outcome
 - Ship Gate itself works the playbook way.
-- It ships the same pieces as templates, so every site adopts them with its next Ship Gate version.
-- All eight sites are migrated in one PR each.
+- All eight sites move to the latest Ship Gate in one PR each.
+
+The sites already follow the playbook through web-baseline 6.1.1. This was found during the build; see `spec.md`, Areas of concern.
 
 ## Affected users and systems
 - Ship Gate: `CLAUDE.md`, workflows and templates.

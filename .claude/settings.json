@@ -2,13 +2,13 @@
   "hooks": {
     "PreToolUse": [
       { "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PROJECT_DIR}/templates/caller/.claude/hooks/guard-bash.sh\"" }] },
+        "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-bash.sh\"" }] },
       { "matcher": "Edit|Write|MultiEdit",
-        "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PROJECT_DIR}/templates/caller/.claude/hooks/protect-tests.sh\"" }] }
+        "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-tests.sh\"" }] }
     ],
     "PostToolUse": [
       { "matcher": "Edit|Write|MultiEdit",
-        "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PROJECT_DIR}/templates/caller/.claude/hooks/lint-shell.sh\"" }] }
+        "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/lint-shell.sh\"" }] }
     ]
   }
 }

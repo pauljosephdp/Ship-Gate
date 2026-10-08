@@ -950,7 +950,7 @@ m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows
 if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi
 
 echo "AI-native SDLC: hooks, review, triage, CI health"
-HOOKS="$HERE/../templates/caller/.claude/hooks"
+HOOKS="$HERE/../.claude/hooks"
 hook_case() {
   local want=$1 cmd=$2 got
   printf '%s' "$cmd" | jq -Rs '{tool_input:{command:.}}' | bash "$HOOKS/guard-bash.sh" >/dev/null 2>&1; got=$?
@@ -990,21 +990,22 @@ protect_case "asks before changing an existing test" ask tests/a.test.ts
 protect_case "asks for a matching glob anywhere"    ask src.spec.ts
 protect_case "a new test needs no approval"          allow tests/new.test.ts
 protect_case "other files need no approval"          allow README.md
-for f in REVIEW.md .github/CODEOWNERS .claude/settings.json .claude/protected-tests.txt .claude/agents/verifier.md \
-         .github/workflows/claude.yml .github/workflows/ci-health.yml docs/changes/README.md \
-         docs/changes/_template/intent.md docs/changes/_template/spec.md docs/changes/_template/plan.md CLAUDE.playbook.md; do
-  if [ -s "$HERE/../templates/caller/$f" ]; then ok "caller template ships $f"; else bad "caller template ships $f" "missing" ""; fi
+for f in REVIEW.md .github/CODEOWNERS .claude/protected-tests.txt .claude/agents/verifier.md \
+         docs/intent/README.md docs/intent/_template/intent.md docs/intent/_template/spec.md docs/intent/_template/plan.md; do
+  if [ -s "$HERE/../$f" ]; then ok "Ship Gate has $f"; else bad "Ship Gate has $f" "missing" ""; fi
 done
-if jq -e '.hooks.PreToolUse[0].hooks[0].command | test("guard-bash.sh")' "$HERE/../templates/caller/.claude/settings.json" >/dev/null \
-  && jq -e '.hooks.PreToolUse[0].hooks[0].command | test("guard-bash.sh")' "$HERE/../.claude/settings.json" >/dev/null; then
-  ok "Ship Gate and the caller template wire the guard-bash hook"
-else bad "guard-bash hook wired" "settings.json does not run it" ""; fi
-cost_case "caller CI triages a failed verify"           templates/caller/.github/workflows/ci.yml 'pauljosephdp/Ship-Gate/triage@'
-cost_case "caller CI triage only after a failure"       templates/caller/.github/workflows/ci.yml "if: failure() && github.event_name == 'pull_request'"
-cost_case "caller review skips drafts"                  templates/caller/.github/workflows/claude.yml 'github.event.pull_request.draft == false'
-cost_case "caller review skips Dependabot (no secrets)" templates/caller/.github/workflows/claude.yml "github.event.pull_request.user.login != 'dependabot[bot]'"
-cost_case "caller @claude only for collaborators"       templates/caller/.github/workflows/claude.yml 'OWNER","MEMBER","COLLABORATOR'
-cost_case "caller CI health watches verify weekly"      templates/caller/.github/workflows/ci-health.yml 'workflow: ci.yml'
+if jq -e '.hooks.PreToolUse[0].hooks[0].command | test("guard-bash.sh")' "$HERE/../.claude/settings.json" >/dev/null; then
+  ok "Ship Gate wires the guard-bash hook"
+else bad "guard-bash hook wired" ".claude/settings.json does not run it" ""; fi
+if [ -e "$HERE/../templates/caller/.claude" ] || [ -e "$HERE/../templates/caller/REVIEW.md" ]; then
+  bad "no playbook files in the caller templates" "web-baseline owns the sites' .claude/ and REVIEW.md" ""
+else ok "no playbook files in the caller templates (web-baseline owns them)"; fi
+cost_case "review skips drafts"                         .github/workflows/claude.yml 'github.event.pull_request.draft == false'
+cost_case "review skips Dependabot (no secrets)"        .github/workflows/claude.yml "github.event.pull_request.user.login != 'dependabot[bot]'"
+cost_case "@claude only for collaborators"              .github/workflows/claude.yml 'OWNER","MEMBER","COLLABORATOR'
+cost_case "review passes without an API key"            .github/workflows/claude.yml "if: steps.key.outputs.present == 'true'"
+cost_case "self-test triages a failed run"              .github/workflows/self-test.yml 'uses: ./triage'
+cost_case "CI health watches self-test weekly"          .github/workflows/ci-health.yml 'workflow: self-test.yml'
 cost_case "triage skips without an API key"             triage/action.yml 'No ANTHROPIC_API_KEY secret'
 cost_case "triage is read-only"                         triage/action.yml '--allowedTools "Read,Grep,Glob"'
 cost_case "CI health opens one issue, not many"         ci-health/action.yml 'gh issue comment'

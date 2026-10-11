@@ -65,15 +65,21 @@ export async function settle(page: Page) {
       await new Promise((r) => setTimeout(r, 60));
     }
     window.scrollTo(0, 0);
-    for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(() => r(undefined)));
     const deadline = Date.now() + 3000;
+    // A frame, or 100 ms if frames stop (a hidden page), so the deadline always holds.
+    for (let i = 0; i < 3; i++)
+      await new Promise((r) => {
+        requestAnimationFrame(() => r(undefined));
+        setTimeout(r, 100);
+      });
     let quiet = 0;
-    while (Date.now() < deadline && quiet < 2) {
+    while (Date.now() < deadline) {
       const running = document.getAnimations().filter((a) => {
         const t = a.effect?.getComputedTiming();
         return a.playState === 'running' && t && t.iterations !== Infinity;
       });
       quiet = running.length === 0 ? quiet + 1 : 0;
+      if (quiet === 2) break;
       await new Promise((r) => setTimeout(r, 100));
     }
   });

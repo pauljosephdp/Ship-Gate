@@ -53,6 +53,9 @@ export async function sameOriginOnly(page: Page) {
 
 // Motion systems fade content in on scroll. Scan the settled page, not a card
 // mid-fade: scroll to the end and back, then wait for finite animations to finish.
+// Scroll-driven state (a header hiding at the top, a section spy) changes on the
+// frames after the scroll, so its CSS transitions start late: wait three frames,
+// then require two quiet checks in a row before calling the page settled.
 export async function settle(page: Page) {
   await page.evaluate(async () => {
     await document.fonts?.ready;
@@ -62,13 +65,15 @@ export async function settle(page: Page) {
       await new Promise((r) => setTimeout(r, 60));
     }
     window.scrollTo(0, 0);
+    for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(() => r(undefined)));
     const deadline = Date.now() + 3000;
-    while (Date.now() < deadline) {
+    let quiet = 0;
+    while (Date.now() < deadline && quiet < 2) {
       const running = document.getAnimations().filter((a) => {
         const t = a.effect?.getComputedTiming();
         return a.playState === 'running' && t && t.iterations !== Infinity;
       });
-      if (running.length === 0) break;
+      quiet = running.length === 0 ? quiet + 1 : 0;
       await new Promise((r) => setTimeout(r, 100));
     }
   });

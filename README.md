@@ -270,7 +270,9 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   With `turnstile-forms`, a Turnstile widget on every `formPages` page.
 - **axe, WCAG 2.2 AA** (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`),
   desktop and mobile, after scrolling the page and letting fade-in animations
-  finish, so a card mid-fade is not scanned.
+  finish, so a card mid-fade is not scanned. Transitions that scroll-driven
+  state starts a few frames after the scroll (a header hiding at the top) are
+  waited for too.
 - **Keyboard** (desktop): pressing Tab reaches every control, focus is never
   trapped (WCAG 2.1.2), every focused control is on screen (2.4.11) and changes
   visibly when focused (2.4.7): an outline, ring, border, background, colour or
@@ -908,7 +910,7 @@ Ship Gate follows web-baseline's rules too:
 - **no model in CI and no Anthropic key**. Review, failed-run triage and evals
   are cloud-session work. Self-test fails if a workflow or action calls Claude.
 
-| Play | In Ship Gate (v3.13.0) |
+| Play | In Ship Gate (v3.13.1) |
 |---|---|
 | Plan, Design, Build: `intent.md`, `spec.md`, `plan.md` | `docs/intent/<date>-<name>/`, from `_template/`. `plan.md` is committed before code and updated with it |
 | Build: `CLAUDE.md` | Commands with their healthy output, how a change starts, conventions, and "Things Claude gets wrong" |
@@ -937,7 +939,7 @@ in the workflow.
 Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
 
 ```yaml
-- uses: pauljosephdp/Ship-Gate/ci-health@v3.13.0
+- uses: pauljosephdp/Ship-Gate/ci-health@v3.13.1
   with:
     workflow: ci.yml        # the workflow to watch
     timeout-minutes: 30     # its job timeout
@@ -1037,11 +1039,11 @@ duration bands are proposed to web-baseline, alongside adopting this release.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.13.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.13.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.13.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.13.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,

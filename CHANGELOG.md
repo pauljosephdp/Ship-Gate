@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.13.1 — 2026-10-11
+
+**Fixed**
+- The axe scan no longer catches scroll-driven transitions halfway. `settle()` scrolled back to the top and checked for running animations at once, before a header's hide fade had started a frame later, so axe read its links mid-fade and failed `color-contrast` some of the time (Gallivant's home page, pauljosephdp/Gallivant#39). It now waits three frames and needs two quiet checks in a row. Bump the pin; no site change is needed.
+
 ## v3.13.0 — 2026-10-08
 
 Ship Gate now works the way Anthropic's *AI-Native SDLC Playbook* describes. It follows web-baseline's layout and policy: `docs/intent/`, a `TALLY:` line in `REVIEW.md`, and no model in CI. The `verify` action and the caller templates are unchanged apart from the version pins. Sites take this release through web-baseline (`references/ship-gate.json`), which also brings v3.12.0's faster `verify`.

@@ -236,8 +236,10 @@ against that Worker. The serve command is local by construction:
 - the preview's build-time config is read from the build; wrangler's
   `build.command` never runs.
 
-Don't put production secrets in `verify`'s environment: the local Worker reads
-secrets from the process environment, as `npm run dev` does. Preview starts in
+The serve command also sets `CLOUDFLARE_INCLUDE_PROCESS_ENV=false`, so the job's
+environment is never handed to the Worker as secrets; the Worker reads the
+site's own `.dev.vars` or `.env` files, so never commit a production secret
+there. Preview starts in
 about 15 s; the serve step waits up to 90 s and stops the whole process group
 afterwards. The fixture `test/fixture-worker` proves this mode on every Ship Gate
 change (`fixture (worker)` in `self-test.yml`).
@@ -248,10 +250,12 @@ the build emits). A gated page may redirect a visitor without a session to
 page. Two checks run only in preview mode:
 
 - **On-demand links** (`e2e/on-demand.spec.ts`): every internal link in the
-  build whose target has no emitted file (outside `/api/` and `/ph/`), and every
-  such page in `pages`, must answer 200, a permanent redirect on the site, or a
-  temporary redirect to `onDemand.signInPath`. A page that answers 200 must
-  name itself as canonical, and a `noindex` page must not be in the sitemap.
+  build whose target has no emitted file (outside `/api/` and `/ph/`; relative
+  links resolve against their page), and every such page in `pages`, must end
+  in a 200 after following redirects on the site, at most five: permanent ones,
+  and temporary ones only to `onDemand.signInPath`. So a link missing its
+  trailing slash fails when the page it lands on is missing. The final page
+  must name itself as canonical, and a `noindex` page must not be in the sitemap.
   The discovery scan still reads the static build only, so keep these prefixes
   in `discovery.ignoreLinks`.
 - **CSP on every page**: `public/_headers` covers static files only, so a page
@@ -679,7 +683,10 @@ policy plus the consent bridge) builds from these same files, so CI proves them 
 Consent. With `"cookieless": "on_reject"` (the default), PostHog loads and
 captures on every page before any choice, counting visitors with PostHog's
 daily-salted server hash, and writes no cookie or storage until the visitor
-accepts (`posthog.opt_in_capturing()` from the site's banner). Then it uses
+accepts (`posthog.opt_in_capturing()` from the site's banner). The npm embed
+loads PostHog lazily, so `window.posthog` is undefined for up to a second after
+the page loads: a banner that may answer sooner applies the choice on
+`posthog:ready` too, as `PostHogZarazConsent.astro` does. Then it uses
 cookies as usual. `"always"` never stores anything and needs no banner. `"off"`
 (remove both consent lines from the options file) sets cookies from the first
 page view without asking. That is not lawful in the EU without consent, so it is
@@ -842,7 +849,7 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `policies` | `[]` | Stack policies this site follows; see Stack policies |
 | `formPages` | `[]` | Every page with a public form (the `turnstile-forms` policy checks the widget there) |
 | `smokePaths` | `/`, `/robots.txt`, `/sitemap-index.xml` | Checked on production after deploy |
-| `server` | `static` | `static` serves the built files (handles `dist/client` from the Cloudflare adapter); `preview` runs the site's Worker with `npm run preview`, local bindings only (see Lighthouse standard → Pages rendered on request) |
+| `server` | `static` | `static` serves the built files (handles `dist/client` from the Cloudflare adapter); `preview` runs the site's Worker with `npm run preview`, local bindings only (see The gate → Pages rendered on request) |
 | `onDemand.signInPath` | none | With `"server": "preview"`: where a gated page redirects a visitor without a session, e.g. `"/signin/"` |
 | `distDir` | `dist` | The build output folder |
 | `lighthouseUrls` | same as `pages` | A list of paths, or `"all"` for every indexable page the build emits (one URL per route on pull requests) |
@@ -1123,8 +1130,9 @@ input the caller template uses for drafts: `scans` variants stop after the
 post-build scans, `browser` variants skip Lighthouse, and only the conforming
 run does everything. Skipped checks read "➖ not run" in the summary, and
 `expect-gate.sh` asserts that too. Fixture runs upload no reports; the
-summary table in the log is what `expect-gate.sh` reads. Two jobs share the variants,
-`fixture (browser)` and `fixture (scans)`; a new variant goes in a free `vN`
+summary table in the log is what `expect-gate.sh` reads. Three jobs share the variants,
+`fixture (browser)`, `fixture (scans)` and `fixture (worker)` (the Worker fixture,
+whose variants are named `worker-*`); a new variant goes in a free `vN`
 slot, and `self-test` fails until it has an expectation, a stage and a slot.
 The fixture jobs exercise the verify action only, so they run when a change
 touches it: `action.yml`, `scripts/` (not `self-test.sh`, `release.sh`,

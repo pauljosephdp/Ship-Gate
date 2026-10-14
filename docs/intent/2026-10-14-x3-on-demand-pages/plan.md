@@ -117,3 +117,12 @@ concern 3).
     waits for the server's process group to exit (Astro's preview lock); the lazy PostHog component resets its
     init-once flag if the chunk fails to load; the on-demand check counts a path as emitted only when a file exists;
     the PostHog browser test waits 500 ms after init for the first requests.
+11. **Adversarial review fixes** (14 Oct, VERDICT: CONTINUE, two Important): the on-demand check resolves relative
+    links against their page and follows redirects on the site (at most five), so a 301 to a missing page fails and a
+    sign-in redirect must reach a 200. `worker-dead-link` now links without the trailing slash, and the fixture Worker
+    answers `/account/*`, which reproduced the miss before the fix. Also: the consent check waits for the lazy SDK, the
+    serve command sets `CLOUDFLARE_INCLUDE_PROCESS_ENV=false`, `onDemand.signInPath` refuses `//`, the first-screen
+    check fails when it finds no script, the README tells banners about `posthog:ready`, and CLAUDE.md lists
+    `fixture (worker)`. Not done: an ignore list for same-site paths another origin serves (no site needs it yet), and
+    a test of the after-build `dist/server/wrangler.json` guard (the adapter copies the source config, which the
+    verify-time guard already covers).

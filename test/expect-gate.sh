@@ -24,6 +24,7 @@ if [ "$1" = --first-screen ]; then
       for (const m of js.matchAll(/(?:^|[;\s}])import\s*(?:[\w${}\s,*]+from\s*)?["\x27](\.{1,2}\/[^"\x27]+)["\x27]/g))
         todo.push(path.posix.join(path.posix.dirname(url), m[1]));
     }
+    if (seen.size === 0) { console.log("no first-screen JS found: the PostHog component did not render"); process.exit(1); }
     console.log(`first-screen JS: ${seen.size} file(s), no posthog-js`);' "$2"
   exit
 fi

@@ -62,6 +62,9 @@ for (const path of run.pages) {
     // ── Consent: before anything is clicked or pressed, and at least 1.5 s after load ──
     if (desktop && consentOn) {
       await page.waitForTimeout(Math.max(0, 1500 - (Date.now() - loaded)));
+      // The npm embed loads PostHog lazily (after load, when idle): read storage once it has started.
+      if (run.posthog?.embed === 'npm')
+        await page.waitForFunction(() => (window as any).posthog?.__loaded === true, null, { timeout: 10_000 }).catch(() => {});
       // A tag blocked by CSP never makes a request, so read the markup too.
       const tags: string[] = await page.$$eval('script[src], iframe[src], img[src], link[href]',
         (els) => els.map((e) => (e as HTMLScriptElement).src || (e as HTMLLinkElement).href || ''));

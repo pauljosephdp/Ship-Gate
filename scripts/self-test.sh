@@ -235,6 +235,7 @@ expect_prepare "preview: remote: false passes"     pass                        "
 expect_prepare "static ignores remote bindings"    pass                        "echo '$KV_REMOTE' > wrangler.jsonc"
 expect_prepare "onDemand.signInPath accepted"      pass                        "cfg '\"server\":\"preview\",\"onDemand\":{\"signInPath\":\"/signin/\"}'"
 expect_prepare "onDemand.signInPath not a path"    "onDemand.signInPath must" "cfg '\"server\":\"preview\",\"onDemand\":{\"signInPath\":\"https://x.example/\"}'"
+expect_prepare "onDemand.signInPath protocol-relative" "onDemand.signInPath must" "cfg '\"server\":\"preview\",\"onDemand\":{\"signInPath\":\"//x.example/\"}'"
 expect_prepare "onDemand needs server preview"     "onDemand needs"            "cfg '\"onDemand\":{\"signInPath\":\"/signin/\"}'"
 # The preview serve command runs the Worker locally, never with Cloudflare credentials.
 d="$(baseline)"; cd "$d" && cfg '"server":"preview"'
@@ -244,6 +245,7 @@ GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" node "$PREPARE" after-build >/dev/null 2>&1
 serve="$(grep -o '"command": *"[^"]*"\|command: "[^"]*"' "$d/.sg/playwright.config.ts" 2>/dev/null)"
 if grep -qF 'CLOUDFLARE_VITE_FORCE_LOCAL=true' <<<"$serve" && grep -qF -- '-u CLOUDFLARE_API_TOKEN' <<<"$serve" \
   && grep -qF -- '-u CF_API_TOKEN' <<<"$serve" && grep -qF 'ASTRO_PREVIEW_BACKGROUND=1' <<<"$serve" \
+  && grep -qF 'CLOUDFLARE_INCLUDE_PROCESS_ENV=false' <<<"$serve" \
   && grep -qF '"startServerReadyTimeout": 90000' "$d/.sg/lighthouserc.json" 2>/dev/null; then ok "preview serve command is local, foreground, credential-free"
 else bad "preview serve command is local, foreground, credential-free" "serve command: ${serve:-none}" ""; fi
 cd "$HERE" && rm -rf "$d"

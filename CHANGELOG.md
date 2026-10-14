@@ -4,16 +4,16 @@
 
 **Added**
 - `"server": "preview"` is now proven with `@astrojs/cloudflare`: the gate runs the site's own Worker and tests pages it renders on request. Intent, spec and plan: `docs/intent/2026-10-14-x3-on-demand-pages/`.
-  - The preview serve command is local by construction: no Cloudflare credentials, `CLOUDFLARE_VITE_FORCE_LOCAL=true`, and `ASTRO_PREVIEW_BACKGROUND=1` (Astro 7 backgrounds preview under an agent). The browser suite, Lighthouse and `checks.browser` share it.
+  - The preview serve command is local by construction: no Cloudflare credentials, `CLOUDFLARE_VITE_FORCE_LOCAL=true`, `CLOUDFLARE_INCLUDE_PROCESS_ENV=false` (the job's environment never becomes Worker secrets), and `ASTRO_PREVIEW_BACKGROUND=1` (Astro 7 backgrounds preview under an agent). The browser suite, Lighthouse and `checks.browser` share it.
   - `prepare` fails when the wrangler config or the built `dist/server/wrangler.json` marks a binding `remote: true`.
   - `onDemand.signInPath`: where a gated page redirects a visitor without a session.
-  - `e2e/on-demand.spec.ts` (preview only): every link target and page outside the static build answers 200, a permanent redirect, or a redirect to `onDemand.signInPath`; it names itself as canonical, and a `noindex` page is not in the sitemap.
+  - `e2e/on-demand.spec.ts` (preview only): every link target and page outside the static build, with relative links resolved from their page, answers 200 after following redirects on the site (a permanent redirect, or a temporary one to `onDemand.signInPath`); the final page names itself as canonical, and a `noindex` page is not in the sitemap.
   - In preview mode, when the home page sends a CSP, every listed page must send one too (`_headers` covers static files only).
   - `run-checks.sh --serve` waits up to 90 s and stops the server's whole process group.
   - `test/fixture-worker`, a Cloudflare Worker fixture with pages rendered on request, and a `fixture (worker)` CI job with three broken variants (`worker-remote-binding`, `worker-no-csp`, `worker-dead-link`).
 
 **Changed**
-- `templates/caller/posthog/src/components/PostHog.astro` loads `posthog-js` lazily: a dynamic `import()` after the `load` event, when the browser is idle (1 s at most). Its ~95 KB gzip leaves the first-screen JS; the key stays in the small entry script, so the PostHog scans are unchanged. It fires `posthog:ready` on `document`. A visitor who leaves within about a second of the page loading sends no pageview. Sites copy the new component.
+- `templates/caller/posthog/src/components/PostHog.astro` loads `posthog-js` lazily: a dynamic `import()` after the `load` event, when the browser is idle (1 s at most). Its ~95 KB gzip leaves the first-screen JS; the key stays in the small entry script, so the PostHog scans are unchanged. It fires `posthog:ready` on `document`; a site's own consent banner applies a choice made before then on that event. A visitor who leaves within about a second of the page loading sends no pageview. Sites copy the new component.
 - `PostHogZarazConsent.astro` also syncs on `posthog:ready`, so a consent choice made before PostHog loaded is applied. Sites copy it too.
 - The PostHog browser test waits up to 10 s for the npm embed to load (it waited a fixed 1.5 s). The fixture's `analytics-always-on` run checks that posthog-js is not in the first-screen JS.
 - A static site needs no change: every new check runs only with `"server": "preview"`.

@@ -237,7 +237,8 @@ against that Worker. The serve command is local by construction:
 - the preview's build-time config is read from the build; wrangler's
   `build.command` never runs.
 
-The serve command also sets `CLOUDFLARE_INCLUDE_PROCESS_ENV=false`, so the job's
+The serve command also pins `CLOUDFLARE_INCLUDE_PROCESS_ENV=false` (the
+plugin's default, which a site's `.env` file could otherwise turn on), so the job's
 environment is never handed to the Worker as secrets; the Worker reads the
 site's own `.dev.vars` or `.env` files, so never commit a production secret
 there. Preview starts in
@@ -258,7 +259,8 @@ page. Two checks run only in preview mode:
   trailing slash fails when the page it lands on is missing. A `Location` on the
   production origin (`siteUrl`) counts as on the site. When the final answer is
   HTML, it must name itself as canonical, and a `noindex` page must not be in the
-  sitemap; a feed or a download only has to answer. The key pages in `pages` are
+  sitemap; a feed or a download only has to answer. Paths a `public/_redirects`
+  rule answers are left to the discovery scan and the edge checks. The key pages in `pages` are
   checked even when `e2ePages` leaves them out.
   The discovery scan still reads the static build only, so keep these prefixes
   in `discovery.ignoreLinks`.

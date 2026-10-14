@@ -21,6 +21,16 @@ const emitted = (p: string) => {
 const attrs = (tag: string) => Object.fromEntries([...tag.matchAll(/([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)]
   .map((m) => [m[1].toLowerCase(), m[2] ?? m[3] ?? m[4] ?? '']));
 const tags = (html: string, name: string) => [...html.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'gi'))].map((m) => attrs(m[0]));
+// Paths a public/_redirects rule answers: Workers static assets serves those before the Worker,
+// and the discovery scan and edge.spec.ts own them. `*` is a splat, `:name` one segment.
+const redirectRules = (() => {
+  const f = join(run.root, '_redirects');
+  if (!existsSync(f)) return [] as RegExp[];
+  return readFileSync(f, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+    .map((l) => l.split(/\s+/)[0]).filter((from) => from.startsWith('/'))
+    .map((from) => new RegExp(`^${from.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/:[A-Za-z]\w*/g, '[^/]+')}$`));
+})();
+const redirected = (p: string) => redirectRules.some((r) => r.test(p));
 const notAPage = (p: string) => /^\/(api|ph)(\/|$)/.test(p);
 
 function htmlFiles(dir: string): string[] {
@@ -49,7 +59,7 @@ function targets(): string[] {
         if (u.origin !== origin) continue;
         p = u.pathname;
       } catch { continue; }
-      if (!notAPage(p) && !emitted(p)) found.add(p);
+      if (!notAPage(p) && !emitted(p) && !redirected(p)) found.add(p);
     }
   }
   return [...found].filter((p) => !notAPage(p)).sort();

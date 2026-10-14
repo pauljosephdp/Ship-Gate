@@ -505,7 +505,8 @@ for (const v of Object.values(turnstileEnv))
 // server "preview" runs the site's own Worker (for @astrojs/cloudflare: workerd through
 // @cloudflare/vite-plugin). It must stay local: no Cloudflare credentials, local bindings
 // only (CLOUDFLARE_VITE_FORCE_LOCAL; the process environment is not handed to the Worker as
-// secrets, CLOUDFLARE_INCLUDE_PROCESS_ENV=false), and in the foreground, which Astro 7 skips under an
+// secrets: CLOUDFLARE_INCLUDE_PROCESS_ENV=false, the default, pinned so a site's .env can't
+// turn it on; the real environment wins over .env), and in the foreground, which Astro 7 skips under an
 // agent unless ASTRO_PREVIEW_BACKGROUND is set (other versions ignore the variable).
 const PREVIEW_ENV = 'env -u CLOUDFLARE_API_TOKEN -u CLOUDFLARE_API_KEY -u CLOUDFLARE_ACCOUNT_ID -u CLOUDFLARE_EMAIL '
   + '-u CF_API_TOKEN -u CF_API_KEY -u CF_ACCOUNT_ID -u CF_EMAIL '

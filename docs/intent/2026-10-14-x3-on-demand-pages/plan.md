@@ -136,3 +136,8 @@ concern 3).
 13. **Agent evals** (CLAUDE.md changed): 4 of 5 passed, at the 0.8 threshold. `no-manual-tag` failed on its check's
     wording, not its behaviour: the agent refused to tag and named the release job, but wrote "`release` job" with
     backticks, which the check's `grep -qi 'release job'` misses. The eval files are protected; reported to Paul.
+14. **Last review fix** (14 Oct, one Important): the on-demand check leaves paths a `public/_redirects` rule answers
+    to the discovery scan and edge checks (Workers static assets serves them before the Worker); it had failed a
+    correct site linking `/chat` to another origin. The Worker fixture now carries that shortcut, which reproduced the
+    failure before the fix. The docs now say `CLOUDFLARE_INCLUDE_PROCESS_ENV=false` is the plugin's default, pinned so
+    a site's `.env` can't turn it on.

@@ -229,6 +229,8 @@ KV_REMOTE='{"kv_namespaces":[{"binding":"CACHE","id":"abc","remote":true}]}'
 expect_prepare "preview: local bindings pass"      pass                        "cfg '\"server\":\"preview\"' && echo '{\"kv_namespaces\":[{\"binding\":\"CACHE\",\"id\":\"abc\"}]}' > wrangler.jsonc"
 expect_prepare "preview: remote binding (jsonc)"   'binding "CACHE" is remote' "cfg '\"server\":\"preview\"' && echo '$KV_REMOTE' > wrangler.jsonc"
 expect_prepare "preview: remote binding (toml)"    'binding "DB" is remote'    "cfg '\"server\":\"preview\"' && printf '[[d1_databases]]\nbinding = \"DB\"\ndatabase_id = \"x\"\nremote = true\n' > wrangler.toml"
+expect_prepare "preview: remote binding (toml inline)" 'binding "CACHE" is remote' "cfg '\"server\":\"preview\"' && printf 'kv_namespaces = [{ binding = \"CACHE\", id = \"x\", remote = true }]\n' > wrangler.toml"
+expect_prepare "preview: unreadable wrangler.jsonc" "could not read"      "cfg '\"server\":\"preview\"' && echo '{ not json' > wrangler.jsonc"
 expect_prepare "preview: remote: false passes"     pass                        "cfg '\"server\":\"preview\"' && echo '{\"r2_buckets\":[{\"binding\":\"B\",\"bucket_name\":\"b\",\"remote\":false}]}' > wrangler.json"
 expect_prepare "static ignores remote bindings"    pass                        "echo '$KV_REMOTE' > wrangler.jsonc"
 expect_prepare "onDemand.signInPath accepted"      pass                        "cfg '\"server\":\"preview\",\"onDemand\":{\"signInPath\":\"/signin/\"}'"
@@ -237,9 +239,12 @@ expect_prepare "onDemand needs server preview"     "onDemand needs"            "
 # The preview serve command runs the Worker locally, never with Cloudflare credentials.
 d="$(baseline)"; cd "$d" && cfg '"server":"preview"'
 GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" node "$PREPARE" verify >/dev/null 2>&1
+mkdir -p dist && echo '<!doctype html><title>x</title><h1>x</h1>' > dist/index.html
+GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" node "$PREPARE" after-build >/dev/null 2>&1
 serve="$(grep -o '"command": *"[^"]*"\|command: "[^"]*"' "$d/.sg/playwright.config.ts" 2>/dev/null)"
 if grep -qF 'CLOUDFLARE_VITE_FORCE_LOCAL=true' <<<"$serve" && grep -qF -- '-u CLOUDFLARE_API_TOKEN' <<<"$serve" \
-  && grep -qF 'ASTRO_PREVIEW_BACKGROUND=1' <<<"$serve"; then ok "preview serve command is local, foreground, credential-free"
+  && grep -qF -- '-u CF_API_TOKEN' <<<"$serve" && grep -qF 'ASTRO_PREVIEW_BACKGROUND=1' <<<"$serve" \
+  && grep -qF '"startServerReadyTimeout": 90000' "$d/.sg/lighthouserc.json" 2>/dev/null; then ok "preview serve command is local, foreground, credential-free"
 else bad "preview serve command is local, foreground, credential-free" "serve command: ${serve:-none}" ""; fi
 cd "$HERE" && rm -rf "$d"
 expect_prepare "missing @astrojs/check"           "Missing dev dependency @astrojs/check" "sed -i 's/\"@astrojs\/check\": \"1\"//' package.json"

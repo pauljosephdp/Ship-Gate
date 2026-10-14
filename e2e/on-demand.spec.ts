@@ -10,9 +10,11 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { run } from './helpers';
 
+const isFile = (f: string) => existsSync(f) && statSync(f).isFile();
 const emitted = (p: string) => {
   const f = join(run.root, decodeURIComponent(p));
-  return (p.endsWith('/') ? existsSync(join(f, 'index.html')) : existsSync(f) || existsSync(`${f}.html`));
+  // Without a trailing slash, Workers static assets also serves dir/index.html (after a redirect).
+  return p.endsWith('/') ? isFile(join(f, 'index.html')) : isFile(f) || isFile(`${f}.html`) || isFile(join(f, 'index.html'));
 };
 const notAPage = (p: string) => /^\/(api|ph)(\/|$)/.test(p);
 

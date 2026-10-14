@@ -197,6 +197,7 @@ for (const path of run.posthog ? run.pages : []) {
       // The template loads posthog-js lazily (load event, then idle, 1 s at most): wait for its init.
       // A timeout falls through to the assertions below, which say what is missing.
       await page.waitForFunction(() => (window as any).posthog?.__loaded === true, null, { timeout: 10_000 }).catch(() => {});
+      await page.waitForTimeout(500); // its first requests go out right after init
     } else {
       await page.waitForTimeout(1500);
     }

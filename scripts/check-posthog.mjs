@@ -5,7 +5,9 @@
 //
 // • Every indexable page initialises PostHog: the project key reaches the page, inline
 //   (the snippet embed) or in a same-origin script the page loads (the npm embed). CI builds
-//   with Ship Gate's test key, so its presence proves the component rendered.
+//   with Ship Gate's test key, so its presence proves the component rendered. The npm embed
+//   keeps the key in its small entry script and loads posthog-js itself lazily, as a dynamic
+//   import() chunk, so the key check reads the entry and the chunks it imports.
 // • No personal API key (phx_) anywhere in client output, and no project key other than
 //   the test key: a different one was hard-coded, or leaked into CI from somewhere else.
 // • Every Content-Security-Policy that applies to a page (from _headers or a <meta> tag,

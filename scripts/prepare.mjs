@@ -507,13 +507,15 @@ for (const v of Object.values(turnstileEnv))
 // only (CLOUDFLARE_VITE_FORCE_LOCAL), and in the foreground, which Astro 7 skips under an
 // agent unless ASTRO_PREVIEW_BACKGROUND is set (other versions ignore the variable).
 const PREVIEW_ENV = 'env -u CLOUDFLARE_API_TOKEN -u CLOUDFLARE_API_KEY -u CLOUDFLARE_ACCOUNT_ID -u CLOUDFLARE_EMAIL '
+  + '-u CF_API_TOKEN -u CF_API_KEY -u CF_ACCOUNT_ID -u CF_EMAIL '
   + 'CLOUDFLARE_VITE_FORCE_LOCAL=true ASTRO_PREVIEW_BACKGROUND=1';
 const serveCommand = server === 'static'
   ? `node "${join(HERE, 'serve-static.mjs')}" "${distDir}" ${PORT}`
   : `${PREVIEW_ENV} npm run preview -- --port ${PORT}`;
 
 // A binding marked `remote: true` reaches the real Cloudflare resource even from a local Worker.
-// Returns the names of such bindings in a wrangler config (JSON, JSONC or TOML text).
+// Returns the names of such bindings in a wrangler config (JSON, JSONC or TOML text), or null
+// when JSON(C) text cannot be parsed.
 function remoteBindings(text, toml) {
   const found = [];
   if (toml) {
@@ -525,6 +527,9 @@ function remoteBindings(text, toml) {
       const b = line.match(/^binding\s*=\s*["']([^"']+)["']/);
       if (b) binding = b[1];
       if (/^remote\s*=\s*true\b/.test(line)) found.push(binding ?? table);
+      // Inline tables: kv_namespaces = [{ binding = "CACHE", id = "x", remote = true }]
+      for (const t of line.matchAll(/\{[^{}]*\}/g))
+        if (/\bremote\s*=\s*true\b/.test(t[0])) found.push(t[0].match(/\bbinding\s*=\s*["']([^"']+)["']/)?.[1] ?? line.split('=')[0].trim());
     }
     return found;
   }
@@ -539,7 +544,7 @@ function remoteBindings(text, toml) {
     out += c;
   }
   let data;
-  try { data = JSON.parse(out.replace(/,(\s*[}\]])/g, '$1')); } catch { return found; }
+  try { data = JSON.parse(out.replace(/,(\s*[}\]])/g, '$1')); } catch { return null; }
   const walk = (v, key) => {
     if (Array.isArray(v)) { for (const x of v) walk(x, key); return; }
     if (!v || typeof v !== 'object') return;
@@ -556,7 +561,8 @@ if (server === 'preview') {
   for (const f of ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml']) {
     if (!existsSync(f)) continue;
     const names = remoteBindings(readFileSync(f, 'utf8'), f.endsWith('.toml'));
-    if (names.length) remoteError(f, names);
+    if (names === null) err(`${f}: could not read it as JSON with comments, so Ship Gate cannot check it for remote bindings.`);
+    else if (names.length) remoteError(f, names);
   }
 }
 
@@ -580,6 +586,7 @@ if (mode === 'after-build') {
   const built = join(distDir, 'server', 'wrangler.json');
   if (server === 'preview' && existsSync(built)) {
     const names = remoteBindings(readFileSync(built, 'utf8'), false);
+    if (names === null) { err(`${built}: could not read it as JSON, so Ship Gate cannot check it for remote bindings.`); fail(); }
     if (names.length) { remoteError(built, names); fail(); }
   }
   const all = indexablePages(root).map((p) => p.path);
@@ -625,6 +632,8 @@ if (mode === 'after-build') {
       collect: {
         startServerCommand: serveCommand,
         startServerReadyPattern: `localhost:${PORT}`,
+        // The preview server (workerd) takes ~15 s to answer; lhci's default wait is 10 s.
+        startServerReadyTimeout: 90000,
         url: lhUrls.map((p) => ORIGIN + p),
         numberOfRuns: runs,
         settings: { chromeFlags: '--no-sandbox --headless=new', blockedUrlPatterns: blocked },

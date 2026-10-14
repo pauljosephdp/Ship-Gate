@@ -32,13 +32,16 @@
     document.dispatchEvent(new Event('posthog:ready'));
   }
 
+  // A failed chunk load (offline, a deploy replaced the file) leaves PostHog for the next page.
+  const load = (key: string) => start(key).catch(() => { window.__posthog_initialized = false; });
+
   // <ClientRouter> re-runs scripts on navigation; initialise once.
   if (key && !window.__posthog_initialized) {
     window.__posthog_initialized = true;
     const idle = () =>
       'requestIdleCallback' in window
-        ? requestIdleCallback(() => void start(key), { timeout: 1000 })
-        : setTimeout(() => void start(key), 1000);
+        ? requestIdleCallback(() => load(key), { timeout: 1000 })
+        : setTimeout(() => load(key), 1000);
     if (document.readyState === 'complete') idle();
     else addEventListener('load', idle, { once: true });
   }

@@ -106,3 +106,14 @@ concern 3).
 6. **README:** "Nothing in the gate runs wrangler" now reads that the gate never runs `wrangler deploy` or a remote
    command: preview mode runs the site's Worker through the Cloudflare Vite plugin, and the fixture's `check` runs
    `wrangler types` (local).
+7. **R8 allows a permanent redirect on the site** (301/308, e.g. a moved page or a trailing-slash fix) besides the
+   temporary redirect to `onDemand.signInPath`; any other temporary redirect, or one to another origin, fails.
+8. **Start-up waits:** Lighthouse gets `startServerReadyTimeout: 90000` (lhci's default is 10 s); Playwright's
+   `webServer` keeps its existing 120 s, which already covers the preview start-up.
+9. **`worker-remote-binding`'s expectation** checks the failing row (`Contract and config`); the binding name in the
+   error is covered by the self-test cases for the guard, since the gate summary carries only the row.
+10. **Review fixes** (REVIEW.md pass, 14 Oct): the TOML guard also reads inline tables; an unreadable wrangler config
+    fails `prepare` in preview mode; the serve command also unsets wrangler's older `CF_*` variables; `run-checks.sh`
+    waits for the server's process group to exit (Astro's preview lock); the lazy PostHog component resets its
+    init-once flag if the chunk fails to load; the on-demand check counts a path as emitted only when a file exists;
+    the PostHog browser test waits 500 ms after init for the first requests.

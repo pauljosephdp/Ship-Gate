@@ -5,9 +5,9 @@
 **Added**
 - `"server": "preview"` is now proven with `@astrojs/cloudflare`: the gate runs the site's own Worker and tests pages it renders on request. Intent, spec and plan: `docs/intent/2026-10-14-x3-on-demand-pages/`.
   - The preview serve command is local by construction: no Cloudflare credentials, `CLOUDFLARE_VITE_FORCE_LOCAL=true`, `CLOUDFLARE_INCLUDE_PROCESS_ENV=false` (the job's environment never becomes Worker secrets), and `ASTRO_PREVIEW_BACKGROUND=1` (Astro 7 backgrounds preview under an agent). The browser suite, Lighthouse and `checks.browser` share it.
-  - `prepare` fails when the wrangler config or the built `dist/server/wrangler.json` marks a binding `remote: true`.
+  - `prepare` fails when the wrangler config or the built `dist/server/wrangler.json` marks a binding `remote: true` (or `experimental_remote: true`), or can't be read.
   - `onDemand.signInPath`: where a gated page redirects a visitor without a session.
-  - `e2e/on-demand.spec.ts` (preview only): every link target and page outside the static build, with relative links resolved from their page, answers 200 after following redirects on the site (a permanent redirect, or a temporary one to `onDemand.signInPath`); the final page names itself as canonical, and a `noindex` page is not in the sitemap.
+  - `e2e/on-demand.spec.ts` (preview only): every link target and page outside the static build, with relative links resolved from their page, answers 200 after following redirects on the site (a permanent redirect, or a temporary one to `onDemand.signInPath`); when the final answer is HTML, it names itself as canonical and a `noindex` page is not in the sitemap (a feed or a download only has to answer).
   - In preview mode, when the home page sends a CSP, every listed page must send one too (`_headers` covers static files only).
   - `run-checks.sh --serve` waits up to 90 s and stops the server's whole process group.
   - `test/fixture-worker`, a Cloudflare Worker fixture with pages rendered on request, and a `fixture (worker)` CI job with three broken variants (`worker-remote-binding`, `worker-no-csp`, `worker-dead-link`).

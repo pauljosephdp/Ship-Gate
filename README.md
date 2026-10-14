@@ -232,7 +232,8 @@ against that Worker. The serve command is local by construction:
   foreground in an agent session;
 - `prepare` fails when the wrangler config (`wrangler.jsonc`, `.json` or
   `.toml`) or the built `dist/server/wrangler.json` marks a binding
-  `remote: true`;
+  `remote: true` (or the older `experimental_remote: true`), and when it can't
+  read the config;
 - the preview's build-time config is read from the build; wrangler's
   `build.command` never runs.
 
@@ -254,8 +255,11 @@ page. Two checks run only in preview mode:
   links resolve against their page), and every such page in `pages`, must end
   in a 200 after following redirects on the site, at most five: permanent ones,
   and temporary ones only to `onDemand.signInPath`. So a link missing its
-  trailing slash fails when the page it lands on is missing. The final page
-  must name itself as canonical, and a `noindex` page must not be in the sitemap.
+  trailing slash fails when the page it lands on is missing. A `Location` on the
+  production origin (`siteUrl`) counts as on the site. When the final answer is
+  HTML, it must name itself as canonical, and a `noindex` page must not be in the
+  sitemap; a feed or a download only has to answer. The key pages in `pages` are
+  checked even when `e2ePages` leaves them out.
   The discovery scan still reads the static build only, so keep these prefixes
   in `discovery.ignoreLinks`.
 - **CSP on every page**: `public/_headers` covers static files only, so a page

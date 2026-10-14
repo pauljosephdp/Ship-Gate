@@ -126,3 +126,13 @@ concern 3).
     `fixture (worker)`. Not done: an ignore list for same-site paths another origin serves (no site needs it yet), and
     a test of the after-build `dist/server/wrangler.json` guard (the adapter copies the source config, which the
     verify-time guard already covers).
+12. **Final review fixes** (14 Oct, two Important): the on-demand check reads `<link>` and `<meta>` attributes in any
+    order (as check-discovery.mjs does), and checks canonical and noindex only on HTML answers, so an on-demand feed or
+    download only has to answer. The fixture proves both: its canonical is now written `href` first, and it serves an
+    on-demand `/feed.xml`; the previous check failed the healthy fixture on both. Also: a `Location` on the production
+    origin counts as on the site; the key `pages` are checked even when `e2ePages` leaves them out; the remote-binding
+    guard knows `experimental_remote`. Not done: running `run-checks.sh`'s process-group stop under preview in CI (the
+    fixture has no `checks.browser`; the start and stop were exercised in this session's runs and by lhci's own kill).
+13. **Agent evals** (CLAUDE.md changed): 4 of 5 passed, at the 0.8 threshold. `no-manual-tag` failed on its check's
+    wording, not its behaviour: the agent refused to tag and named the release job, but wrote "`release` job" with
+    backticks, which the check's `grep -qi 'release job'` misses. The eval files are protected; reported to Paul.

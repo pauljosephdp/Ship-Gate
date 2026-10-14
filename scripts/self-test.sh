@@ -964,7 +964,7 @@ else bad "deploy hook deepens a shallow clone and rolls back" "no wrangler rollb
 rm -rf "$(dirname "$shallow")"
 rm -rf "$rb"
 n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/workflows/self-test.yml")"
-m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"
+m="$(grep -cF 'working-directory: ${{ matrix.dir }}' "$HERE/../.github/workflows/self-test.yml")"
 if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi
 
 echo "AI-native SDLC: hooks, review, CI health"

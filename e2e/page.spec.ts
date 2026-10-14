@@ -92,7 +92,16 @@ for (const path of run.pages) {
     // ── CSP ──
     const h = res?.headers() ?? {};
     const hasMeta = (await page.locator('meta[http-equiv="Content-Security-Policy" i]').count()) > 0;
-    if (h['content-security-policy'] || h['content-security-policy-report-only'] || hasMeta) {
+    const hasCsp = !!(h['content-security-policy'] || h['content-security-policy-report-only'] || hasMeta);
+    // server "preview": public/_headers covers static files only, so a page the Worker renders
+    // on request can lose the CSP its static pages carry. When the home page has one, so must this.
+    if (run.server === 'preview' && !hasCsp) {
+      const home = await page.request.get('/');
+      const homeCsp = !!(home.headers()['content-security-policy'] || home.headers()['content-security-policy-report-only']
+        || /<meta[^>]+http-equiv=["']?content-security-policy/i.test(await home.text()));
+      expect.soft(homeCsp, 'the home page sends a Content-Security-Policy but this page does not: set it in the Worker for pages rendered on request').toBe(false);
+    }
+    if (hasCsp) {
       await page.waitForTimeout(500);
       const violations: string[] = await page.evaluate(() => (window as any).__cspViolations);
       // The event names the directive; the console catches refusals that fire no event.
@@ -184,7 +193,13 @@ for (const path of run.posthog ? run.pages : []) {
     page.on('request', (r) => isPostHog(r.url()) && calls.push(r.url()));
     await sameOriginOnly(page);
     await page.goto(path);
-    await page.waitForTimeout(1500);
+    if (run.posthog?.embed === 'npm') {
+      // The template loads posthog-js lazily (load event, then idle, 1 s at most): wait for its init.
+      // A timeout falls through to the assertions below, which say what is missing.
+      await page.waitForFunction(() => (window as any).posthog?.__loaded === true, null, { timeout: 10_000 }).catch(() => {});
+    } else {
+      await page.waitForTimeout(1500);
+    }
     const state = await page.evaluate(() => {
       const ph = (window as any).posthog;
       if (!ph || typeof ph.init !== 'function') return null;

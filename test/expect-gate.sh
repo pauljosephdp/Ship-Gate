@@ -6,10 +6,32 @@
 #     full     every check, Lighthouse included
 #     browser  every check up to the browser tests, no Lighthouse
 #     scans    stops after the post-build scans; the fault is caught before any browser runs
+#   expect-gate.sh --first-screen DIST   exit 1 when posthog-js is in DIST/index.html's first-screen JS
 set -euo pipefail
+if [ "$1" = --first-screen ]; then
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const root = process.argv[1], html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+    const todo = [...html.matchAll(/<script[^>]*\ssrc="(\/[^"]+\.js)"|<link[^>]*modulepreload[^>]*href="(\/[^"]+\.js)"/g)].map((m) => m[1] ?? m[2]);
+    const seen = new Set();
+    while (todo.length) {
+      const url = todo.pop();
+      if (seen.has(url)) continue;
+      seen.add(url);
+      const js = fs.readFileSync(path.join(root, url), "utf8");
+      if (js.includes("$pageview")) { console.log(`posthog-js is in the first-screen file ${url}`); process.exit(1); }
+      // static imports load with the entry; dynamic import() does not
+      for (const m of js.matchAll(/(?:^|[;\s}])import\s*(?:[\w${}\s,*]+from\s*)?["\x27](\.{1,2}\/[^"\x27]+)["\x27]/g))
+        todo.push(path.posix.join(path.posix.dirname(url), m[1]));
+    }
+    console.log(`first-screen JS: ${seen.size} file(s), no posthog-js`);' "$2"
+  exit
+fi
 if [ "$1" = --stage ]; then variant=$2; else variant=$1 outcome=$2; fi
 case "$variant" in
-  conforming) stage=full fails="" ;;
+  conforming|worker-conforming) stage=full fails="" ;;
+  worker-remote-binding) stage=scans fails="Contract and config" ;;
+  worker-no-csp|worker-dead-link) stage=browser fails="Smoke, axe, reflow, CSP, edge" ;;
   vendor-named-asset) stage=browser fails="" ;;
   analytics-always-on) stage=browser fails="" ;;
   posthog-hybrid-missing|posthog-hybrid-csp) stage=scans fails="PostHog on every page" ;;
@@ -38,5 +60,11 @@ fi
 if [ "$stage" = scans ]; then
   grep -qF "| Smoke, axe, reflow, CSP, edge | ➖ not run |" "$SHIP_GATE_DIR/summary.md" \
     || { echo "::error::Variant $variant ran at stage scans but the browser tests did not read \"not run\"."; exit 1; }
+fi
+# PostHog loads lazily: posthog-js must not be in the first-screen JS of the built home page,
+# meaning its <script src> and modulepreload files and everything they import statically.
+if [ "$variant" = analytics-always-on ]; then
+  bash "$(dirname "$0")/expect-gate.sh" --first-screen "$(dirname "$0")/fixture-site/dist" \
+    || { echo "::error::Variant $variant ships posthog-js in the first-screen JS: it must load lazily."; exit 1; }
 fi
 echo "Gate behaved as expected for $variant (stage $stage)."

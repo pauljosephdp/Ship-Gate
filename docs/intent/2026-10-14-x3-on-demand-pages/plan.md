@@ -1,5 +1,5 @@
 # Plan: test on-demand pages, and load PostHog lazily (from spec.md 2026-10-14)
-Status: draft.
+Status: accepted (Paul, 14 October 2026: "Yes", including the changes to the protected tests e2e/page.spec.ts, test/break-fixture.sh and test/expect-gate.sh).
 
 ## Files that change
 

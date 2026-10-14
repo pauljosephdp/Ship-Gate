@@ -10,11 +10,14 @@ serve=""
 if [ "${1:-}" = "--serve" ]; then serve=1; shift; fi
 if [ -n "$serve" ]; then
   : "${SHIP_GATE_SERVE:?prepare.mjs must run first}"
-  bash -c "$SHIP_GATE_SERVE" > "${RUNNER_TEMP:-/tmp}/ship-gate-serve.log" 2>&1 &
+  # Its own process group, so the exit trap stops the whole server (npm, astro, workerd),
+  # not only the wrapper shell.
+  setsid bash -c "$SHIP_GATE_SERVE" > "${RUNNER_TEMP:-/tmp}/ship-gate-serve.log" 2>&1 &
   server_pid=$!
-  trap 'kill "$server_pid" 2>/dev/null' EXIT
+  trap 'kill -- "-$server_pid" 2>/dev/null || kill "$server_pid" 2>/dev/null' EXIT
   export SHIP_GATE_BASE_URL="http://localhost:4321" BASE_URL="http://localhost:4321"
-  for _ in $(seq 1 60); do curl -fsS -o /dev/null "$SHIP_GATE_BASE_URL/" 2>/dev/null && break; sleep 0.5; done
+  # Up to 90 s: the static server answers at once, the preview server (workerd) in ~15 s.
+  for _ in $(seq 1 180); do curl -fsS -o /dev/null "$SHIP_GATE_BASE_URL/" 2>/dev/null && break; sleep 0.5; done
   curl -sS -o /dev/null "$SHIP_GATE_BASE_URL/" || { echo "::error::The site did not start:"; cat "${RUNNER_TEMP:-/tmp}/ship-gate-serve.log"; exit 1; }
   echo "Serving the build at $SHIP_GATE_BASE_URL"
 fi

@@ -502,9 +502,73 @@ const turnstileEnv = {
 for (const v of Object.values(turnstileEnv))
   if (!/^[A-Z][A-Z0-9_]*$/.test(v)) err(`turnstileEnv name "${v}" is not a valid environment variable name.`);
 
+// server "preview" runs the site's own Worker (for @astrojs/cloudflare: workerd through
+// @cloudflare/vite-plugin). It must stay local: no Cloudflare credentials, local bindings
+// only (CLOUDFLARE_VITE_FORCE_LOCAL), and in the foreground, which Astro 7 skips under an
+// agent unless ASTRO_PREVIEW_BACKGROUND is set (other versions ignore the variable).
+const PREVIEW_ENV = 'env -u CLOUDFLARE_API_TOKEN -u CLOUDFLARE_API_KEY -u CLOUDFLARE_ACCOUNT_ID -u CLOUDFLARE_EMAIL '
+  + 'CLOUDFLARE_VITE_FORCE_LOCAL=true ASTRO_PREVIEW_BACKGROUND=1';
 const serveCommand = server === 'static'
   ? `node "${join(HERE, 'serve-static.mjs')}" "${distDir}" ${PORT}`
-  : `npm run preview -- --port ${PORT}`;
+  : `${PREVIEW_ENV} npm run preview -- --port ${PORT}`;
+
+// A binding marked `remote: true` reaches the real Cloudflare resource even from a local Worker.
+// Returns the names of such bindings in a wrangler config (JSON, JSONC or TOML text).
+function remoteBindings(text, toml) {
+  const found = [];
+  if (toml) {
+    let binding = null, table = '';
+    for (const raw of text.split('\n')) {
+      const line = raw.replace(/\s#.*$/, '').trim();
+      const head = line.match(/^\[\[?\s*([^\]]+?)\s*\]\]?$/);
+      if (head) { table = head[1]; binding = null; continue; }
+      const b = line.match(/^binding\s*=\s*["']([^"']+)["']/);
+      if (b) binding = b[1];
+      if (/^remote\s*=\s*true\b/.test(line)) found.push(binding ?? table);
+    }
+    return found;
+  }
+  // JSONC: drop comments outside strings and trailing commas, then walk every object.
+  let out = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { out += c; if (c === '\\') out += text[++i] ?? ''; else if (c === '"') q = false; continue; }
+    if (c === '"') { q = true; out += c; continue; }
+    if (c === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; out += '\n'; continue; }
+    if (c === '/' && text[i + 1] === '*') { i = text.indexOf('*/', i + 2); if (i < 0) break; i++; continue; }
+    out += c;
+  }
+  let data;
+  try { data = JSON.parse(out.replace(/,(\s*[}\]])/g, '$1')); } catch { return found; }
+  const walk = (v, key) => {
+    if (Array.isArray(v)) { for (const x of v) walk(x, key); return; }
+    if (!v || typeof v !== 'object') return;
+    if (v.remote === true) found.push(v.binding ?? v.name ?? key);
+    for (const [k, x] of Object.entries(v)) walk(x, k);
+  };
+  walk(data, '');
+  return found;
+}
+const remoteError = (file, names) =>
+  err(`${file}: binding "${names[0]}" is remote (remote: true). With "server": "preview" the gate runs the Worker on the PR, `
+    + 'and a remote binding would reach the real resource. Use a local binding for CI.');
+if (server === 'preview') {
+  for (const f of ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml']) {
+    if (!existsSync(f)) continue;
+    const names = remoteBindings(readFileSync(f, 'utf8'), f.endsWith('.toml'));
+    if (names.length) remoteError(f, names);
+  }
+}
+
+// Pages the Worker renders on request (server "preview"): a gated page may redirect a
+// visitor without a session to the site's sign-in page instead of answering 200.
+const onDemand = cfg.onDemand;
+if (onDemand !== undefined) {
+  if (server !== 'preview') err('onDemand needs "server": "preview": only the preview server renders pages on request.');
+  if (!onDemand || typeof onDemand !== 'object' || Array.isArray(onDemand)) err('onDemand must be an object.');
+  else if (onDemand.signInPath !== undefined && !isPathList([onDemand.signInPath]))
+    err('onDemand.signInPath must be a path on the site starting with "/", e.g. "/signin/".');
+}
 
 if (errors.length) fail();
 
@@ -512,6 +576,12 @@ if (errors.length) fail();
 if (mode === 'after-build') {
   const root = staticRoot(distDir);
   if (!existsSync(root)) { console.log(`::error::${root} not found — the build must run first.`); process.exit(1); }
+  // The adapter writes the Worker's resolved config into the build: check it as well.
+  const built = join(distDir, 'server', 'wrangler.json');
+  if (server === 'preview' && existsSync(built)) {
+    const names = remoteBindings(readFileSync(built, 'utf8'), false);
+    if (names.length) { remoteError(built, names); fail(); }
+  }
   const all = indexablePages(root).map((p) => p.path);
   const resolvePages = (v, label) => {
     if (v !== 'all') return v;
@@ -582,6 +652,8 @@ if (mode === 'after-build') {
     // checks that it writes no cookie or storage until the visitor accepts.
     trackerHosts: hybrid && posthog.cookieless !== 'off' ? TRACKER_HOSTS.filter((h) => h !== 'posthog.com') : TRACKER_HOSTS,
     posthog: hybrid ? { ...posthog, hosts: posthogHosts, testKey: POSTHOG_TEST_KEY, assetsHost: POSTHOG_EU.assets } : null,
+    server,
+    onDemand: server === 'preview' ? { signInPath: onDemand?.signInPath ?? null } : null,
     discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [], searchCrawlers, aiTraining },
   }, null, 2));
   console.log(`Ship Gate after build: ${all.length} indexable page(s) in ${root}; Lighthouse ${lhUrls.length} URL(s) × ${runs} run(s).`);
@@ -592,7 +664,7 @@ if (mode === 'after-build') {
 mkdirSync(OUT, { recursive: true });
 // Ship Gate's own test tooling, pinned by its lockfile. Sites don't carry these dependencies.
 for (const f of ['package.json', 'package-lock.json']) copyFileSync(join(HERE, '..', 'tools', f), join(OUT, f));
-for (const f of ['page.spec.ts', 'edge.spec.ts', 'helpers.ts']) copyFileSync(join(HERE, '..', 'e2e', f), join(OUT, f));
+for (const f of ['page.spec.ts', 'edge.spec.ts', 'on-demand.spec.ts', 'helpers.ts']) copyFileSync(join(HERE, '..', 'e2e', f), join(OUT, f));
 writeFileSync(
   join(OUT, 'playwright.config.ts'),
   `// Generated by Ship Gate — do not edit or commit.

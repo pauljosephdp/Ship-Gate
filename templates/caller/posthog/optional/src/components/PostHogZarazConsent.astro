@@ -40,6 +40,8 @@
     (window as { __posthog_zaraz_consent?: boolean }).__posthog_zaraz_consent = true;
     document.addEventListener('zarazConsentAPIReady', sync);
     document.addEventListener('zarazConsentChoicesUpdated', sync);
+    // PostHog loads lazily: apply a choice made before it was ready.
+    document.addEventListener('posthog:ready', sync);
     sync();
   }
 </script>

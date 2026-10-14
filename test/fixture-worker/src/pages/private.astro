@@ -1,0 +1,5 @@
+---
+// A gated page: without a session, the visitor goes to sign in.
+export const prerender = false;
+return Astro.redirect('/signin/', 303);
+---

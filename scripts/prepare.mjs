@@ -527,10 +527,10 @@ function remoteBindings(text, toml) {
       if (head) { table = head[1]; binding = null; continue; }
       const b = line.match(/^binding\s*=\s*["']([^"']+)["']/);
       if (b) binding = b[1];
-      if (/^remote\s*=\s*true\b/.test(line)) found.push(binding ?? table);
+      if (/^(experimental_)?remote\s*=\s*true\b/.test(line)) found.push(binding ?? table);
       // Inline tables: kv_namespaces = [{ binding = "CACHE", id = "x", remote = true }]
       for (const t of line.matchAll(/\{[^{}]*\}/g))
-        if (/\bremote\s*=\s*true\b/.test(t[0])) found.push(t[0].match(/\bbinding\s*=\s*["']([^"']+)["']/)?.[1] ?? line.split('=')[0].trim());
+        if (/\b(experimental_)?remote\s*=\s*true\b/.test(t[0])) found.push(t[0].match(/\bbinding\s*=\s*["']([^"']+)["']/)?.[1] ?? line.split('=')[0].trim());
     }
     return found;
   }
@@ -549,7 +549,8 @@ function remoteBindings(text, toml) {
   const walk = (v, key) => {
     if (Array.isArray(v)) { for (const x of v) walk(x, key); return; }
     if (!v || typeof v !== 'object') return;
-    if (v.remote === true) found.push(v.binding ?? v.name ?? key);
+    // `experimental_remote`: the key's earlier, experimental name.
+    if (v.remote === true || v.experimental_remote === true) found.push(v.binding ?? v.name ?? key);
     for (const [k, x] of Object.entries(v)) walk(x, k);
   };
   walk(data, '');
@@ -663,7 +664,7 @@ if (mode === 'after-build') {
     trackerHosts: hybrid && posthog.cookieless !== 'off' ? TRACKER_HOSTS.filter((h) => h !== 'posthog.com') : TRACKER_HOSTS,
     posthog: hybrid ? { ...posthog, hosts: posthogHosts, testKey: POSTHOG_TEST_KEY, assetsHost: POSTHOG_EU.assets } : null,
     server,
-    onDemand: server === 'preview' ? { signInPath: onDemand?.signInPath ?? null } : null,
+    onDemand: server === 'preview' ? { signInPath: onDemand?.signInPath ?? null, pages } : null,
     discovery: { levels: discoveryLevels, sitemap: discovery.sitemap, ignoreLinks: discovery.ignoreLinks ?? [], searchCrawlers, aiTraining },
   }, null, 2));
   console.log(`Ship Gate after build: ${all.length} indexable page(s) in ${root}; Lighthouse ${lhUrls.length} URL(s) × ${runs} run(s).`);

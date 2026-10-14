@@ -25,7 +25,7 @@ const graph = [
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="canonical" href={canonical} />
+    <link href={canonical} rel="canonical" />
     {noindex && <meta name="robots" content="noindex" />}
     {alternates.map((a) => <link rel="alternate" hreflang={a.hreflang} href={a.href} />)}
     <meta property="og:type" content="website" />

@@ -28,7 +28,7 @@ export const run = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.met
   };
   server: 'static' | 'preview';
   // server "preview" only; null otherwise. signInPath: where a gated page sends a visitor without a session.
-  onDemand: null | { signInPath: string | null };
+  onDemand: null | { signInPath: string | null; pages: string[] };
   discovery: { ignoreLinks: string[] };
 };
 

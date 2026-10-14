@@ -17,6 +17,10 @@ const emitted = (p: string) => {
   // Without a trailing slash, Workers static assets also serves dir/index.html (after a redirect).
   return p.endsWith('/') ? isFile(join(f, 'index.html')) : isFile(f) || isFile(`${f}.html`) || isFile(join(f, 'index.html'));
 };
+// A tag's attributes in any order, quoted or not, as check-discovery.mjs reads them.
+const attrs = (tag: string) => Object.fromEntries([...tag.matchAll(/([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)]
+  .map((m) => [m[1].toLowerCase(), m[2] ?? m[3] ?? m[4] ?? '']));
+const tags = (html: string, name: string) => [...html.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'gi'))].map((m) => attrs(m[0]));
 const notAPage = (p: string) => /^\/(api|ph)(\/|$)/.test(p);
 
 function htmlFiles(dir: string): string[] {
@@ -32,7 +36,8 @@ function htmlFiles(dir: string): string[] {
 function targets(): string[] {
   if (run.server !== 'preview') return [];
   const origin = new URL(run.siteUrl).origin;
-  const found = new Set(run.pages.filter((p) => !emitted(p)));
+  // `pages` (the key pages) and `e2ePages`: an on-demand key page is checked even when e2ePages leaves it out.
+  const found = new Set([...(run.onDemand?.pages ?? []), ...run.pages].filter((p) => !emitted(p)));
   for (const f of htmlFiles(run.root)) {
     // A relative link resolves against the page it is on, as check-discovery.mjs does.
     const rel = relative(run.root, f).split(sep).join('/');
@@ -72,6 +77,7 @@ test.describe('on-demand pages', () => {
     const inSitemap = sitemapPaths();
     const bad: string[] = [];
     const home = new URL(baseURL ?? 'http://localhost').origin;
+    const production = new URL(run.siteUrl).origin; // an absolute Location on the production origin is on this site
     // Follows redirects on this site (at most five): a 301 to a missing page is a dead link, not a pass.
     const follow = async (start: string) => {
       let path = start;
@@ -83,6 +89,7 @@ test.describe('on-demand pages', () => {
         const loc = res.headers()['location'] ?? '';
         let to: URL | null = null;
         try { to = new URL(loc, `${home}${path}`); } catch { /* reported below */ }
+        if (to && to.origin === production) to = new URL(to.pathname + to.search, home);
         if (!to || to.origin !== home) return { res, path, hops, error: `${status} to another origin (${loc || 'no Location'})` };
         // A permanent redirect is a moved page; a temporary one must be the site's sign-in.
         if (![301, 308].includes(status) && to.pathname !== signIn)
@@ -97,12 +104,15 @@ test.describe('on-demand pages', () => {
       const via = hops.length ? ` (via ${hops.join(' → ')})` : '';
       if (error || !res) { bad.push(`${p} → ${error}${via}`); continue; }
       if (res.status() !== 200) { bad.push(`${p} → ${res.status()}${via}`); continue; }
+      // Canonical and noindex are page rules: a feed or a download only has to answer.
+      if (!/text\/html/i.test(res.headers()['content-type'] ?? '')) continue;
       const html = await res.text();
-      const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]*href=["']([^"']+)/i)?.[1];
+      const canonical = tags(html, 'link').find((a) => (a.rel ?? '').toLowerCase().split(/\s+/).includes('canonical'))?.href;
       const here = path.split('?')[0];
       if (canonical && new URL(canonical, run.siteUrl).pathname !== here) bad.push(`${p}${via}: canonical points at ${canonical}`);
       if (!canonical) bad.push(`${p}${via}: no canonical`);
-      const noindex = /<meta[^>]+name=["']robots["'][^>]*content=["'][^"']*noindex/i.test(html) || /noindex/i.test(res.headers()['x-robots-tag'] ?? '');
+      const noindex = tags(html, 'meta').some((a) => /^(robots|googlebot)$/i.test(a.name ?? '') && /noindex/i.test(a.content ?? ''))
+        || /noindex/i.test(res.headers()['x-robots-tag'] ?? '');
       if (noindex && inSitemap.has(here)) bad.push(`${p}${via}: noindex, but listed in the sitemap`);
     }
     expect(bad).toEqual([]);

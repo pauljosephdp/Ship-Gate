@@ -45,7 +45,8 @@
       "/account/",
       "/private/",
       "/signin/",
-      "/api/"
+      "/api/",
+      "/feed.xml"
     ]
   },
   "server": "preview",

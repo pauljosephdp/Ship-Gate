@@ -29,7 +29,7 @@ export const run = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.met
   server: 'static' | 'preview';
   // server "preview" only; null otherwise. signInPath: where a gated page sends a visitor without a session.
   onDemand: null | { signInPath: string | null; pages: string[] };
-  discovery: { ignoreLinks: string[] };
+  discovery: { ignoreLinks: string[]; sitemap?: string };
 };
 
 // A request to PostHog: its cloud hosts, or the site's own proxy path (posthog.apiHost).

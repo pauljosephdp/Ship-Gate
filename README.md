@@ -259,8 +259,12 @@ page. Two checks run only in preview mode:
   trailing slash fails when the page it lands on is missing. A `Location` on the
   production origin (`siteUrl`) counts as on the site. When the final answer is
   HTML, it must name itself as canonical, and a `noindex` page must not be in the
-  sitemap; a feed or a download only has to answer. Paths a `public/_redirects`
-  rule answers are left to the discovery scan and the edge checks. The key pages in `pages` are
+  sitemap; a feed or a download only has to answer. A static `public/_redirects`
+  rule that redirects is left to the edge checks, which verify its status,
+  `Location` and destination; any other rule (a splat, a placeholder, a 200
+  rewrite) is followed on the served site, and a rule may send a visitor to
+  another site. Sitemaps are read from `discovery.sitemap` (or every
+  `sitemap*.xml` at the root), following sitemap-index entries. The key pages in `pages` are
   checked even when `e2ePages` leaves them out.
   The discovery scan still reads the static build only, so keep these prefixes
   in `discovery.ignoreLinks`.

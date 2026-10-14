@@ -21,16 +21,21 @@ const emitted = (p: string) => {
 const attrs = (tag: string) => Object.fromEntries([...tag.matchAll(/([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)]
   .map((m) => [m[1].toLowerCase(), m[2] ?? m[3] ?? m[4] ?? '']));
 const tags = (html: string, name: string) => [...html.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'gi'))].map((m) => attrs(m[0]));
-// Paths a public/_redirects rule answers: Workers static assets serves those before the Worker,
-// and the discovery scan and edge.spec.ts own them. `*` is a splat, `:name` one segment.
+// public/_redirects rules (Workers static assets answers them before the Worker). A static rule
+// that redirects is checked by edge.spec.ts (status, Location, destination), so its source is left
+// out here; every other rule (a splat, a placeholder, a 200 rewrite) is followed on the served site.
+// `*` is a splat, `:name` one segment.
 const redirectRules = (() => {
   const f = join(run.root, '_redirects');
-  if (!existsSync(f)) return [] as RegExp[];
+  if (!existsSync(f)) return [] as { re: RegExp; checkedByEdge: boolean }[];
   return readFileSync(f, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-    .map((l) => l.split(/\s+/)[0]).filter((from) => from.startsWith('/'))
-    .map((from) => new RegExp(`^${from.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/:[A-Za-z]\w*/g, '[^/]+')}$`));
+    .map((l) => l.split(/\s+/)).filter(([from]) => from.startsWith('/'))
+    .map(([from, to, status]) => ({
+      re: new RegExp(`^${from.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/:[A-Za-z]\w*/g, '[^/]+')}$`),
+      checkedByEdge: !/\*|\/:[A-Za-z]/.test(from) && Number(status ?? 302) !== 200 && !!to,
+    }));
 })();
-const redirected = (p: string) => redirectRules.some((r) => r.test(p));
+const ruleFor = (p: string) => redirectRules.find((r) => r.re.test(p));
 const notAPage = (p: string) => /^\/(api|ph)(\/|$)/.test(p);
 
 function htmlFiles(dir: string): string[] {
@@ -59,18 +64,33 @@ function targets(): string[] {
         if (u.origin !== origin) continue;
         p = u.pathname;
       } catch { continue; }
-      if (!notAPage(p) && !emitted(p) && !redirected(p)) found.add(p);
+      if (!notAPage(p) && !emitted(p) && !ruleFor(p)?.checkedByEdge) found.add(p);
     }
   }
   return [...found].filter((p) => !notAPage(p)).sort();
 }
 
+// Every URL in the site's sitemaps: the configured one (discovery.sitemap) or any sitemap*.xml at
+// the root, following sitemap-index entries into child files, as the discovery scan does.
 const sitemapPaths = () => {
   const paths = new Set<string>();
-  for (const name of existsSync(run.root) ? readdirSync(run.root) : [])
-    if (/^sitemap.*\.xml$/.test(name))
-      for (const m of readFileSync(join(run.root, name), 'utf8').matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g))
-        try { paths.add(new URL(m[1]).pathname); } catch { /* not a URL */ }
+  const todo = run.discovery.sitemap ? [run.discovery.sitemap]
+    : (existsSync(run.root) ? readdirSync(run.root) : []).filter((n) => /^sitemap.*\.xml$/.test(n)).map((n) => `/${n}`);
+  const seen = new Set<string>();
+  while (todo.length) {
+    const at = todo.pop() as string;
+    if (seen.has(at)) continue;
+    seen.add(at);
+    const f = join(run.root, decode(at));
+    if (!isFile(f)) continue;
+    const xml = readFileSync(f, 'utf8');
+    const index = /<sitemapindex\b/i.test(xml);
+    for (const m of xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)) {
+      let u: URL;
+      try { u = new URL(m[1]); } catch { continue; }
+      if (index) todo.push(u.pathname); else paths.add(u.pathname);
+    }
+  }
   return paths;
 };
 
@@ -93,24 +113,28 @@ test.describe('on-demand pages', () => {
       let path = start;
       const hops: string[] = [];
       for (let i = 0; i < 6; i++) {
+        const fromRule = !!ruleFor(path.split('?')[0]);
         const res = await request.get(path, { maxRedirects: 0 });
         const status = res.status();
-        if (![301, 302, 303, 307, 308].includes(status)) return { res, path, hops, error: null };
+        if (![301, 302, 303, 307, 308].includes(status)) return { res, path, hops, error: null, offsite: false };
         const loc = res.headers()['location'] ?? '';
         let to: URL | null = null;
         try { to = new URL(loc, `${home}${path}`); } catch { /* reported below */ }
         if (to && to.origin === production) to = new URL(to.pathname + to.search, home);
-        if (!to || to.origin !== home) return { res, path, hops, error: `${status} to another origin (${loc || 'no Location'})` };
+        // A _redirects rule may send a visitor to another site (a shortcut); that site is not this gate's.
+        if (to && to.origin !== home && fromRule) return { res: null, path, hops, error: null, offsite: true };
+        if (!to || to.origin !== home) return { res, path, hops, error: `${status} to another origin (${loc || 'no Location'})`, offsite: false };
         // A permanent redirect is a moved page; a temporary one must be the site's sign-in.
-        if (![301, 308].includes(status) && to.pathname !== signIn)
-          return { res, path, hops, error: `${status} ${to.pathname}; a gated page redirects to onDemand.signInPath (${signIn ?? 'not set'})` };
+        if (![301, 308].includes(status) && to.pathname !== signIn && !fromRule)
+          return { res, path, hops, error: `${status} ${to.pathname}; a gated page redirects to onDemand.signInPath (${signIn ?? 'not set'})`, offsite: false };
         hops.push(`${status} ${to.pathname}`);
         path = to.pathname + to.search;
       }
-      return { res: null, path, hops, error: 'more than five redirects' };
+      return { res: null, path, hops, error: 'more than five redirects', offsite: false };
     };
     for (const p of list) {
-      const { res, path, hops, error } = await follow(p);
+      const { res, path, hops, error, offsite } = await follow(p);
+      if (offsite) continue;
       const via = hops.length ? ` (via ${hops.join(' → ')})` : '';
       if (error || !res) { bad.push(`${p} → ${error}${via}`); continue; }
       if (res.status() !== 200) { bad.push(`${p} → ${res.status()}${via}`); continue; }

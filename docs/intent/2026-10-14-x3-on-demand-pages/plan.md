@@ -141,3 +141,7 @@ concern 3).
     correct site linking `/chat` to another origin. The Worker fixture now carries that shortcut, which reproduced the
     failure before the fix. The docs now say `CLOUDFLARE_INCLUDE_PROCESS_ENV=false` is the plugin's default, pinned so
     a site's `.env` can't turn it on.
+15. **Codex review on PR #46** (two P2): the on-demand check now leaves out only the sources of static redirecting
+    `_redirects` rules (which edge.spec.ts checks end to end) and follows every other rule on the served site, where
+    a rule may also leave the site; and it reads the configured sitemap and follows sitemap-index entries. The fixture
+    now links through a splat rule (`/old-account/* /account/ 301`); pointed at a missing page, it fails the check.

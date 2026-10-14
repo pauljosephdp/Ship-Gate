@@ -2,16 +2,17 @@
 // PostHog in the browser, bundled from posthog-js (ship-gate.config.json → posthog.embed "npm").
 // Put <PostHog /> in the base layout's <head>, so every page loads it. The bundle is a
 // same-origin /_astro/ script, so CSP needs no inline-script allowance.
-// Initialises nothing when PUBLIC_POSTHOG_KEY is unset.
+// posthog-js loads lazily: a dynamic import once the page has loaded and the browser is idle
+// (1 s at most), so its ~95 KB stays out of the first-screen JS. On init it fires `posthog:ready`
+// on document. Initialises nothing when PUBLIC_POSTHOG_KEY is unset.
 ---
 <script>
-  import posthog from 'posthog-js';
   import { posthogOptions } from '../lib/posthog-options';
 
   const key = import.meta.env.PUBLIC_POSTHOG_KEY;
-  // <ClientRouter> re-runs scripts on navigation; initialise once.
-  if (key && !window.__posthog_initialized) {
-    window.__posthog_initialized = true;
+
+  async function start(key: string) {
+    const { default: posthog } = await import('posthog-js');
     // Preview and local traffic stay out of production analytics.
     const tag = { environment: __DEPLOY_ENV__ };
     posthog.init(key, {
@@ -28,5 +29,20 @@
     });
     posthog.register(tag);
     window.posthog = posthog;
+    document.dispatchEvent(new Event('posthog:ready'));
+  }
+
+  // A failed chunk load (offline, a deploy replaced the file) leaves PostHog for the next page.
+  const load = (key: string) => start(key).catch(() => { window.__posthog_initialized = false; });
+
+  // <ClientRouter> re-runs scripts on navigation; initialise once.
+  if (key && !window.__posthog_initialized) {
+    window.__posthog_initialized = true;
+    const idle = () =>
+      'requestIdleCallback' in window
+        ? requestIdleCallback(() => load(key), { timeout: 1000 })
+        : setTimeout(() => load(key), 1000);
+    if (document.readyState === 'complete') idle();
+    else addEventListener('load', idle, { once: true });
   }
 </script>

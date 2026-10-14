@@ -1,0 +1,56 @@
+{
+  "siteUrl": "https://example.com",
+  "policies": [
+    "posthog-server-only",
+    "tags-via-zaraz",
+    "turnstile-forms",
+    "workers-builds-only",
+    "market-cn",
+    "rtl-logical-css",
+    "consent-before-tracking"
+  ],
+  "pages": [
+    "/",
+    "/about/",
+    "/contact/",
+    "/ar/",
+    "/account/",
+    "/private/"
+  ],
+  "formPages": [
+    "/contact/"
+  ],
+  "smokePaths": [
+    "/"
+  ],
+  "lighthouseUrls": [
+    "/",
+    "/account/"
+  ],
+  "e2ePages": [
+    "/",
+    "/about/",
+    "/contact/",
+    "/ar/",
+    "/account/",
+    "/private/"
+  ],
+  "keyboard": "error",
+  "discovery": {
+    "searchCrawlers": [
+      "Baiduspider",
+      "Yeti"
+    ],
+    "ignoreLinks": [
+      "/account/",
+      "/private/",
+      "/signin/",
+      "/api/",
+      "/feed.xml"
+    ]
+  },
+  "server": "preview",
+  "onDemand": {
+    "signInPath": "/signin/"
+  }
+}

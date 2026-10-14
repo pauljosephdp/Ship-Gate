@@ -1,0 +1,154 @@
+// Ship Gate on-demand test — pages the Worker renders on request ("server": "preview").
+// The discovery scan reads the static build only, so a link to such a page is outside it
+// (list its prefix in discovery.ignoreLinks). This test asks the served Worker instead: every
+// internal link in the build whose target has no emitted file, and every page in `pages` with
+// no emitted file, must answer 200 or redirect on this site (a gated page sends a visitor to
+// onDemand.signInPath). A page that answers 200 names itself as canonical, and a noindex page
+// is not in the sitemap. API routes (/api/) and the PostHog proxy (/ph/) are not pages.
+import { test, expect } from '@playwright/test';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { run } from './helpers';
+
+const isFile = (f: string) => existsSync(f) && statSync(f).isFile();
+const decode = (p: string) => { try { return decodeURIComponent(p); } catch { return p; } };
+const emitted = (p: string) => {
+  const f = join(run.root, decode(p));
+  // Without a trailing slash, Workers static assets also serves dir/index.html (after a redirect).
+  return p.endsWith('/') ? isFile(join(f, 'index.html')) : isFile(f) || isFile(`${f}.html`) || isFile(join(f, 'index.html'));
+};
+// A tag's attributes in any order, quoted or not, as check-discovery.mjs reads them.
+const attrs = (tag: string) => Object.fromEntries([...tag.matchAll(/([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)]
+  .map((m) => [m[1].toLowerCase(), m[2] ?? m[3] ?? m[4] ?? '']));
+const tags = (html: string, name: string) => [...html.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'gi'))].map((m) => attrs(m[0]));
+// public/_redirects rules (Workers static assets answers them before the Worker). A static rule
+// that redirects is checked by edge.spec.ts (status, Location, destination), so its source is left
+// out here; every other rule (a splat, a placeholder, a 200 rewrite) is followed on the served site.
+// `*` is a splat, `:name` one segment.
+const redirectRules = (() => {
+  const f = join(run.root, '_redirects');
+  if (!existsSync(f)) return [] as { re: RegExp; checkedByEdge: boolean }[];
+  return readFileSync(f, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+    .map((l) => l.split(/\s+/)).filter(([from]) => from.startsWith('/'))
+    .map(([from, to, status]) => ({
+      re: new RegExp(`^${from.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/:[A-Za-z]\w*/g, '[^/]+')}$`),
+      checkedByEdge: !/\*|\/:[A-Za-z]/.test(from) && Number(status ?? 302) !== 200 && !!to,
+    }));
+})();
+const ruleFor = (p: string) => redirectRules.find((r) => r.re.test(p));
+const notAPage = (p: string) => /^\/(api|ph)(\/|$)/.test(p);
+
+function htmlFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const f = join(dir, name);
+    if (statSync(f).isDirectory()) out.push(...htmlFiles(f));
+    else if (name.endsWith('.html')) out.push(f);
+  }
+  return out;
+}
+
+function targets(): string[] {
+  if (run.server !== 'preview') return [];
+  const origin = new URL(run.siteUrl).origin;
+  // `pages` (the key pages) and `e2ePages`: an on-demand key page is checked even when e2ePages leaves it out.
+  const found = new Set([...(run.onDemand?.pages ?? []), ...run.pages].filter((p) => !emitted(p)));
+  for (const f of htmlFiles(run.root)) {
+    // A relative link resolves against the page it is on, as check-discovery.mjs does.
+    const rel = relative(run.root, f).split(sep).join('/');
+    const at = `/${rel.replace(/(^|\/)index\.html$/, '$1').replace(/\.html$/, '')}`;
+    for (const m of readFileSync(f, 'utf8').matchAll(/<a\b[^>]*\shref=["']([^"'#?]+)/gi)) {
+      let p: string;
+      try {
+        const u = new URL(m[1].replace(/&amp;/g, '&'), `${origin}${at}`);
+        if (u.origin !== origin) continue;
+        p = u.pathname;
+      } catch { continue; }
+      if (!notAPage(p) && !emitted(p) && !ruleFor(p)?.checkedByEdge) found.add(p);
+    }
+  }
+  return [...found].filter((p) => !notAPage(p)).sort();
+}
+
+// Every URL in the site's sitemaps: the configured one (discovery.sitemap) or any sitemap*.xml at
+// the root, following sitemap-index entries into child files, as the discovery scan does.
+const sitemapPaths = () => {
+  const paths = new Set<string>();
+  const todo = run.discovery.sitemap ? [run.discovery.sitemap]
+    : (existsSync(run.root) ? readdirSync(run.root) : []).filter((n) => /^sitemap.*\.xml$/.test(n)).map((n) => `/${n}`);
+  const seen = new Set<string>();
+  while (todo.length) {
+    const at = todo.pop() as string;
+    if (seen.has(at)) continue;
+    seen.add(at);
+    const f = join(run.root, decode(at));
+    if (!isFile(f)) continue;
+    const xml = readFileSync(f, 'utf8');
+    const index = /<sitemapindex\b/i.test(xml);
+    for (const m of xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)) {
+      let u: URL;
+      try { u = new URL(m[1]); } catch { continue; }
+      if (index) todo.push(u.pathname); else paths.add(u.pathname);
+    }
+  }
+  return paths;
+};
+
+test.describe('on-demand pages', () => {
+  test.beforeEach(({}, info) => {
+    test.skip(run.server !== 'preview', 'Only "server": "preview" serves pages rendered on request.');
+    test.skip(info.project.name !== 'desktop', 'HTTP-level checks run once.');
+  });
+
+  test('every on-demand link target and page answers 200 or redirects on this site', async ({ request, baseURL }) => {
+    const list = targets();
+    test.skip(list.length === 0, 'No links or pages outside the static build.');
+    const signIn = run.onDemand?.signInPath ?? null;
+    const inSitemap = sitemapPaths();
+    const bad: string[] = [];
+    const home = new URL(baseURL ?? 'http://localhost').origin;
+    const production = new URL(run.siteUrl).origin; // an absolute Location on the production origin is on this site
+    // Follows redirects on this site (at most five): a 301 to a missing page is a dead link, not a pass.
+    const follow = async (start: string) => {
+      let path = start;
+      const hops: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        const fromRule = !!ruleFor(path.split('?')[0]);
+        const res = await request.get(path, { maxRedirects: 0 });
+        const status = res.status();
+        if (![301, 302, 303, 307, 308].includes(status)) return { res, path, hops, error: null, offsite: false };
+        const loc = res.headers()['location'] ?? '';
+        let to: URL | null = null;
+        try { to = new URL(loc, `${home}${path}`); } catch { /* reported below */ }
+        if (to && to.origin === production) to = new URL(to.pathname + to.search, home);
+        // A _redirects rule may send a visitor to another site (a shortcut); that site is not this gate's.
+        if (to && to.origin !== home && fromRule) return { res: null, path, hops, error: null, offsite: true };
+        if (!to || to.origin !== home) return { res, path, hops, error: `${status} to another origin (${loc || 'no Location'})`, offsite: false };
+        // A permanent redirect is a moved page; a temporary one must be the site's sign-in.
+        if (![301, 308].includes(status) && to.pathname !== signIn && !fromRule)
+          return { res, path, hops, error: `${status} ${to.pathname}; a gated page redirects to onDemand.signInPath (${signIn ?? 'not set'})`, offsite: false };
+        hops.push(`${status} ${to.pathname}`);
+        path = to.pathname + to.search;
+      }
+      return { res: null, path, hops, error: 'more than five redirects', offsite: false };
+    };
+    for (const p of list) {
+      const { res, path, hops, error, offsite } = await follow(p);
+      if (offsite) continue;
+      const via = hops.length ? ` (via ${hops.join(' → ')})` : '';
+      if (error || !res) { bad.push(`${p} → ${error}${via}`); continue; }
+      if (res.status() !== 200) { bad.push(`${p} → ${res.status()}${via}`); continue; }
+      // Canonical and noindex are page rules: a feed or a download only has to answer.
+      if (!/text\/html/i.test(res.headers()['content-type'] ?? '')) continue;
+      const html = await res.text();
+      const canonical = tags(html, 'link').find((a) => (a.rel ?? '').toLowerCase().split(/\s+/).includes('canonical'))?.href;
+      const here = path.split('?')[0];
+      if (canonical && new URL(canonical, run.siteUrl).pathname !== here) bad.push(`${p}${via}: canonical points at ${canonical}`);
+      if (!canonical) bad.push(`${p}${via}: no canonical`);
+      const noindex = tags(html, 'meta').some((a) => /^(robots|googlebot)$/i.test(a.name ?? '') && /noindex/i.test(a.content ?? ''))
+        || /noindex/i.test(res.headers()['x-robots-tag'] ?? '');
+      if (noindex && inSitemap.has(here)) bad.push(`${p}${via}: noindex, but listed in the sitemap`);
+    }
+    expect(bad).toEqual([]);
+  });
+});

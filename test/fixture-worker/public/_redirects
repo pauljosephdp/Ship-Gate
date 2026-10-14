@@ -1,0 +1,3 @@
+/old-about /about/ 301
+/chat https://example.org/chat 302
+/old-account/* /account/ 301

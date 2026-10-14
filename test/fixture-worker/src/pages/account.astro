@@ -1,0 +1,10 @@
+---
+// Rendered on request: the Worker answers this page, not a file in the build.
+import Base from '../layouts/Base.astro';
+export const prerender = false;
+const at = new Date().toISOString();
+---
+<Base title="Your account" description="A page the Worker renders on each request, so Ship Gate proves it can test one." noindex>
+  <h1>Your account</h1>
+  <p>Rendered on request at <time datetime={at}>{at}</time>.</p>
+</Base>

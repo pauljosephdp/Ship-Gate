@@ -224,6 +224,32 @@ expect_prepare "no lint script needed"            pass ":"
 expect_prepare "missing check script"             "missing the \"check\" script" "sed -i 's/\"check\": \"astro check\", //' package.json"
 expect_prepare "preview server needs preview"     "missing the \"preview\" script" "sed -i 's/\"preview\": \"astro preview\",//' package.json && cfg '\"server\":\"preview\"'"
 expect_prepare "static server needs no preview"   pass                        "sed -i 's/\"preview\": \"astro preview\",//' package.json"
+# server "preview" runs the site's Worker in CI: local bindings only.
+KV_REMOTE='{"kv_namespaces":[{"binding":"CACHE","id":"abc","remote":true}]}'
+expect_prepare "preview: local bindings pass"      pass                        "cfg '\"server\":\"preview\"' && echo '{\"kv_namespaces\":[{\"binding\":\"CACHE\",\"id\":\"abc\"}]}' > wrangler.jsonc"
+expect_prepare "preview: remote binding (jsonc)"   'binding "CACHE" is remote' "cfg '\"server\":\"preview\"' && echo '$KV_REMOTE' > wrangler.jsonc"
+expect_prepare "preview: remote binding (toml)"    'binding "DB" is remote'    "cfg '\"server\":\"preview\"' && printf '[[d1_databases]]\nbinding = \"DB\"\ndatabase_id = \"x\"\nremote = true\n' > wrangler.toml"
+expect_prepare "preview: remote binding (toml inline)" 'binding "CACHE" is remote' "cfg '\"server\":\"preview\"' && printf 'kv_namespaces = [{ binding = \"CACHE\", id = \"x\", remote = true }]\n' > wrangler.toml"
+expect_prepare "preview: experimental_remote binding" 'binding "AI" is remote' "cfg '\"server\":\"preview\"' && echo '{\"services\":[{\"binding\":\"AI\",\"service\":\"x\",\"experimental_remote\":true}]}' > wrangler.json"
+expect_prepare "preview: unreadable wrangler.jsonc" "could not read"      "cfg '\"server\":\"preview\"' && echo '{ not json' > wrangler.jsonc"
+expect_prepare "preview: remote: false passes"     pass                        "cfg '\"server\":\"preview\"' && echo '{\"r2_buckets\":[{\"binding\":\"B\",\"bucket_name\":\"b\",\"remote\":false}]}' > wrangler.json"
+expect_prepare "static ignores remote bindings"    pass                        "echo '$KV_REMOTE' > wrangler.jsonc"
+expect_prepare "onDemand.signInPath accepted"      pass                        "cfg '\"server\":\"preview\",\"onDemand\":{\"signInPath\":\"/signin/\"}'"
+expect_prepare "onDemand.signInPath not a path"    "onDemand.signInPath must" "cfg '\"server\":\"preview\",\"onDemand\":{\"signInPath\":\"https://x.example/\"}'"
+expect_prepare "onDemand.signInPath protocol-relative" "onDemand.signInPath must" "cfg '\"server\":\"preview\",\"onDemand\":{\"signInPath\":\"//x.example/\"}'"
+expect_prepare "onDemand needs server preview"     "onDemand needs"            "cfg '\"onDemand\":{\"signInPath\":\"/signin/\"}'"
+# The preview serve command runs the Worker locally, never with Cloudflare credentials.
+d="$(baseline)"; cd "$d" && cfg '"server":"preview"'
+GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" node "$PREPARE" verify >/dev/null 2>&1
+mkdir -p dist && echo '<!doctype html><title>x</title><h1>x</h1>' > dist/index.html
+GITHUB_ENV= SHIP_GATE_DIR="$d/.sg" node "$PREPARE" after-build >/dev/null 2>&1
+serve="$(grep -o '"command": *"[^"]*"\|command: "[^"]*"' "$d/.sg/playwright.config.ts" 2>/dev/null)"
+if grep -qF 'CLOUDFLARE_VITE_FORCE_LOCAL=true' <<<"$serve" && grep -qF -- '-u CLOUDFLARE_API_TOKEN' <<<"$serve" \
+  && grep -qF -- '-u CF_API_TOKEN' <<<"$serve" && grep -qF 'ASTRO_PREVIEW_BACKGROUND=1' <<<"$serve" \
+  && grep -qF 'CLOUDFLARE_INCLUDE_PROCESS_ENV=false' <<<"$serve" \
+  && grep -qF '"startServerReadyTimeout": 90000' "$d/.sg/lighthouserc.json" 2>/dev/null; then ok "preview serve command is local, foreground, credential-free"
+else bad "preview serve command is local, foreground, credential-free" "serve command: ${serve:-none}" ""; fi
+cd "$HERE" && rm -rf "$d"
 expect_prepare "missing @astrojs/check"           "Missing dev dependency @astrojs/check" "sed -i 's/\"@astrojs\/check\": \"1\"//' package.json"
 expect_prepare "build script deploys"             "writes to production"      "sed -i 's/\"build\": \"astro build\"/\"build\": \"astro build \&\& wrangler deploy\"/' package.json"
 expect_prepare "siteUrl with trailing slash"      "siteUrl must be"           "sed -i 's#https://example.com#https://example.com/#' ship-gate.config.json"
@@ -946,7 +972,7 @@ else bad "deploy hook deepens a shallow clone and rolls back" "no wrangler rollb
 rm -rf "$(dirname "$shallow")"
 rm -rf "$rb"
 n="$(grep -cF 'stage: ${{ env.SHIP_GATE_FIXTURE_STAGE }}' "$HERE/../.github/workflows/self-test.yml")"
-m="$(grep -cF 'working-directory: test/fixture-site' "$HERE/../.github/workflows/self-test.yml")"
+m="$(grep -cF 'working-directory: ${{ matrix.dir }}' "$HERE/../.github/workflows/self-test.yml")"
 if [ "$n" = "$m" ]; then ok "every fixture gate step passes its stage ($n)"; else bad "every fixture gate step passes its stage" "$n of $m" ""; fi
 
 echo "AI-native SDLC: hooks, review, CI health"

@@ -215,8 +215,62 @@ The built site is served by `scripts/serve-static.mjs`, which behaves like
 Cloudflare Workers static assets: it applies `_redirects` and `_headers`, hides
 `.assetsignore` files, and redirects `/about` to `/about/` as Workers does. So
 CSP, security headers and redirects are tested on the PR, not discovered in
-production. Nothing in the gate runs `wrangler`: some site configs run a remote
-migration whenever wrangler starts.
+production. The gate never runs `wrangler deploy` or a remote command: some site
+configs run a remote migration whenever wrangler's build command runs.
+
+**Pages rendered on request (`"server": "preview"`).** A site whose Worker renders
+pages on request (Astro `export const prerender = false` with
+`@astrojs/cloudflare`) sets `"server": "preview"`. The gate then serves it with
+`npm run preview`, which runs the site's own Worker in workerd, and every
+served-URL check (the browser suite, Lighthouse and `checks.browser`) runs
+against that Worker. The serve command is local by construction:
+
+- it unsets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`
+  and `CLOUDFLARE_EMAIL`, and sets `CLOUDFLARE_VITE_FORCE_LOCAL=true`, so every
+  binding is local;
+- it sets `ASTRO_PREVIEW_BACKGROUND=1`, which keeps Astro 7's preview in the
+  foreground in an agent session;
+- `prepare` fails when the wrangler config (`wrangler.jsonc`, `.json` or
+  `.toml`) or the built `dist/server/wrangler.json` marks a binding
+  `remote: true` (or the older `experimental_remote: true`), and when it can't
+  read the config;
+- the preview's build-time config is read from the build; wrangler's
+  `build.command` never runs.
+
+The serve command also pins `CLOUDFLARE_INCLUDE_PROCESS_ENV=false` (the
+plugin's default, which a site's `.env` file could otherwise turn on), so the job's
+environment is never handed to the Worker as secrets; the Worker reads the
+site's own `.dev.vars` or `.env` files, so never commit a production secret
+there. Preview starts in
+about 15 s; the serve step waits up to 90 s and stops the whole process group
+afterwards. The fixture `test/fixture-worker` proves this mode on every Ship Gate
+change (`fixture (worker)` in `self-test.yml`).
+
+List the on-demand pages in `pages` (and `e2ePages`; `"all"` only finds pages
+the build emits). A gated page may redirect a visitor without a session to
+`onDemand.signInPath`; Playwright follows the redirect and checks the sign-in
+page. Two checks run only in preview mode:
+
+- **On-demand links** (`e2e/on-demand.spec.ts`): every internal link in the
+  build whose target has no emitted file (outside `/api/` and `/ph/`; relative
+  links resolve against their page), and every such page in `pages`, must end
+  in a 200 after following redirects on the site, at most five: permanent ones,
+  and temporary ones only to `onDemand.signInPath`. So a link missing its
+  trailing slash fails when the page it lands on is missing. A `Location` on the
+  production origin (`siteUrl`) counts as on the site. When the final answer is
+  HTML, it must name itself as canonical, and a `noindex` page must not be in the
+  sitemap; a feed or a download only has to answer. A static `public/_redirects`
+  rule that redirects is left to the edge checks, which verify its status,
+  `Location` and destination; any other rule (a splat, a placeholder, a 200
+  rewrite) is followed on the served site, and a rule may send a visitor to
+  another site. Sitemaps are read from `discovery.sitemap` (or every
+  `sitemap*.xml` at the root), following sitemap-index entries. The key pages in `pages` are
+  checked even when `e2ePages` leaves them out.
+  The discovery scan still reads the static build only, so keep these prefixes
+  in `discovery.ignoreLinks`.
+- **CSP on every page**: `public/_headers` covers static files only, so a page
+  the Worker renders can lose the CSP its static pages carry. When the home page
+  sends a CSP, every listed page must send one too.
 
 ### Lighthouse standard
 
@@ -265,7 +319,8 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
 - **Smoke:** 200, one `h1`, a title and one meta description, no JS errors.
   With `posthog-server-only`, no browser calls to PostHog. With
   `posthog-hybrid` (desktop), every page tries to reach PostHog and defines
-  `window.posthog`; with the npm embed the real SDK must also be loaded,
+  `window.posthog`; with the npm embed the real SDK must also be loaded (the
+  test waits up to 10 s for the lazy load),
   capturing before any consent choice, and in the configured cookieless mode.
   With `turnstile-forms`, a Turnstile widget on every `formPages` page.
 - **axe, WCAG 2.2 AA** (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`),
@@ -621,13 +676,13 @@ policy plus the consent bridge) builds from these same files, so CI proves them 
 | Template | Put it at | What it does |
 |---|---|---|
 | `src/lib/posthog-options.ts` | same path | Every browser feature on: `defaults: '2026-08-30'`, `person_profiles: 'always'`, autocapture, `capture_pageview: 'history_change'`, page leave, heatmaps, dead clicks, exceptions, web vitals and network timing, session replay (cross-origin iframes, console logs), surveys and feature flags, `cross_subdomain_cookie`, and `cookieless_mode: 'on_reject'` with `opt_out_capturing_by_default` |
-| `src/components/PostHog.astro` | same path, in the base layout's `<head>` | The npm embed: bundles `posthog-js` into a same-origin `/_astro/` script, initialises once (`<ClientRouter>`-safe), adds `tracing_headers` for the site's own host, registers `environment: __DEPLOY_ENV__`, and registers it again after every `opt_in_capturing()` and `opt_out_capturing()` (opting in moves posthog-js to cookie storage, which drops the tag; every event after consent would then slip past the "not production" filter) |
+| `src/components/PostHog.astro` | same path, in the base layout's `<head>` | The npm embed: `posthog-js` loads lazily, a dynamic `import()` once the page has loaded and the browser is idle (1 s at most), so its ~95 KB gzip stays out of the first-screen JS; the key stays in the small same-origin `/_astro/` entry script. It initialises once (`<ClientRouter>`-safe), adds `tracing_headers` for the site's own host, registers `environment: __DEPLOY_ENV__`, and registers it again after every `opt_in_capturing()` and `opt_out_capturing()` (opting in moves posthog-js to cookie storage, which drops the tag; every event after consent would then slip past the "not production" filter), then fires `posthog:ready` on `document`. A visitor who leaves within about a second of the page loading sends no pageview |
 | `src/components/PostHogSnippet.astro` | instead of `PostHog.astro` | The snippet from PostHog's Astro guide, EU host, same options and the same re-tagging after consent, no npm dependency; needs `'unsafe-inline'` under a CSP |
 | `src/lib/server/analytics.ts` | same path | `posthog-node` for Workers: `track`, `trackError` (error tracking) and `flag` (feature flags), flushed with `waitUntil`, tagged with `environment`. Each joins the browser's visitor through, in order: the `X-POSTHOG-DISTINCT-ID`/`X-POSTHOG-SESSION-ID` tracing headers, the ids the form sent in its body (`posthog: { distinctId, sessionId }` from `window.posthog`, read with `browserIds(body)` and passed as the last argument; the tracing headers come from a lazily loaded extension, so the first form post often lacks them), then the PostHog cookie's `distinct_id` and `$sesid[1]`. With none, a random id with `$process_person_profile: false`, so anonymous visitors never merge into one person. Logs `[analytics] sending <event> key phc_xxxx… (N chars)` and PostHog's own errors (`shutdown()` hides them), and warns once with the Worker's binding names (never values) when `POSTHOG_API_KEY` is missing |
 | `src/env.d.ts` | merge | Declares `__BUILD_SHA__`, `__DEPLOY_ENV__`, `PUBLIC_POSTHOG_KEY` and `window.posthog` |
 | `csp.txt` | merge into `public/_headers` | The CSP sources PostHog needs |
 | `src/lib/server/posthog-proxy.ts` and `src/worker.ts` | same paths; wrangler `"main": "./src/worker.ts"` | Optional same-origin reverse proxy at `/ph`, so ad blockers don't drop events and CSP needs only `'self'`. It runs in the Worker entry before Astro, so it needs no on-demand rendering and `trailingSlash: 'always'` never redirects PostHog's POSTs. `/ph/static/*` and `/ph/array/*` go to `eu-assets.i.posthog.com`, the rest to `eu.i.posthog.com`; the site's cookies and PostHog's `Set-Cookie` are dropped, and `CF-Connecting-IP` goes on as `X-Forwarded-For` so PostHog still geolocates. A site with its own `worker.ts` adds the import and `posthogProxy(request) ?? handle(request, env, ctx)`. Then set `apiHost` to `/ph` in both the options file and the config. Unit-tested in `test/posthog-proxy.test.mjs`; the fixture (a static site) doesn't build it |
-| `optional/src/components/PostHogZarazConsent.astro` | same path, right after the PostHog component | Zaraz consent → PostHog and Google Analytics: on `zarazConsentAPIReady` and `zarazConsentChoicesUpdated`, the purpose's `true` calls `opt_in_capturing()` and grants `analytics_storage` (`zaraz.set('google_consent_update', …)`); `false` calls `opt_out_capturing()` and denies it. Does nothing until `zaraz.consent.APIReady`, so a returning visitor who said yes is never opted out on first paint. Set `PURPOSE_ID`. Astro inlines a script this small, which a CSP without `'unsafe-inline'` blocks without an error, so add `vite: { build: { assetsInlineLimit: (file) => (/ZarazConsent/.test(file) ? false : undefined) } }` to `astro.config.mjs` to keep it a same-origin file |
+| `optional/src/components/PostHogZarazConsent.astro` | same path, right after the PostHog component | Zaraz consent → PostHog and Google Analytics: on `zarazConsentAPIReady`, `zarazConsentChoicesUpdated` and `posthog:ready` (a choice made before PostHog loaded), the purpose's `true` calls `opt_in_capturing()` and grants `analytics_storage` (`zaraz.set('google_consent_update', …)`); `false` calls `opt_out_capturing()` and denies it. Does nothing until `zaraz.consent.APIReady`, so a returning visitor who said yes is never opted out on first paint. Set `PURPOSE_ID`. Astro inlines a script this small, which a CSP without `'unsafe-inline'` blocks without an error, so add `vite: { build: { assetsInlineLimit: (file) => (/ZarazConsent/.test(file) ? false : undefined) } }` to `astro.config.mjs` to keep it a same-origin file |
 | `optional/src/lib/hubspot-conversion.ts` | same path | `trackHubSpotForm(formId, event)`: on a HubSpot embed's `hsFormCallback`/`onFormSubmitted` for that form, `zaraz.track` and `posthog.capture` the event with the form ID only |
 
 ```json
@@ -638,7 +693,10 @@ policy plus the consent bridge) builds from these same files, so CI proves them 
 Consent. With `"cookieless": "on_reject"` (the default), PostHog loads and
 captures on every page before any choice, counting visitors with PostHog's
 daily-salted server hash, and writes no cookie or storage until the visitor
-accepts (`posthog.opt_in_capturing()` from the site's banner). Then it uses
+accepts (`posthog.opt_in_capturing()` from the site's banner). The npm embed
+loads PostHog lazily, so `window.posthog` is undefined for up to a second after
+the page loads: a banner that may answer sooner applies the choice on
+`posthog:ready` too, as `PostHogZarazConsent.astro` does. Then it uses
 cookies as usual. `"always"` never stores anything and needs no banner. `"off"`
 (remove both consent lines from the options file) sets cookies from the first
 page view without asking. That is not lawful in the EU without consent, so it is
@@ -801,7 +859,8 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `policies` | `[]` | Stack policies this site follows; see Stack policies |
 | `formPages` | `[]` | Every page with a public form (the `turnstile-forms` policy checks the widget there) |
 | `smokePaths` | `/`, `/robots.txt`, `/sitemap-index.xml` | Checked on production after deploy |
-| `server` | `static` | `static` serves the built files (handles `dist/client` from the Cloudflare adapter); `preview` runs `npm run preview` |
+| `server` | `static` | `static` serves the built files (handles `dist/client` from the Cloudflare adapter); `preview` runs the site's Worker with `npm run preview`, local bindings only (see The gate → Pages rendered on request) |
+| `onDemand.signInPath` | none | With `"server": "preview"`: where a gated page redirects a visitor without a session, e.g. `"/signin/"` |
 | `distDir` | `dist` | The build output folder |
 | `lighthouseUrls` | same as `pages` | A list of paths, or `"all"` for every indexable page the build emits (one URL per route on pull requests) |
 | `e2ePages` | same as `pages` | Pages for smoke, axe, reflow and CSP; a list or `"all"` |
@@ -910,7 +969,7 @@ Ship Gate follows web-baseline's rules too:
 - **no model in CI and no Anthropic key**. Review, failed-run triage and evals
   are cloud-session work. Self-test fails if a workflow or action calls Claude.
 
-| Play | In Ship Gate (v3.13.1) |
+| Play | In Ship Gate (v3.14.0) |
 |---|---|
 | Plan, Design, Build: `intent.md`, `spec.md`, `plan.md` | `docs/intent/<date>-<name>/`, from `_template/`. `plan.md` is committed before code and updated with it |
 | Build: `CLAUDE.md` | Commands with their healthy output, how a change starts, conventions, and "Things Claude gets wrong" |
@@ -939,7 +998,7 @@ in the workflow.
 Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
 
 ```yaml
-- uses: pauljosephdp/Ship-Gate/ci-health@v3.13.1
+- uses: pauljosephdp/Ship-Gate/ci-health@v3.14.0
   with:
     workflow: ci.yml        # the workflow to watch
     timeout-minutes: 30     # its job timeout
@@ -1039,11 +1098,11 @@ duration bands are proposed to web-baseline, alongside adopting this release.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.13.1 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.14.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.13.1". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.14.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,
@@ -1081,8 +1140,9 @@ input the caller template uses for drafts: `scans` variants stop after the
 post-build scans, `browser` variants skip Lighthouse, and only the conforming
 run does everything. Skipped checks read "➖ not run" in the summary, and
 `expect-gate.sh` asserts that too. Fixture runs upload no reports; the
-summary table in the log is what `expect-gate.sh` reads. Two jobs share the variants,
-`fixture (browser)` and `fixture (scans)`; a new variant goes in a free `vN`
+summary table in the log is what `expect-gate.sh` reads. Three jobs share the variants,
+`fixture (browser)`, `fixture (scans)` and `fixture (worker)` (the Worker fixture,
+whose variants are named `worker-*`); a new variant goes in a free `vN`
 slot, and `self-test` fails until it has an expectation, a stage and a slot.
 The fixture jobs exercise the verify action only, so they run when a change
 touches it: `action.yml`, `scripts/` (not `self-test.sh`, `release.sh`,
@@ -1165,10 +1225,5 @@ is left out for a reason:
 - **[TO CONFIRM]** `WORKERS_CI_COMMIT_SHA` and `WORKERS_CI_BRANCH` are present
   in production builds, so the post-deploy SHA check and environment tagging
   both work.
-- The discovery scan reads the static build. Pages rendered on request by the
-  Worker are outside it: list their prefixes in `discovery.ignoreLinks`, and
-  cover them with a site browser check.
-- Pages that render on the server rather than at build time are not served by
-  the `static` server, which serves only what `output: 'static'` emits. A site that adds server-rendered pages to `pages` sets
-  `"server": "preview"`, which has not yet been proven with the Cloudflare
-  adapter in CI.
+- `"server": "preview"` is proven with `@astrojs/cloudflare` only. Another
+  adapter's `npm run preview` may need its own local-only settings.

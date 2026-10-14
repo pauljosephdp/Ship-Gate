@@ -5,7 +5,10 @@
 # The site's and the test tools' node_modules survive: the lockfiles never change
 # between variants, and the action reuses them in fixture mode instead of reinstalling.
 set -euo pipefail
-cd "$(dirname "$0")/fixture-site"
+# worker-* variants break test/fixture-worker (a Cloudflare Worker site run with "server": "preview");
+# every other variant breaks test/fixture-site (a static site).
+case "$1" in worker-*) fixture=fixture-worker ;; *) fixture=fixture-site ;; esac
+cd "$(dirname "$0")/$fixture"
 git checkout -q -- .
 git clean -ffdxq -e node_modules .
 if [ -n "${SHIP_GATE_DIR:-}" ] && [ -d "$SHIP_GATE_DIR" ]; then
@@ -87,6 +90,11 @@ case "$1" in
   posthog-hybrid-csp) posthog_hybrid ;;
   analytics-always-on) posthog_hybrid; posthog_csp; analytics_always_on ;;
   direct-tag) add '<script is:inline async src="https://www.googletagmanager.com/gtm.js?id=GTM-ABCD123"></script>' ;;
+  worker-conforming) ;;
+  worker-remote-binding) sed -i 's#"assets": {#"kv_namespaces": [{ "binding": "CACHE", "id": "fixture", "remote": true }],\n  "assets": {#' wrangler.jsonc ;;
+  worker-no-csp) sed -i "s#Object.entries(HEADERS)#Object.entries(HEADERS).filter(([n]) => !(n === 'Content-Security-Policy' \&\& new URL(request.url).pathname === '/account/'))#" src/worker.ts ;;
+  # No trailing slash: the Worker answers 301 to /account/settings/, which is a 404.
+  worker-dead-link) add '<p><a href="/account/settings">Account settings</a></p>' ;;
   *) echo "Unknown variant: $1" >&2; exit 2 ;;
 esac
 echo "Fixture variant: $1"

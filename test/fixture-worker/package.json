@@ -1,0 +1,20 @@
+{
+  "name": "ship-gate-fixture-worker",
+  "private": true,
+  "type": "module",
+  "description": "A tiny conforming site whose Worker renders some pages on request. self-test.yml runs the whole Ship Gate action against it with \"server\": \"preview\", then against broken copies.",
+  "scripts": {
+    "check": "wrangler types && astro check",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "astro": "7.3.5",
+    "typescript": "6.0.3",
+    "wrangler": "4.144.0"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "14.3.3"
+  }
+}

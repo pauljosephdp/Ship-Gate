@@ -89,3 +89,20 @@ concern 3).
 - `bash evals/run.sh` only if `CLAUDE.md`, `REVIEW.md` or `.claude/` change (not planned).
 - On the ready PR: `self-test`, `fixture (browser)`, `fixture (scans)` and `fixture (worker)` green.
 - After merge: tag `v3.14.0` and its release exist at the merge commit.
+
+## Departures (build, 14 October 2026)
+1. **R5, redirects to sign-in:** `page.spec.ts` needs no change for them. Playwright's `goto` follows the redirect and
+   checks the sign-in page as a page; the redirect itself (status, same origin, `onDemand.signInPath`) is checked by
+   `e2e/on-demand.spec.ts`. Less change to a protected test.
+2. **R6, CSP on every page, narrowed:** CSP is not a default required header, so "no page may carry neither" would
+   have imposed one on every preview site. The check is instead: in preview mode, when the home page sends a CSP,
+   every listed page must send one too (the real risk: `_headers` covers static files only). Static sites unchanged.
+3. **Variant names and a third variant:** the Worker variants are named `worker-*`, and that prefix picks
+   `test/fixture-worker` in `break-fixture.sh` (no `SHIP_GATE_FIXTURE` variable). A third variant,
+   `worker-dead-link`, proves the on-demand check bites; `worker-no-csp` proves the CSP check.
+4. **The fixture Worker runs first only for its on-demand routes** (`run_worker_first`), so static files keep
+   `_headers` and `_redirects`, as Workers static assets serves them.
+5. **`e2e/helpers.ts`** gains `server`, `onDemand` and `discovery` in the run type; `run.json` carries them.
+6. **README:** "Nothing in the gate runs wrangler" now reads that the gate never runs `wrangler deploy` or a remote
+   command: preview mode runs the site's Worker through the Cloudflare Vite plugin, and the fixture's `check` runs
+   `wrangler types` (local).

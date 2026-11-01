@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.14.1 — 2026-11-01
+
+**Fixed**
+- The caller `full-sweep.yml` wrote `ship-gate.full.json` into the repo root, so web-baseline's `conform:check` failed the monthly sweep (`unlisted-path … ship-gate.full.json`) on every site. It now writes the file to `$RUNNER_TEMP` and passes `config: ${{ runner.temp }}/ship-gate.full.json`. Sites replace `.github/workflows/full-sweep.yml` with the template and bump the pin; the action is unchanged. Intent, spec and plan: `docs/intent/2026-11-01-full-sweep-config-outside-workspace/`.
+
 ## v3.14.0 — 2026-10-14
 
 **Added**

@@ -889,6 +889,9 @@ ok "post-deploy.sh covers the live checks"
 cost_case "each run prunes its branch's older reports"   action.yml 'select(.workflow_run.head_branch == env.BRANCH and (.workflow_run.id | tostring) != env.RUN_ID)'
 cost_case "caller CI may delete its older reports"      templates/caller/.github/workflows/ci.yml 'actions: write'
 cost_case "caller full sweep may delete its older reports" templates/caller/.github/workflows/full-sweep.yml 'actions: write'
+cost_case "caller full sweep writes its config outside the checkout" templates/caller/.github/workflows/full-sweep.yml 'config: ${{ runner.temp }}/ship-gate.full.json'
+if grep -qE "writeFileSync\\(['\"](\\./)?ship-gate\\.full\\.json" "$HERE/../templates/caller/.github/workflows/full-sweep.yml"; then bad "caller full sweep leaves no file in the checkout" "it writes ship-gate.full.json to the workspace" ""
+else ok "caller full sweep leaves no file in the checkout"; fi
 if grep -q 'registries' "$HERE/../templates/caller/.github/dependabot.yml"; then bad "caller Dependabot needs no registry (Ship-Gate is public)" "a registries block is left" ""
 else ok "caller Dependabot needs no registry (Ship-Gate is public)"; fi
 cost_case "caller Dependabot does not rebase open PRs"   templates/caller/.github/dependabot.yml 'rebase-strategy: disabled'

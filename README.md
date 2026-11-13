@@ -31,7 +31,7 @@ and the post-deploy check.
 | `.github/workflows/full-sweep.yml` | Monthly: the gate against every page (`"all"`), which pull requests only sample; its generated config goes to `$RUNNER_TEMP`, never into the checkout (a stray file fails web-baseline's `conform:check`) |
 | `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
 | `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs; Ship Gate is public, so no token or registry (step 14) |
-| `.github/workflows/dependabot-auto-merge.yml` | Queues Dependabot's minor or patch Ship Gate bump to squash-merge once `verify` passes; majors and npm updates wait for a person (step 15) |
+| `.github/workflows/dependabot-auto-merge.yml` | Queues Dependabot's minor or patch Ship Gate bump, and its npm patch PRs, to squash-merge once `verify` passes; majors and npm minors wait for a person (step 15) |
 | `.github/pull_request_template.md` | The review checklist |
 
 Templates for all of them are in `templates/caller/`. Sites on the `posthog-hybrid`
@@ -970,7 +970,7 @@ Ship Gate follows web-baseline's rules too:
 - **no model in CI and no Anthropic key**. Review, failed-run triage and evals
   are cloud-session work. Self-test fails if a workflow or action calls Claude.
 
-| Play | In Ship Gate (v3.14.1) |
+| Play | In Ship Gate (v3.15.0) |
 |---|---|
 | Plan, Design, Build: `intent.md`, `spec.md`, `plan.md` | `docs/intent/<date>-<name>/`, from `_template/`. `plan.md` is committed before code and updated with it |
 | Build: `CLAUDE.md` | Commands with their healthy output, how a change starts, conventions, and "Things Claude gets wrong" |
@@ -999,7 +999,7 @@ in the workflow.
 Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
 
 ```yaml
-- uses: pauljosephdp/Ship-Gate/ci-health@v3.14.1
+- uses: pauljosephdp/Ship-Gate/ci-health@v3.15.0
   with:
     workflow: ci.yml        # the workflow to watch
     timeout-minutes: 30     # its job timeout
@@ -1087,23 +1087,27 @@ duration bands are proposed to web-baseline, alongside adopting this release.
     token. A site still carrying a `ship-gate` registry and a
     `SHIP_GATE_READ_TOKEN` Dependabot secret can drop both when it next
     re-copies the template.
-15. Let Ship Gate bumps merge themselves. Turn on Settings → General → **Allow
+15. Let routine Dependabot bumps merge themselves. Turn on Settings → General → **Allow
     auto-merge** and **Automatically delete head branches**. `dependabot-auto-merge.yml` then queues each Dependabot PR
-    that raises the Ship Gate pin by a minor or patch version (`gh pr merge
-    --auto --squash`); it merges when `verify` passes. A major Ship Gate
-    release, a group that also carries another action's major, and npm
-    updates wait for a person. The workflow runs on `pull_request_target` from
+    that raises the Ship Gate pin by a minor or patch version, and each npm PR
+    whose update type is patch (`gh pr merge --auto --squash`); it merges when
+    `verify` passes. A major Ship Gate release, a group that also carries
+    another action's major, and npm minor and major updates wait for a person.
+    Add an `AUTOMATION_TOKEN` secret under **Dependabot** secrets (a workflow
+    started by Dependabot cannot read Actions secrets) so the merge starts
+    `main`'s own workflows; without it the workflow token queues the merge, and
+    with an expired or under-scoped token the step fails and the PR stays open. The workflow runs on `pull_request_target` from
     `main` and never checks out the PR. The ruleset does not require an up-to-date
     branch (step 11), so a bump merges even after `main` moved. If the site's ruleset allows
     only merge commits, change `--squash` to `--merge`.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.14.1 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v3.15.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.14.1". Do not change deploy configuration
+> titled "chore: adopt ship gate v3.15.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,

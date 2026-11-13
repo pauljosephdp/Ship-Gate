@@ -899,6 +899,11 @@ cost_case "caller auto-merge runs from main, not the PR"  templates/caller/.gith
 cost_case "caller auto-merge acts on Dependabot PRs only" templates/caller/.github/workflows/dependabot-auto-merge.yml "if: github.event.pull_request.user.login == 'dependabot[bot]'"
 cost_case "caller auto-merge only for Ship Gate bumps"   templates/caller/.github/workflows/dependabot-auto-merge.yml "contains(steps.meta.outputs.dependency-names, 'pauljosephdp/Ship-Gate')"
 cost_case "caller auto-merge never for a major"          templates/caller/.github/workflows/dependabot-auto-merge.yml "steps.meta.outputs.update-type == 'version-update:semver-minor'"
+cost_case "caller auto-merge queues npm patch bumps"     templates/caller/.github/workflows/dependabot-auto-merge.yml "steps.meta.outputs.package-ecosystem == 'npm_and_yarn'"
+cost_case "caller auto-merge: npm patch only"            templates/caller/.github/workflows/dependabot-auto-merge.yml "&& steps.meta.outputs.update-type == 'version-update:semver-patch'"
+if tr '\n' ' ' < "$HERE/../templates/caller/.github/workflows/dependabot-auto-merge.yml" | grep -qE "package-ecosystem == 'npm_and_yarn'[^)]*semver-(minor|major)"; then bad "caller auto-merge never queues an npm minor or major" "the npm clause names semver-minor or semver-major" ""
+else ok "caller auto-merge never queues an npm minor or major"; fi
+cost_case "caller auto-merge prefers AUTOMATION_TOKEN"   templates/caller/.github/workflows/dependabot-auto-merge.yml 'GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN || github.token }}'
 cost_case "action takes a skip-fast input"               action.yml "if: inputs.skip-fast == 'true'"
 cost_case "skip-fast skips only on a Workers Builds check" action.yml "if: steps.fast.outputs.skip != 'true'"
 cost_case "action takes a lighthouse-runs input"         action.yml 'SHIP_GATE_LIGHTHOUSE_RUNS: ${{ inputs.lighthouse-runs }}'

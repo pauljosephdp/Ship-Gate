@@ -1,9 +1,10 @@
 # Plan: Dependabot npm patch PRs merge themselves (from spec.md 2026-11-13)
 
 ## Files that change
-- `scripts/self-test.sh`: three `cost_case` lines (committed first, failing).
+- `scripts/self-test.sh`: three `cost_case` lines (committed first, failing) and, after review, a negative check that the npm clause names no minor or major.
+- `.gitignore`: `*.whl` (review: a tool wheel was nearly committed).
 - `templates/caller/.github/workflows/dependabot-auto-merge.yml`: header, `if:`, `GH_TOKEN`.
-- `README.md`: file table row, step 15, pins to v3.15.0.
+- `README.md`: file table row, step 15, pins and the Play row to v3.15.0.
 - `templates/caller/.github/workflows/{ci,full-sweep,post-deploy}.yml`: pins to v3.15.0.
 - `CHANGELOG.md`: v3.15.0 (minor: a conforming site needs no change to keep passing).
 

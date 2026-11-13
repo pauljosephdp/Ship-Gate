@@ -970,7 +970,7 @@ Ship Gate follows web-baseline's rules too:
 - **no model in CI and no Anthropic key**. Review, failed-run triage and evals
   are cloud-session work. Self-test fails if a workflow or action calls Claude.
 
-| Play | In Ship Gate (v3.14.1) |
+| Play | In Ship Gate (v3.15.0) |
 |---|---|
 | Plan, Design, Build: `intent.md`, `spec.md`, `plan.md` | `docs/intent/<date>-<name>/`, from `_template/`. `plan.md` is committed before code and updated with it |
 | Build: `CLAUDE.md` | Commands with their healthy output, how a change starts, conventions, and "Things Claude gets wrong" |
@@ -1095,7 +1095,8 @@ duration bands are proposed to web-baseline, alongside adopting this release.
     another action's major, and npm minor and major updates wait for a person.
     Add an `AUTOMATION_TOKEN` secret under **Dependabot** secrets (a workflow
     started by Dependabot cannot read Actions secrets) so the merge starts
-    `main`'s own workflows; without it the workflow token queues the merge. The workflow runs on `pull_request_target` from
+    `main`'s own workflows; without it the workflow token queues the merge, and
+    with an expired or under-scoped token the step fails and the PR stays open. The workflow runs on `pull_request_target` from
     `main` and never checks out the PR. The ruleset does not require an up-to-date
     branch (step 11), so a bump merges even after `main` moved. If the site's ruleset allows
     only merge commits, change `--squash` to `--merge`.

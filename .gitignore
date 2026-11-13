@@ -2,3 +2,4 @@ node_modules/
 .ship-gate/
 .DS_Store
 .lighthouseci/
+*.whl

@@ -1,17 +1,18 @@
 # Merges Dependabot's routine bumps on their own once "verify" passes.
 #
 # Queued: a PR that raises pauljosephdp/Ship-Gate by a minor or patch version, and
-# an npm PR whose update type is patch (a grouped PR reports its largest move, so
-# every package in it is a patch). A major Ship Gate release means the site must
+# an npm PR whose update type is patch (a grouped PR reports the largest move among
+# its packages, so a group carrying a minor or major is not queued). A major Ship Gate release means the site must
 # change something, so it waits for a person, as does any group that also carries
 # another action's major, and any npm minor or major. Auto-merge never skips the
 # required "verify" check: a bump that fails the gate stays open.
 #
 # Merges use the AUTOMATION_TOKEN secret when it is set, so the merge to main
 # starts main's own workflows; a merge made with the workflow token does not.
-# A workflow started by Dependabot reads only Dependabot secrets: add
-# AUTOMATION_TOKEN under Settings → Secrets → Dependabot as well as Actions.
-# Without it the workflow token queues the merge.
+# A workflow started by Dependabot reads only Dependabot secrets, so add
+# AUTOMATION_TOKEN under Settings → Secrets → Dependabot. Without it the workflow
+# token queues the merge; with an expired or under-scoped one the step fails and
+# the PR stays open.
 #
 # Needs Settings → General → "Allow auto-merge" on. The ruleset does not require an
 # up-to-date branch (README step 11), so a queued bump still merges after main moved.

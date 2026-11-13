@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.15.0 — 2026-11-13
+
+**Changed**
+- The caller `dependabot-auto-merge.yml` also queues Dependabot's **npm patch** PRs (a grouped PR counts by its largest move) to squash-merge once `verify` passes. Before, npm PRs waited for a person, and a routine bump sat green for days: six sites had the same 9-package patch group open from 5 Nov. npm minor and major updates, and Ship Gate majors, still wait. Merges use `AUTOMATION_TOKEN` when the site has it as a **Dependabot** secret, so the merge starts `main`'s own workflows. Sites replace the file with the template and bump the pin (web-baseline does both); a site that wants the token adds the Dependabot secret. Intent, spec and plan: `docs/intent/2026-11-13-dependabot-npm-patch-automerge/`.
+
 ## v3.14.1 — 2026-11-01
 
 **Fixed**

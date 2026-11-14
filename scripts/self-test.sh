@@ -133,14 +133,15 @@ expect_guard "turnstile: policy off, no warning" "nowarn:secrets.required"   ":"
 expect_guard "Tailwind 4 with legacy config"     "warn:tailwind.config.js sits beside Tailwind 4" "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"^4.3.3\"/' package.json && echo 'export default {}' > tailwind.config.js"
 expect_guard "Tailwind 4 config via @config"     "nowarn:tailwind.config"    "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"^4.3.3\"/' package.json && echo 'export default {}' > tailwind.config.js && mkdir -p src/styles && echo '@config \"../../tailwind.config.js\";' > src/styles/global.css"
 expect_guard "Tailwind 3 config, quiet"          "nowarn:tailwind.config"    "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"3.4.17\"/' package.json && echo 'export default {}' > tailwind.config.js"
-DELEGATE_ALL="tailwind-config env-file node-pin posthog-secrets posthog-layout"
-SHIP_GATE_DELEGATED="$DELEGATE_ALL" \
-expect_guard "delegated: env file is conform:check's" "has:Guard env-file: checked by the site's standard" "echo 'A=1' > .env"
-SHIP_GATE_DELEGATED="$DELEGATE_ALL" \
+# "standard": "web-baseline" delegates node-pin only; the hooks for other guards do not exist, so
+# naming them in SHIP_GATE_DELEGATED changes nothing.
+SHIP_GATE_DELEGATED="node-pin" \
 expect_guard "delegated: Node pin is conform:check's" "has:Guard node-pin: checked by the site's standard" "rm .nvmrc"
-SHIP_GATE_DELEGATED="$DELEGATE_ALL" \
-expect_guard "delegated: Tailwind config is conform:check's" "nowarn:tailwind.config" "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"^4.3.3\"/' package.json && echo 'export default {}' > tailwind.config.js"
-SHIP_GATE_DELEGATED="$DELEGATE_ALL" \
+SHIP_GATE_DELEGATED="env-file node-pin" \
+expect_guard "never delegated: committed env file"   "Env/secret file committed" "echo 'A=1' > .env"
+SHIP_GATE_DELEGATED="tailwind-config node-pin" \
+expect_guard "not delegated: Tailwind config (deviation-exemptible)" "warn:tailwind.config.js sits beside Tailwind 4" "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"^4.3.3\"/' package.json && echo 'export default {}' > tailwind.config.js"
+SHIP_GATE_DELEGATED="node-pin" \
 expect_guard "delegated: push to main still fails"  "pushes to main"           "wf auto.yml '      - run: git push origin HEAD:main'"
 expect_guard "Clarity loaded directly"            "Third-party tag"           "echo '<script src=\"https://www.clarity.ms/tag/abc\"></script>' > src/pages/c.astro"
 expect_guard "Clarity hosts in CSP allowed"      pass                        "mkdir -p public && printf '/*\\n  Content-Security-Policy: script-src '\\''self'\\'' https://www.clarity.ms https://scripts.clarity.ms\\n' > public/_headers"
@@ -220,8 +221,10 @@ POLICIES=posthog-hybrid \
 expect_guard "hybrid: no wrangler config fails"   "no wrangler config"        "$HYB && rm wrangler.jsonc"
 EXEMPT=posthog-secrets POLICIES=posthog-hybrid \
 expect_guard "hybrid: posthog-secrets exemptible"  "warn:[exempt: posthog-secrets]" "$HYB && $NO_SECRETS"
-SHIP_GATE_DELEGATED="tailwind-config env-file node-pin posthog-secrets posthog-layout" POLICIES=posthog-hybrid \
-expect_guard "hybrid: secrets and layout delegated" "has:checked by the site's standard" "$HYB && rm src/components/PostHog.astro && $NO_SECRETS"
+SHIP_GATE_DELEGATED="posthog-secrets posthog-layout node-pin" POLICIES=posthog-hybrid \
+expect_guard "not delegated: posthog-secrets (deviation-exemptible)" "secrets.required lacks POSTHOG_API_KEY" "$HYB && $NO_SECRETS"
+SHIP_GATE_DELEGATED="posthog-secrets posthog-layout node-pin" POLICIES=posthog-hybrid \
+expect_guard "not delegated: PostHog layout wiring" "No posthog.init("      "$HYB && rm src/components/PostHog.astro"
 POLICIES="posthog-hybrid turnstile-forms" \
 expect_guard "hybrid: secrets in jsonc, quiet"    "nowarn:secrets.required"   "$HYB && $SECRETS_JSONC"
 POLICIES=posthog-hybrid \
@@ -235,8 +238,13 @@ unset SHIP_GATE_POSTHOG_EMBED
 echo "Config and contract (prepare.mjs)"
 expect_prepare "conforming site passes"           pass ":"
 expect_prepare "no lint script needed"            pass ":"
-CONFORM="sed -i 's#\"test\": \"vitest run\",#\"test\": \"vitest run\", \"conform:check\": \"node scripts/conform.mjs\",#' package.json"
-expect_prepare "standard web-baseline, conform:check wired" "has:checked by conform:check" "$CONFORM && cfg '\"standard\":\"web-baseline\",\"checks\":{\"postBuild\":[\"conform:check\"]}'"
+conform() { echo "sed -i 's#\"test\": \"vitest run\",#\"test\": \"vitest run\", \"conform:check\": \"$1\",#' package.json"; }
+CONFORM="$(conform 'node scripts/standard/conform.mjs --ci --final')"
+WB='"standard":"web-baseline","checks":{"postBuild":["conform:check"]}'
+expect_prepare "standard web-baseline, conform --final wired" "has:node-pin checked by conform:check" "$CONFORM && cfg '$WB'"
+expect_prepare "standard web-baseline, conform --ci only" "must run \"node scripts/standard/conform.mjs --ci --final\"" "$(conform 'node scripts/standard/conform.mjs --ci') && cfg '$WB'"
+expect_prepare "standard web-baseline, another script"   "must run \"node scripts/standard/conform.mjs" "$(conform 'node scripts/lint.mjs --final') && cfg '$WB'"
+expect_prepare "standard web-baseline, chained --final elsewhere" "must run \"node scripts/standard/conform.mjs" "$(conform 'node scripts/standard/conform.mjs --ci \&\& node x.mjs --final') && cfg '$WB'"
 expect_prepare "standard web-baseline without conform:check" "no checks phase lists \"conform:check\"" "$CONFORM && cfg '\"standard\":\"web-baseline\"'"
 expect_prepare "unknown standard"                 "standard must be one of"   "cfg '\"standard\":\"house-style\"'"
 expect_prepare "first-party-only with allowedOrigins" pass                   "cfg '\"policies\":[\"first-party-only\"],\"allowedOrigins\":[\"https://challenges.cloudflare.com\"]'"

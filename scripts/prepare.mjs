@@ -80,11 +80,19 @@ export const POLICIES = {
 };
 // "standard": a site that runs a standard whose own check owns some of Ship Gate's source guards.
 // Those guards are skipped (not exempted: the standard's check still runs, inside this gate, as one of
-// the site's checks); the contract fails unless that check is wired into a phase.
+// the site's checks). The contract fails unless that check is wired into a phase AND its script runs
+// the standard's checker in the mode that enforces every rule (`run`). A guard is delegated only when
+// the standard cannot waive it either: web-baseline's conform.mjs --final enforces every phase, but a
+// recorded deviation (docs/baseline/deviations.json) can accept a forbidden path (tailwind.config.*)
+// or missing required content (secrets.required, the PostHog layout wiring), so those guards stay
+// here. Its Node runtime pin has no deviation, so node-pin is delegated. env-file is never delegated:
+// a committed secret is never exemptible.
 export const STANDARDS_DELEGATED = {
   'web-baseline': {
     check: 'conform:check',
-    guards: ['tailwind-config', 'env-file', 'node-pin', 'posthog-secrets', 'posthog-layout'],
+    run: /\bnode\s+(?:\.\/)?scripts\/standard\/conform\.mjs\b[^&|;]*\s--final\b/,
+    runText: 'node scripts/standard/conform.mjs --ci --final',
+    guards: ['node-pin'],
   },
 };
 
@@ -498,7 +506,9 @@ for (const phase of PHASES) {
 if (delegated) {
   const wired = PHASES.some((ph) => (checks[ph] ?? []).includes(delegated.check));
   if (!wired) err(`standard "${standard}" hands ${delegated.guards.join(', ')} to its ${delegated.check} script, but no checks phase lists "${delegated.check}". Add it to checks.postBuild, or remove "standard".`);
-  else console.log(`standard "${standard}": ${delegated.guards.join(', ')} are checked by ${delegated.check}, not by Ship Gate's guards.`);
+  else if (!delegated.run.test(scripts[delegated.check] ?? ''))
+    err(`standard "${standard}": the "${delegated.check}" script must run "${delegated.runText}" (every rule enforced) to take over ${delegated.guards.join(', ')}; it runs "${scripts[delegated.check] ?? ''}". Change the script, or remove "standard".`);
+  else console.log(`standard "${standard}": ${delegated.guards.join(', ')} checked by ${delegated.check}, not by Ship Gate's guards.`);
 }
 
 if (checkLists.browser.length && !allDeps.playwright && !allDeps['@playwright/test'])

@@ -16,9 +16,22 @@ a site uses (analytics, tag management, bot protection, deploy pipeline) are
 
 **Here, identical for every site:** stack guards, the contract check, the
 structure, placeholder and discovery scans, the opt-in stack policies, the Playwright
-suite (axe, reflow, CSP, redirects and headers), Lighthouse standards, the
+suite (axe, reflow, CSP, redirects and headers, the no-JS and parity checks), Lighthouse standards, the
 static server, the test tooling and its versions (`tools/package-lock.json`),
-and the post-deploy check.
+the post-deploy check, and **the rule file**, `standards/standards.json`.
+
+**One rule file, one owner per check (v4).** `standards/standards.json` holds
+the crawler tokens and groups, the AI-training opt-out, the JSON-LD required
+properties, the llms.txt reading, the China host list, the tracker vendors and
+the thresholds of the checks below. Every script reads its lists from it
+(`scripts/standards.mjs`); none keeps a copy. The website-audit skill
+(`pauljosephdp/Skills`, the live-site auditor) carries a generated copy of the
+same file, so a rule changes once, here, and a change to it is a Ship Gate
+release. The split is: anything provable from the build, or the build served
+on `localhost`, is Ship Gate's; anything that needs production, the edge, field
+data or Search Console is website-audit's. No check runs in both. website-audit
+reads Ship Gate's results (`reports/results.json`, below) instead of re-testing
+what the build proves.
 
 **In each site repo, small and site-specific:**
 
@@ -28,7 +41,7 @@ and the post-deploy check.
 | `scripts/ship-gate-workers.sh` | Called at the end of the Workers Builds build command: the fast stage on every non-production push (a no-op on `main`; unused when Workers Builds builds only `main`) |
 | `scripts/ship-gate-after-deploy.sh` | Appended to the Workers Builds deploy command: the post-deploy check after every production deploy; with `SHIP_GATE_ROLLBACK=1` a failed check rolls production back and asks the repo for a revert PR |
 | `.github/workflows/post-deploy.yml` | Manual fallback: `pauljosephdp/Ship-Gate/post-deploy@vX.Y.Z` on demand |
-| `.github/workflows/full-sweep.yml` | Monthly: the gate against every page (`"all"`), which pull requests only sample; its generated config goes to `$RUNNER_TEMP`, never into the checkout (a stray file fails web-baseline's `conform:check`) |
+| `.github/workflows/full-sweep.yml` | Monthly: the gate against every page (`"all"`), which pull requests only sample; its generated config goes to `$RUNNER_TEMP`, never into the checkout (a stray file fails web-baseline's `conform:check`). Uploads `reports/results.json` as the `ship-gate-results` artifact on every run, green or red, for 35 days (Results for website-audit) |
 | `ship-gate.config.json` | Site URL, pages, policies, the site's own checks, stricter or temporarily looser thresholds |
 | `.github/dependabot.yml` | Bumps npm packages and the pinned Ship Gate version, grouped, without rebasing open PRs; Ship Gate is public, so no token or registry (step 14) |
 | `.github/workflows/dependabot-auto-merge.yml` | Queues Dependabot's minor or patch Ship Gate bump, and its npm patch PRs, to squash-merge once `verify` passes; majors and npm minors wait for a person (step 15) |
@@ -52,8 +65,11 @@ Sites on `analytics-always-on` also follow `templates/caller/analytics/` and
    checks after the build
 5. Against the served build: site browser checks, then the Playwright suite
    (smoke + axe on desktop 1440 and Pixel 7, keyboard, reflow, CSP, consent,
-   edge files)
+   edge files, the no-JS ratio, lazy images in the first viewport, desktop and
+   mobile parity, and `first-party-only`)
 6. Lighthouse CI (mobile)
+7. Always, even after a failure: `reports/results.json`, every check's result in
+   one machine-readable file (Results for website-audit)
 
 Everything runs in the cloud: the action on GitHub-hosted runners, the fast stage
 and deploys in Cloudflare Workers Builds. Steps 5 and 6 start a static server
@@ -345,11 +361,15 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   must load with zero violations.
 - **Consent** (`consent-before-tracking` policy, desktop): before any
   interaction, no cookie is set beyond Cloudflare's essential ones and
-  `consentEssentialCookies`, and nothing from a tracking vendor's host
-  (PostHog, HubSpot tracking, Clarity, Google Analytics/Tag Manager,
-  DoubleClick, Meta, Hotjar, LinkedIn, TikTok) is requested or present in the
-  markup. Matching is by hostname, so the site's own files named after a
-  vendor pass, and HubSpot form embeds (`hsforms.net`) are allowed. With
+  `consentEssentialCookies`, and nothing from a tracking vendor is requested
+  or present in the markup: the `analytics`, `advertising`,
+  `social_remarketing` and `session_replay` categories of `trackerVendors` in
+  `standards/standards.json` (PostHog, HubSpot tracking, Clarity, Google
+  Analytics/Tag Manager, DoubleClick, Meta, Hotjar, LinkedIn, TikTok, Segment,
+  Mixpanel, Criteo, FullStory, LogRocket and the rest). Matching is by host (the
+  host, a subdomain, or a run of its labels; `facebook.com/tr` also needs the
+  path), never by path alone, so the site's own files named after a vendor
+  pass, and HubSpot form embeds (`hsforms.net`) are allowed. With
   `posthog-hybrid` in a cookieless mode, PostHog may load before consent, but
   must write no `ph_` cookie and no `ph_`/`__ph` localStorage or
   sessionStorage key. With the npm embed and `"cookieless": "on_reject"`, a
@@ -361,6 +381,32 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
 
 Other origins are blocked in the browser, so a vendor outage never fails a PR.
 CSP still reports a disallowed URL before any request is made.
+
+**Render checks** (`e2e/render.spec.ts`, desktop project, each page in
+`e2ePages`; v4, moved in from website-audit). They are discovery rules with
+`where: browser`, so their levels follow `discoveryOverrides`:
+
+- `rendered-content` (warn): the page loaded with JavaScript off against the
+  rendered page. Fewer than 70% of its words or 50% of its links without
+  JavaScript (`buildChecks.renderedContent`) warns: crawlers for AI answers
+  mostly do not run JavaScript. This replaces v3's 50-word floor in the build scan.
+- `lazy-first-viewport` (warn): an `<img loading="lazy">` inside the first
+  viewport, on desktop (1440×900) or on a Pixel 7, read at load. It delays the
+  paint it seems to help, often the LCP image.
+- `content-parity` (warn): the words of the main content (`<main>`, else the
+  body without header, nav, footer and aside), case-folded, on a Pixel 7
+  against desktop. Mobile missing 15% or more of desktop's words warns
+  (`buildChecks.contentParity`). Text behind a disclosure control
+  (`<details>`, a panel an `aria-controls` names, accordion or collapse
+  classes) counts as present. Google indexes the mobile page.
+- **Target size** needs nothing new: axe's `target-size` rule (WCAG 2.5.8,
+  24×24 CSS px) runs under the `wcag22aa` tag the smoke test already uses.
+
+With the `first-party-only` policy, every page the sitemap lists loads with no
+request to another origin; `allowedOrigins` lists the exceptions (each one a
+decision the site can explain, such as `https://challenges.cloudflare.com` for
+Turnstile). The request is recorded before the gate aborts it, so the attempt
+is the failure.
 
 Once per run, the **edge** checks: every static `_redirects` rule answers with
 its status and `Location`; every on-site destination answers 200 (no chains);
@@ -402,7 +448,10 @@ assets are `immutable`; an unknown path answers 404 with the site's 404 page;
 
 Whether search engines, answer engines and AI assistants can crawl the site,
 understand it and quote it. It reads the built output (no browser, no network),
-so it runs in seconds on every page and gives the same answer every run.
+so it runs in seconds on every page and gives the same answer every run. The
+rules marked *browser* run in the render checks above; the crawler lists, the
+JSON-LD table, the llms.txt rules and the thresholds come from
+`standards/standards.json`.
 
 The four terms overlap, so each rule sits under the one it matters most to:
 
@@ -415,63 +464,84 @@ The four terms overlap, so each rule sits under the one it matters most to:
 - **AIO** (AI Overviews): Google's AI Overviews and AI Mode draw on the normal
   Search index, so a page qualifies by being indexed and snippet-eligible. Google
   documents no extra markup for them.
+- **perf**: the page lays out and loads without avoidable shift or delay.
 
 | Area | Rule | Default | Fails when |
 |---|---|---|---|
 | SEO | `robots-txt` | error | no `robots.txt` in the build, a line that doesn't parse, or no `User-agent` group; after deploy, also not 200 or not `text/plain` |
 | SEO | `robots-sitemap` | error | `robots.txt` has no `Sitemap:` line on `siteUrl` |
-| SEO | `robots-blocks-page` | error | an indexable page is disallowed for Googlebot or Bingbot |
+| SEO | `robots-blocks-page` | error | an indexable page is disallowed for Googlebot or bingbot (the search engines in `groups.searchMustAllow`) |
 | SEO | `sitemap` | error | no sitemap, or it doesn't parse, lists another origin, or has a malformed `lastmod`; sitemap indexes are followed |
 | SEO | `sitemap-coverage` | error | an indexable, self-canonical page is missing, or the sitemap lists a noindex, redirecting, canonicalised or missing URL |
 | SEO | `sitemap-lastmod` | warn | a URL has no `lastmod`, or one in the future |
+| SEO | `sitemap-lastmod-bulk` | warn | of 10 or more URLs that carry a `lastmod`, 90% share one value (a bulk stamp; missing ones are `sitemap-lastmod`'s), unless that value is the repository's first commit date or the site derives `lastmod` from git (`src/data/lastmod.json`, web-baseline's `gen-lastmod`); or a `lastmod` carries the build's own time (within 2 minutes of the sitemap being written) |
 | SEO | `sitemap-xml` | warn | `/sitemap.xml` is neither built nor redirected to the sitemap (agents probe that path without reading `robots.txt`) |
 | SEO | `sitemap-live` | error | after deploy: a sitemap named in production `robots.txt` doesn't answer 200 with XML |
 | SEO | `canonical` | error | not exactly one canonical, not on `siteUrl`, or it names a URL that redirects or is not an indexable page |
 | SEO | `html-lang` | error | `<html>` has no valid `lang` |
 | SEO | `viewport` | error | no `width=device-width` viewport |
 | SEO | `internal-links` | error | an `<a href>` on the site resolves to no built file and no `_redirects` rule |
+| SEO | `orphan-pages` | warn | no other indexable page in the build links to the page (one static `_redirects` hop is followed); pages canonicalised elsewhere are left out |
+| SEO | `click-depth` | warn | a page is more than 3 clicks from `/` over the built links, or is linked only from pages `/` can't reach |
 | SEO | `redirect-permanence` | warn | a `_redirects` rule answers 302 or 307, a temporary move (302 is Cloudflare's default when a rule names no status) |
 | SEO | `rtl-direction` | error | a page in a right-to-left language (`ar`, `he`, `fa`, `ur`, `ps`, `yi`, `ckb` and others) has no `dir="rtl"` on `<html>` or `<body>` |
 | SEO | `hreflang-pairs` | warn | an `hreflang` alternate names a URL on the site that isn't an indexable page, or a page that doesn't link back |
+| SEO | `content-parity` | warn | *browser*: a content block visible on desktop is missing on mobile (Browser checks) |
 | AEO | `structured-data` | error | JSON-LD doesn't parse, lacks a schema.org `@context` or `@type`, or lacks key properties (below) |
 | AEO | `site-entity` | error | the home page declares no Organization, LocalBusiness or Person, or its `url` is off-site |
 | AEO | `entity-sameas` | warn | that entity has no `sameAs` profile links |
 | AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content). Text is read as rendered, so inline markup such as `CuSO<sub>4</sub>` matches `CuSO4` |
+| AEO | `faq-markup-missing` | warn | a visible FAQ with no FAQPage JSON-LD: 2 or more question-and-answer pairs (an h2–h4 ending in `?`, then answer text) in `<main>` (or the body), outside header, nav, footer and aside. An "FAQ" heading alone is not one. Google retired FAQ rich results on 7 May 2026; answer engines still read the pairs |
 | AEO | `breadcrumbs` | warn | a page two or more levels deep has no BreadcrumbList |
-| GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, Applebot, DuckAssistBot |
-| GEO | `ai-training` | error | an AI training token (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent, Bytespider) can fetch `/`, or a `Content-Signal` says `ai-train=yes`; with `"aiTraining": "reserve"`, a training token that can fetch `/` is governed by a group with no `ai-train=no` signal; with `"aiTraining": "allow"`, the reverse of the default. Build and after deploy |
-| GEO | `ai-uses-allowed` | error | a `Content-Signal` sets `search=no` or `ai-input=no`. Build and after deploy |
+| GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: the rest of `groups.searchMustAllow` (OAI-SearchBot, Claude-SearchBot, PerplexityBot, Applebot, DuckAssistBot, Amzn-SearchBot, MistralAI-Index) and `groups.userFetchShouldAllow` (ChatGPT-User, Claude-User, Perplexity-User) |
+| GEO | `ai-training` | error | a token in `groups.trainingOnly` (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, MistralAI-Training) can fetch `/`, or a `Content-Signal` says `ai-train=yes`; with `"aiTraining": "reserve"`, a training token that can fetch `/` is governed by a group with no `ai-train=no` signal; with `"aiTraining": "allow"`, the reverse of the default |
+| GEO | `ai-training-optout-scope` | warn | a line naming `__usage_ai-training` sits in a group for `User-agent: *`, where it has no effect: the AI-preferences opt-out is read from its own `User-agent: __usage_ai-training` group |
+| GEO | `ai-uses-allowed` | error | a `Content-Signal` sets `search=no` or `ai-input=no` |
 | GEO | `ai-crawler-rules` | warn | no `User-agent` group names an AI crawler (GPTBot, OAI-SearchBot, ClaudeBot, Claude-SearchBot, Google-Extended, …) |
 | GEO | `content-signals` | warn | `robots.txt` has no `Content-Signal` line, or one that doesn't declare all of `search`, `ai-input` and `ai-train` ([contentsignals.org](https://contentsignals.org)) |
 | GEO | `content-signals-format` | error | a `Content-Signal` entry isn't `search`, `ai-input` or `ai-train` `=yes`/`=no`, or sits before any `User-agent` line |
-| GEO | `link-headers` | warn | `_headers` gives `/` no `Link` header with rel `api-catalog`, `service-desc`, `service-doc` or `describedby` (RFC 8288, RFC 9727), a value doesn't parse, or an on-site target isn't built; after deploy, the real header |
-| GEO | `markdown-negotiation` | warn | after deploy: `Accept: text/markdown` on `/` doesn't return `text/markdown`, or a browser request no longer gets HTML |
+| GEO | `link-headers` | warn | `_headers` gives `/` no `Link` header with rel `api-catalog`, `service-desc`, `service-doc` or `describedby` (RFC 8288, RFC 9727), a value doesn't parse, or an on-site target isn't built |
 | GEO | `open-graph` | error | no `og:title`, `og:description` or absolute `og:image`, an `og:image` on the site that the build lacks, or an off-site `og:url` |
 | GEO | `article-dates` | warn | an Article has no `dateModified` |
-| GEO | `rendered-content` | warn | fewer than 50 words of text in the HTML (content rendered by JavaScript) |
-| GEO | `llms-txt` | warn | no `/llms.txt` |
-| GEO | `llms-txt-format` | error | `/llms.txt` lacks the `# Name` heading, `> summary` line or links ([llmstxt.org](https://llmstxt.org)) |
+| GEO | `rendered-content` | warn | *browser*: without JavaScript the page has under 70% of its words or 50% of its links (Browser checks) |
+| GEO | `llms-txt` | warn | no `/llms.txt` (`llmsTxt.missingLevel`) |
+| GEO | `llms-txt-format` | error | `/llms.txt` lacks the `# Name` heading, `> summary` line or links ([llmstxt.org](https://llmstxt.org); `## Section` headings are optional, per `llmsTxt`) |
 | GEO | `markdown-mirrors` | warn | a `.md` or `.txt` file linked from `llms.txt` has no `X-Robots-Tag: noindex` (or canonical `Link`) header in `_headers` |
 | AIO | `snippet-controls` | warn | an indexable page sets `nosnippet` or `max-snippet:0` |
 | AIO | `image-preview` | warn | an indexable page sets `max-image-preview:none` |
+| perf | `img-dimensions` | error | a local `<img>` (on `siteUrl`, or a `data:` URL) has no `width` or no `height`, so the page shifts as it loads. Remote images and `<noscript>` fallbacks are not checked |
+| perf | `lazy-first-viewport` | warn | *browser*: an image in the first viewport is `loading="lazy"` (Browser checks) |
 
-**Key properties** checked by `structured-data`: Article types need
-`headline`, `datePublished` and `author`. Organization and Person need `name`,
-and LocalBusiness types need `name` and `address`. Every schema.org subtype
-counts (Hotel, Dentist, Attorney, Plumber…), from
+`markdown-negotiation` is gone in v4: Markdown negotiation happens at the edge,
+so website-audit checks it on production. A `discoveryOverrides` entry naming it
+warns and is ignored.
+
+**Key properties** checked by `structured-data` are `jsonLdRequired` in
+`standards/standards.json`: Article types (Article, NewsArticle, BlogPosting,
+TechArticle, and Report and ScholarlyArticle under the Article row) need
+`headline`, `datePublished` and `author`. Organization needs `name` and `url`
+(v4; v3 needed `name` only), Person `name`, and LocalBusiness types `name` and
+`address`. `jsonLdScope` says where a row applies: the Organization and
+LocalBusiness rows only at the top of a JSON-LD block (or its `@graph`) and in
+`publisher`, so a nested reference such as a Person's `worksFor` or `alumniOf`
+needs no `url`; the Offer row only in a Product's or Event's `offers`. Every schema.org subtype counts (Hotel, Dentist, Attorney, Plumber…
+answer to LocalBusiness; other Organization subtypes to Organization), from
 `scripts/schema-org-types.json`; regenerate it with
 `node tools/schema-org-types.mjs` after a schema.org release. WebSite needs `name` and
-`url`. Product needs `name` plus `offers`, `review` or `aggregateRating`. Event
-needs `name`, `startDate` and `location`. FAQPage needs Questions with
-`acceptedAnswer.text`, and BreadcrumbList needs `position`, `name` and `item`.
-Recipe and VideoObject get Google's required properties. Where Google defines
-required properties, these match them; otherwise they are the minimum that
-identifies the thing.
+`url`. Product needs `name` plus `offers`, `review` or `aggregateRating`, and
+its Offer `price` and `priceCurrency`, directly or in a `priceSpecification`
+that carries both (an Offer in `makesOffer` describes a service, and is not
+checked). Event needs `name`, `startDate` and
+`location`. FAQPage needs Questions with `name` and `acceptedAnswer` (with
+`text`), and BreadcrumbList needs `position`, `name` and `item`. Service needs
+`name`. Recipe and VideoObject get Google's required properties.
 
 **AI training is off by default; everything else is on.** `ai-training` fails
-unless `robots.txt` disallows `/` for every model-training token: GPTBot,
-ClaudeBot, Google-Extended, Applebot-Extended, CCBot, meta-externalagent and
-Bytespider. Every other crawler stays allowed: blocking a search crawler fails
+unless `robots.txt` disallows `/` for every token in `groups.trainingOnly`:
+GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot and
+MistralAI-Training. meta-externalagent (training and Meta's indexing) and
+Bytespider (undocumented) are the site's choice; blocking them is fine. Every
+other crawler stays allowed: blocking a search crawler fails
 `robots-blocks-page`, and blocking an AI search or user-fetch crawler such as
 OAI-SearchBot or PerplexityBot fails `ai-search-crawlers`, because it removes the
 site from that product's answers. `ai-uses-allowed` fails a `Content-Signal` that
@@ -512,8 +582,8 @@ Allow: /
 ```
 
 **Other search engines.** `robots-blocks-page` always checks Googlebot and
-Bingbot. A site that serves China, Korea or Russia adds their crawlers, in the
-build scan and after deploy:
+bingbot. A site that serves China, Korea or Russia adds their crawlers to the
+build scan:
 
 ```json
 "discovery": { "searchCrawlers": ["Baiduspider", "Yeti", "YandexBot"] }
@@ -540,8 +610,8 @@ but Google Search does not use it, so it only warns. No markup guarantees a
 citation in an AI answer; these rules make sure nothing on the site prevents
 one.
 
-The result table goes to the job summary and `reports/discovery.md` in the
-build artifact. Error findings fail the step and warnings are annotated.
+The result table goes to the job summary, `reports/discovery.md` and
+`reports/discovery.json` in the build artifact. Error findings fail the step and warnings are annotated.
 `discoveryOverrides` raises or lowers a rule, the same way thresholds are
 overridden:
 
@@ -570,6 +640,7 @@ User-agent: Applebot-Extended
 User-agent: CCBot
 User-agent: meta-externalagent
 User-agent: Bytespider
+User-agent: MistralAI-Training
 Disallow: /
 
 Sitemap: https://example.com/sitemap-index.xml
@@ -590,29 +661,28 @@ used. The post-deploy action runs the same script; the caller's
 `post-deploy.yml` keeps it as a manual fallback. A site deployed some other way
 triggers that workflow on `push`, and `sha` defaults to the triggering commit.
 
-After deploy, the post-deploy action first waits (up to `wait-minutes`) until
-production's home page carries that commit (`sha`) in its `build-sha` meta tag,
-and fails if it never does. Every page it inspects is fetched in full before
-it is searched, so a match can't be lost to a closed pipe. It then checks what
-production **actually serves**, at the site's discovery levels: `robots.txt` is 200, `text/plain`,
-has a `User-agent` group, blocks AI training (per `discovery.aiTraining`), keeps
-search and AI input on in its `Content-Signal`, and doesn't block Googlebot,
-Bingbot, a `discovery.searchCrawlers` crawler or an AI search crawler from a
-smoke path;
-every sitemap it names answers with XML; the home page sends its `Link` header;
-and `Accept: text/markdown` gets Markdown (Cloudflare's Markdown for Agents
-does this at the edge, so the build can't test it). A CDN's managed robots.txt,
-"block AI bots" setting or transform rule can change any of these after the
-build passed. It also fails when `/`, `/robots.txt` or a smoke path answers
-**403 or 429** to a plain request: a WAF rule or rate limit that refuses
-ordinary traffic refuses crawlers too, and AI platforms treat the site as
-unreachable. It warns when a page has neither `ETag` nor `Last-Modified`, which
-crawlers use to refetch only what changed. It never spoofs a crawler's user
-agent: a correctly configured WAF blocks spoofed bots, so that test would fail
-good sites. With `posthog-server-only` it fails when production's home page
-carries PostHog client code or a project key, and when that page can't be
-fetched at all. With `posthog-hybrid` it fails when production's home page (or
-a same-origin script it loads) carries no PostHog project key, carries Ship
+After deploy, the post-deploy check proves **deploy health** and nothing
+more (v4). It first waits (up to `wait-minutes`) until production's home page
+carries that commit (`sha`) in its `build-sha` meta tag, and fails if it never
+does. Every page it inspects is fetched in full before it is searched, so a
+match can't be lost to a closed pipe. Then:
+
+- every smoke path answers 200;
+- `robots.txt` answers 200 as `text/plain` with a `User-agent` group (a 404
+  warns: every crawler is then allowed), and every sitemap it names answers
+  200 with XML that is a sitemap (`robots-txt`, `sitemap-live`, at the site's
+  discovery levels);
+- `/`, `/robots.txt` and the smoke paths don't answer **403 or 429** to a plain
+  request: a WAF rule or rate limit that refuses ordinary traffic refuses
+  crawlers too, and AI platforms treat the site as unreachable. It never spoofs
+  a crawler's user agent: a correctly configured WAF blocks spoofed bots, so
+  that test would fail good sites;
+- the PostHog key policy holds.
+
+With `posthog-server-only` it fails when production's home page carries
+PostHog client code or a project key, and when that page can't be fetched at
+all. With `posthog-hybrid` it fails when production's home page (or a
+same-origin script it loads) carries no PostHog project key, carries Ship
 Gate's CI key or a personal key, or carries a key PostHog doesn't know: one
 read-only GET of the project's remote config (`/array/<key>/config.js`), which
 answers 404 for an unknown key. With a same-origin proxy (`posthog.apiHost` a
@@ -622,23 +692,57 @@ page or a redirect means the proxy isn't reaching PostHog. A plain-text 404 is
 the proxy refusing `/static/` on purpose (a site with session replay off keeps
 `recorder.js` from ever loading through its own origin), so it warns instead;
 the remote config, which must not come back as HTML, already proved the proxy
-reaches PostHog's assets host. With
-`analytics-always-on` it warns when production's home page has no Zaraz loader
-(`/cdn-cgi/zaraz/`), because then Google Analytics runs nowhere. It warns rather
-than fails: a Zaraz setting is not a fault in the deployed commit, and a
-post-deploy failure means roll back.
+reaches PostHog's assets host.
 
-With a `crux-api-key` input (a Google API key with the Chrome UX Report API
-enabled, passed as a secret), it also reports **field Core Web Vitals** for
-phones and warns when p75 LCP is over 2.5 s, INP over 200 ms or CLS over 0.1.
-Lab tools cannot measure INP; only real visits can. Sites with too little
-traffic have no Chrome UX Report data, and the step says so and passes. If
-the API can't be reached, the step warns and passes.
+**Live behaviour is website-audit's** (v4). What production tells crawlers
+beyond answering (which crawlers its served `robots.txt` lets in, the training
+rules as served, the home page's `Link` header, `Accept: text/markdown`), the
+`ETag`/`Last-Modified` freshness headers, field Core Web Vitals from the Chrome
+UX Report, and whether Zaraz is on production can change between deploys
+without a commit (a CDN's managed robots.txt, "block AI bots", a transform
+rule, a Zaraz setting). website-audit checks them on production; post-deploy
+no longer does, and the `crux-api-key` input is gone.
 
 **Not checked: DNS-AID.** DNS for AI Discovery
 (`_index._agents.example.com` SVCB records) is an individual Internet-Draft,
 not adopted by an IETF working group, and only applies to sites that run agent
 endpoints. It is left out until it is adopted.
+
+### Results for website-audit
+
+Every `verify` run, pull request or full sweep, green or red, writes
+`reports/results.json` in the run's Ship Gate folder (`$SHIP_GATE_DIR`,
+`$RUNNER_TEMP/ship-gate` by default) as its last step (`scripts/results.mjs`).
+The step never fails the gate. website-audit reads the latest one instead of
+re-testing what the build proves; the caller `full-sweep.yml` uploads it as the
+**`ship-gate-results`** artifact on every run, kept 35 days, so the newest can
+be fetched through the GitHub API (`GET /repos/{owner}/{repo}/actions/artifacts?name=ship-gate-results`).
+A failed run also carries it in the usual reports artifact.
+
+```json
+{
+  "shipGate": "v4.0.0",
+  "stage": "full",
+  "siteUrl": "https://example.com",
+  "commit": "<sha the gate checked: the PR head, or the pushed commit>",
+  "finishedAt": "2026-12-01T03:41:07.512Z",
+  "checks": [
+    { "id": "canonical", "category": "SEO", "level": "error", "status": "pass", "count": 0, "samples": [] },
+    { "id": "rendered-content", "category": "GEO", "level": "warn", "status": "warn", "count": 1, "samples": ["/pricing/"] }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `shipGate` | The Ship Gate version that ran (the newest `CHANGELOG.md` heading of the pinned tag) |
+| `stage` | `full`, `browser` or `scans` (the action's `stage` input) |
+| `siteUrl`, `commit`, `finishedAt` | The site, the commit checked, and when the run finished (ISO 8601, UTC) |
+| `checks[].id` | A discovery rule id (`canonical`, `img-dimensions`, …), `first-party-only`, `guard:<id>` (each guard `guards.sh` can raise: `guard:env-file`, `guard:node-pin`, `guard:direct-tags`, …), `structure:<check>` (`one-h1`, `heading-order`, `noopener`, `title`, `meta-description`, `title-unique`, `meta-description-unique`, `template-token`, `edge-files`, `llms-links`), `browser:<check>` for the page test's checks (`smoke`, `axe`, `consent`, `csp`, `keyboard`, `reflow`, `posthog`, `turnstile`; a failed assertion is sorted by its message) and the `edge` and `on-demand` specs, `lighthouse:<audit>` (a failed Lighthouse assertion), or `step:<name>` (each row of the summary table: `step:contract`, `step:guards`, `step:build`, `step:browser`, `step:lighthouse`, …) |
+| `checks[].category` | `SEO`, `AEO`, `GEO`, `AIO`, `perf`, `structure`, `a11y`, `security`, `policy`, `build` or `site` |
+| `checks[].level` | `error` (fails the gate) or `warn`; a rule a site turned off reports its default level with status `not-run` |
+| `checks[].status` | `pass`, `fail`, `warn`, or `not-run` (an earlier failure, the stage, a live-only rule, a rule turned off, a policy the site doesn't use, or a guard its standard checks). A render test that failed before recording its page (the page didn't load) reads `fail` for every rule it owns, never `pass` |
+| `checks[].count`, `samples` | How many findings, and up to 10 pages or files they are on |
 
 ### Stack policies
 
@@ -651,11 +755,12 @@ checks:
 | `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot tracking (`hs-scripts`, `hs-analytics`) go through Cloudflare Zaraz. HubSpot form embeds (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until HubSpot's forms API is available. They render their own form, so list only Turnstile forms in `formPages`. A tag host that loads nothing passes: `_headers` comment lines and `Content-Security-Policy` values (a client-side Zaraz tool such as Clarity needs its hosts in the CSP), and a bare `www.clarity.ms` in prose or a link. Clarity's loader (`clarity.ms/tag`) still fails |
 | `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys. When a page carries the widget, a wrangler config without `secrets.required` listing the `turnstileEnv` secret warns, so a deploy without it fails instead of rejecting every submission |
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
-| `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: Google (Fonts, Maps, reCAPTCHA, tags), YouTube, Facebook, Instagram, X/Twitter, Vimeo, Gravatar. A blocked font or script stalls the page until it times out. Links and JSON-LD `sameAs` load nothing and pass. jsDelivr and unpkg warn; non-ASCII URLs warn |
+| `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: `chinaBlockedHosts` in `standards/standards.json` (Google, its Fonts, Maps, reCAPTCHA and tags, YouTube, Facebook, Instagram, WhatsApp, X/Twitter, LinkedIn, Vimeo, Gravatar, Typekit, Dropbox, Medium, Slack, Notion, Figma, WordPress.org and others; v4 adds website-audit's hosts to v3's). A blocked font or script stalls the page until it times out. Only resources count: the URL attributes of loading elements (`script`, `img`, `iframe`, `source`, `video`, `audio`, `embed`, `object`, and `link` with a loading `rel` such as `stylesheet` or `preload`), CSS `@import` and `url()` (in files, `<style>` and `style=""`), and in script a URL passed to `fetch()`, `import()`, `importScripts()`, `sendBeacon()`, `new Worker()` or `EventSource`, assigned to `.src`, or named by a static `import`/`export … from`. In a hand-written inline `<script>`, any blocked URL fails unless it is a link: in `open()`, an `href` (including `setAttribute("href", …)`), `location`, a `share…` name, or a share or intent URL (`/intent/`, `sharer`, `share-offsite`, `/share`, `/shareArticle`). A blocked URL in a script comment counts too. Links (`<a href>`, `data-href`, JSON-LD `sameAs`, social meta) load nothing and pass; in a bundle, any other blocked URL warns. `chinaUnreliableHosts` (jsDelivr, unpkg) warn; non-ASCII URLs warn |
 | `rtl-logical-css` | Warns with a count of physical `left`/`right` declarations in the built CSS (`margin-left`, `padding-right`, `left:`, `text-align: left`, `float: right`, `border-left`), which don't mirror under `dir="rtl"`. Use logical properties (`margin-inline-start`, `inset-inline-start`, `text-align: start`). Never fails: some physical values are right |
-| `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. A wrangler config without `secrets.required` listing `POSTHOG_API_KEY` (and, with `turnstile-forms`, the `turnstileEnv` secret) warns, and becomes an error in v4. Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
-| `consent-before-tracking` | The browser consent check: no non-essential cookie and no tracker before the visitor chooses. Strictly necessary cookies go in `consentEssentialCookies` |
-| `analytics-always-on` | Google Analytics and PostHog load on every page, with or without consent, and neither stores anything until the visitor accepts. Needs `posthog-hybrid` (with `posthog.cookieless` `"on_reject"` or `"always"`) and `tags-via-zaraz`. GA4 is a Zaraz tool with no consent purpose, in Google Consent Mode v2 with every signal denied by default. Then the post-deploy Zaraz check. See Analytics on every page |
+| `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. A wrangler config without `secrets.required` listing `POSTHOG_API_KEY` (and, with `turnstile-forms`, the `turnstileEnv` secret) fails (`posthog-secrets`, an error from v4; exemptible with a date). Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
+| `consent-before-tracking` | The browser consent check: no non-essential cookie and no tracker (the consent-sensitive `trackerVendors` categories) before the visitor chooses. Strictly necessary cookies go in `consentEssentialCookies` |
+| `first-party-only` | Every page the sitemap lists loads only first-party resources (Browser checks). Third-party origins the site needs go in `allowedOrigins`. With `turnstile-forms` that list must hold `https://challenges.cloudflare.com`, and with `posthog-hybrid` `posthog.apiHost` must be a same-origin proxy path |
+| `analytics-always-on` | Google Analytics and PostHog load on every page, with or without consent, and neither stores anything until the visitor accepts. Needs `posthog-hybrid` (with `posthog.cookieless` `"on_reject"` or `"always"`) and `tags-via-zaraz`. GA4 is a Zaraz tool with no consent purpose, in Google Consent Mode v2 with every signal denied by default. See Analytics on every page |
 
 ```json
 "policies": ["posthog-server-only", "tags-via-zaraz", "turnstile-forms", "workers-builds-only"]
@@ -739,8 +844,9 @@ the Zaraz consent modal.
 
 The gate can't see Zaraz: it runs only on Cloudflare's edge. Before merge,
 Ship Gate checks the config, the consent test (no `_ga` or `ph_` storage
-before consent) and the consent bridge's build. After deploy, it checks that
-the Zaraz loader is on production. Cloudflare doesn't document whether the Zaraz
+before consent) and the consent bridge's build. Whether the Zaraz loader is on
+production is live behaviour, which website-audit checks (v4; v3's post-deploy
+warned). Cloudflare doesn't document whether the Zaraz
 GA4 tool sets any cookie while `analytics_storage` is denied. So do the
 checklist's production check once per site before its cookie policy says "no
 cookies before consent".
@@ -773,7 +879,8 @@ are the site owner's decisions.
   `wrangler deploy` and `wrangler versions upload` (every preview) then fail
   when one is unset, instead of shipping a Worker that silently sends nothing.
   Once `secrets` is set, `wrangler dev` loads only the secrets listed, so list
-  all of them. Ship Gate warns when the list is missing (an error from v4).
+  all of them. Ship Gate fails when the list is missing (`posthog-secrets`; it
+  warned before v4).
 
 CI never needs a real key: Ship Gate builds with its own CI-only key, and
 post-deploy fails if that one reaches production.
@@ -799,6 +906,31 @@ These apply to every site:
 - **Lighthouse reports stay private.** Temporary public storage fails.
 - **One dependency bot.** Dependabot and Renovate together warn: every update
   would arrive twice.
+
+**Delegated to web-baseline** (v4). A site that runs the web-baseline standard
+says so, and Ship Gate stops running a source guard web-baseline's own
+`conform:check` enforces without exception, so the check has one owner:
+
+```json
+"standard": "web-baseline",
+"checks": { "postBuild": ["conform:check"] }
+```
+
+with `"conform:check": "node scripts/standard/conform.mjs --ci --final"` in
+`package.json`. The contract check fails when neither `checks.preBuild` nor
+`checks.postBuild` lists `conform:check` (the scans stage and the Workers Builds
+fast stage run no browser phase), or when its script is not the conform call
+alone: `node scripts/standard/conform.mjs` with `--final` (`--ci` alone enforces
+only the run's current phase), no `--report` (it makes conform exit 0), and
+nothing chained after it (`|| true`, `; exit 0`, `&& …`). Only
+`node-pin` is delegated: web-baseline pins the portfolio's Node line, and no
+recorded deviation can waive it. The other overlaps stay Ship Gate guards,
+because a deviation (`docs/baseline/deviations.json`) can accept them in
+web-baseline: `tailwind-config` (a forbidden path), `posthog-secrets` and the
+PostHog layout wiring (required content). `env-file` is never delegated: a
+committed secret is never exemptible. The log names the skipped guard. This is
+not an exemption: the check still runs, inside this gate, as one of the site's
+checks.
 
 The contract check also refuses any script CI runs that writes to production:
 `build`, `check`, `lint`, `test`, `preview`, the install scripts `npm ci` runs
@@ -837,7 +969,7 @@ guards, exemptible only when the site uses the policy:
   `posthog-us-host` and `posthog-env-tag`
 - `posthog-hybrid`: `posthog-missing` (no browser init, or a page without it),
   `posthog-server` (`posthog-node` missing or outside server paths),
-  `posthog-csp`, `posthog-public-var`, `posthog-us-host` and `posthog-env-tag`
+  `posthog-csp`, `posthog-secrets` (`secrets.required` incomplete), `posthog-public-var`, `posthog-us-host` and `posthog-env-tag`
 - `tags-via-zaraz`: `direct-tags`
 - `turnstile-forms`: `turnstile`
 - `workers-builds-only`: `pages-config` and `cloudflare-in-workflows`
@@ -858,6 +990,8 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `siteUrl` | required | Production origin, e.g. `https://example.com` |
 | `pages` | required | One path per key template: home, service or product, contact, article |
 | `policies` | `[]` | Stack policies this site follows; see Stack policies |
+| `standard` | none | `"web-baseline"`: hands `node-pin` to web-baseline's `conform:check` (Guards → Delegated to web-baseline); `conform:check` must be listed in `checks.preBuild` or `checks.postBuild` and be the conform call alone (`node scripts/standard/conform.mjs … --final`, no `--report`, nothing chained after it) |
+| `allowedOrigins` | `[]` | With `first-party-only`: third-party https origins the site may load, e.g. `"https://challenges.cloudflare.com"` |
 | `formPages` | `[]` | Every page with a public form (the `turnstile-forms` policy checks the widget there) |
 | `smokePaths` | `/`, `/robots.txt`, `/sitemap-index.xml` | Checked on production after deploy |
 | `server` | `static` | `static` serves the built files (handles `dist/client` from the Cloudflare adapter); `preview` runs the site's Worker with `npm run preview`, local bindings only (see The gate → Pages rendered on request) |
@@ -880,7 +1014,7 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `discovery.sitemap` | from `robots.txt`, else `/sitemap-index.xml` or `/sitemap.xml` | The sitemap's path |
 | `discovery.ignoreLinks` | `[]` | Path prefixes the Worker serves rather than the static build, e.g. `"/api/"`; the link check skips them |
 | `discovery.aiTraining` | `"block"` | `"block"`: AI training crawlers must be disallowed. `"reserve"`: they may fetch, but the group governing each must say `Content-Signal: ai-train=no`. `"allow"`: they must not be disallowed. See Discovery scan |
-| `discovery.searchCrawlers` | `[]` | Crawler tokens that must reach every indexable page besides Googlebot and Bingbot, e.g. `"Baiduspider"`, `"Yeti"` |
+| `discovery.searchCrawlers` | `[]` | Crawler tokens that must reach every indexable page besides Googlebot and bingbot, e.g. `"Baiduspider"`, `"Yeti"` |
 | `python` | none | `{ "version": "3.11", "packages": ["fonttools"] }` for Python checks |
 | `posthog.embed` | `"snippet"` | With `posthog-hybrid`: `"snippet"` (the inline loader from PostHog's Astro guide) or `"npm"` (`posthog-js` bundled) |
 | `posthog.cookieless` | `"on_reject"` | With `posthog-hybrid`: `"on_reject"`, `"always"` or `"off"`; must match `cookieless_mode` in the options file |
@@ -970,7 +1104,7 @@ Ship Gate follows web-baseline's rules too:
 - **no model in CI and no Anthropic key**. Review, failed-run triage and evals
   are cloud-session work. Self-test fails if a workflow or action calls Claude.
 
-| Play | In Ship Gate (v3.15.0) |
+| Play | In Ship Gate (v4.0.0) |
 |---|---|
 | Plan, Design, Build: `intent.md`, `spec.md`, `plan.md` | `docs/intent/<date>-<name>/`, from `_template/`. `plan.md` is committed before code and updated with it |
 | Build: `CLAUDE.md` | Commands with their healthy output, how a change starts, conventions, and "Things Claude gets wrong" |
@@ -999,7 +1133,7 @@ in the workflow.
 Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
 
 ```yaml
-- uses: pauljosephdp/Ship-Gate/ci-health@v3.15.0
+- uses: pauljosephdp/Ship-Gate/ci-health@v4.0.0
   with:
     workflow: ci.yml        # the workflow to watch
     timeout-minutes: 30     # its job timeout
@@ -1103,11 +1237,11 @@ duration bands are proposed to web-baseline, alongside adopting this release.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v3.15.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v4.0.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v3.15.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v4.0.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,
@@ -1224,6 +1358,10 @@ is left out for a reason:
   (axe, keyboard, reflow).
 - **IndexNow submission:** a write to a search engine. The contract forbids it
   in the gate; keep it in a scheduled workflow.
+- **Live behaviour** (v4): field Core Web Vitals, crawler rules and headers as
+  production serves them, Markdown negotiation, Zaraz, Search Console data. They
+  need production over time, not one build: website-audit owns them, reading the
+  same `standards/standards.json`.
 
 ## Open items
 
@@ -1232,3 +1370,7 @@ is left out for a reason:
   both work.
 - `"server": "preview"` is proven with `@astrojs/cloudflare` only. Another
   adapter's `npm run preview` may need its own local-only settings.
+- The v4 checks (the render spec, `first-party-only`, the moved-in build rules)
+  are proven by `self-test` and a run of the browser suite on the fixture, but
+  have no `fixture` variant yet: `test/break-fixture.sh` and `test/expect-gate.sh`
+  are protected tests, so adding variants needs a person's approval.

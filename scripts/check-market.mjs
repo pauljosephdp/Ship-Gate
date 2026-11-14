@@ -4,8 +4,10 @@
 //   node check-market.mjs        (reads $SHIP_GATE_DIR/run.json, written after the build)
 //
 // market-cn: no page, stylesheet or script loads a resource from a host that mainland China
-//   blocks (Google, YouTube, Facebook, Instagram, X/Twitter, Vimeo, Gravatar). A blocked font or
+//   blocks (chinaBlockedHosts in standards/standards.json: Google, YouTube, Meta, X, LinkedIn,
+//   Vimeo, Gravatar and others; the list website-audit reads too). A blocked font or
 //   script stalls rendering until it times out. Links to those sites are fine: they load nothing.
+//   In a bundle, a blocked URL that is not visibly loaded warns; in an inline <script>, it fails unless it is a link.
 //   URLs with non-ASCII characters warn: they break when shared through Chinese platforms.
 //   Guard "blocked-in-cn" may be exempted with a reason and date.
 // rtl-logical-css: counts left/right physical properties in the built CSS. They do not mirror
@@ -15,6 +17,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { htmlFiles, assetsIgnore } from './site-files.mjs';
+import { CHINA_BLOCKED, CHINA_UNRELIABLE, hostPattern } from './standards.mjs';
 
 const OUT = process.env.SHIP_GATE_DIR || '.ship-gate';
 const { root, policies = [], exempt = [] } = JSON.parse(readFileSync(join(OUT, 'run.json'), 'utf8'));
@@ -39,26 +42,61 @@ let failed = false;
 
 if (policies.includes('market-cn')) {
   // Hosts blocked by the Great Firewall. A "//" must precede the host, so only URLs match.
-  const BLOCKED = /\/\/(?:[a-z0-9-]+\.)*(google\.com|googleapis\.com|gstatic\.com|googletagmanager\.com|google-analytics\.com|doubleclick\.net|googlesyndication\.com|youtube\.com|youtube-nocookie\.com|ytimg\.com|youtu\.be|facebook\.com|facebook\.net|fbcdn\.net|instagram\.com|cdninstagram\.com|twitter\.com|x\.com|twimg\.com|vimeo\.com|vimeocdn\.com|gravatar\.com)(?=[/:"'?#\s)]|$)/gi;
+  const BLOCKED = new RegExp(hostPattern(CHINA_BLOCKED), 'gi');
   // Public CDNs that are unreliable from the mainland: warn, don't fail.
-  const SLOW = /\/\/(cdn\.jsdelivr\.net|unpkg\.com)(?=[/"'?#\s)]|$)/gi;
-  // In HTML, only what the browser loads: links, social meta and JSON-LD sameAs load nothing.
-  const loaded = (html) => html
-    .replace(/<a\b[^>]*>/gi, ' ')
-    .replace(/<meta\b[^>]*>/gi, ' ')
-    .replace(/<link\b(?=[^>]*\brel\s*=\s*["']?(canonical|alternate|me|author|license)\b)[^>]*>/gi, ' ')
-    .replace(/<script\b[^>]*application\/ld\+json[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ');
-  const hits = new Map(), slow = new Map();
+  const SLOW = new RegExp(hostPattern(CHINA_UNRELIABLE), 'gi');
+  // Only what the browser loads is a resource. A link (<a href>, a share URL, JSON-LD sameAs, social
+  // meta) loads nothing. In HTML: the URL attributes of loading elements, CSS in <style> and style="",
+  // and script. In CSS: @import and url(). In script (inline or a bundle) a link can't be told from a
+  // load by its text, so a URL passed to fetch(), import(), importScripts(), sendBeacon(), new Worker()
+  // or EventSource, assigned to .src, or named by a static import/export is a resource. In a bundle any
+  // other blocked URL warns; in a hand-written inline <script> it fails unless it is in a link context.
+  const LOADING = /<(script|img|source|iframe|video|audio|embed|object|input|track)\b[^>]*>/gi;
+  const LINK_LOADS = /\brel\s*=\s*["']?[^"'>]*\b(stylesheet|preload|modulepreload|icon|apple-touch-icon|manifest|prefetch)\b/i;
+  const LOAD_CALL = /(?:\b(?:fetch|import|importScripts|sendBeacon|Worker|EventSource)\s*\(\s*|\.src\s*=\s*)["'`](?:https?:)?$/;
+  // A static import or re-export is a load too: import x from "url", import "url", export { x } from "url".
+  const STATIC_IMPORT = /(?:\bimport\s*(?:[\w$*{},\s]+?\s*from\s*)?|\bexport\s*[\w$*{},\s]+?\s*from\s*)["'`](?:https?:)?$/;
+  // In a hand-written inline <script>, a blocked URL is a load (loader snippets pass it as an argument),
+  // unless it sits in a link context: window.open(), an href or location, or a share URL.
+  const LINK_CONTEXT = /(?:\bopen\s*\(\s*|\bhref\s*[=:]\s*|\bsetAttribute\s*\(\s*["']href["']\s*,\s*|\blocation(?:\.href)?\s*=\s*|share[\w.]*\s*[=:(]\s*)["'`](?:https?:)?$/i;
+  // Share and follow URLs are links whatever the variable is called.
+  const LINK_URL = /^(?:https?:)?\/\/[^\s"'`]*(?:\/intent\/|sharer|share-offsite|\/share\b|\/shareArticle)/i;
+  const attrUrls = (tag) => [...tag.matchAll(/\b(src|srcset|href|poster|data)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)].map((m) => m[3] ?? m[4] ?? m[5] ?? '');
+  const cssLoads = (css) => [...css.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)|url\(\s*["']?([^"')\s]+)/gi)].map((m) => m[1] ?? m[2]).join(' ');
+  // Returns { sure: text of URLs the page loads, maybe: script text whose URLs may be links }.
+  function resources(text, rel) {
+    if (/\.css$/i.test(rel)) return { sure: cssLoads(text), maybe: '' };
+    if (/\.m?js$/i.test(rel)) return scriptLoads(text);
+    const html = text.replace(/<!--[\s\S]*?-->/g, ' ');
+    let sure = [...html.matchAll(LOADING)].flatMap((m) => attrUrls(m[0])).join(' ');
+    sure += ' ' + [...html.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0]).filter((t) => LINK_LOADS.test(t)).flatMap(attrUrls).join(' ');
+    sure += ' ' + cssLoads([...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>|\bstyle\s*=\s*"([^"]*)"/gi)].map((m) => m[1] ?? m[2]).join('\n'));
+    const inline = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter((m) => !/application\/(ld\+)?json/i.test(m[1])).map((m) => scriptLoads(m[2], true));
+    return { sure: [sure, ...inline.map((x) => x.sure)].join(' '), maybe: inline.map((x) => x.maybe).join(' ') };
+  }
+  function scriptLoads(js, inline = false) {
+    const sure = [], maybe = [];
+    for (const m of js.matchAll(new RegExp(hostPattern([...CHINA_BLOCKED, ...CHINA_UNRELIABLE]), 'gi'))) {
+      const near = js.slice(Math.max(0, m.index - 40), m.index), wide = js.slice(Math.max(0, m.index - 300), m.index);
+      const load = LOAD_CALL.test(near) || STATIC_IMPORT.test(wide)
+        || (inline && !LINK_CONTEXT.test(near) && !LINK_URL.test(js.slice(m.index, m.index + 200)));
+      (load ? sure : maybe).push(m[0]);
+    }
+    return { sure: sure.join(' '), maybe: maybe.join(' ') };
+  }
+  const hits = new Map(), slow = new Map(), unsure = new Map();
+  const note = (map, rel, host) => map.set(rel, new Set([...(map.get(rel) ?? []), host.toLowerCase()]));
   for (const f of files(/\.(html|css|m?js)$/i)) {
-    let text = readFileSync(f.file, 'utf8');
-    if (/\.html$/i.test(f.rel)) text = loaded(text);
-    for (const m of text.matchAll(BLOCKED)) hits.set(f.rel, new Set([...(hits.get(f.rel) ?? []), m[1].toLowerCase()]));
-    for (const m of text.matchAll(SLOW)) slow.set(f.rel, new Set([...(slow.get(f.rel) ?? []), m[1].toLowerCase()]));
+    const { sure, maybe } = resources(readFileSync(f.file, 'utf8'), f.rel);
+    for (const m of sure.matchAll(BLOCKED)) note(hits, f.rel, m[1]);
+    for (const m of sure.matchAll(SLOW)) note(slow, f.rel, m[1]);
+    for (const m of maybe.matchAll(BLOCKED)) note(unsure, f.rel, m[1]);
   }
   const level = exempt.includes('blocked-in-cn') ? 'warning' : 'error';
   for (const [rel, hosts] of hits)
     console.log(`::${level}::${level === 'warning' ? '[exempt: blocked-in-cn] ' : ''}${rel} loads from ${[...hosts].join(', ')}, blocked in mainland China. Self-host the font or script, or use a provider that serves China.`);
+  for (const [rel, hosts] of unsure)
+    console.log(`::warning::${rel} names ${[...hosts].join(', ')} (blocked in mainland China) in script. If it loads from there, rather than linking to it, self-host it.`);
   for (const [rel, hosts] of slow) console.log(`::warning::${rel} loads from ${[...hosts].join(', ')}, which is unreliable from mainland China. Self-host it.`);
   const nonAscii = htmlFiles(root).map((p) => p.path).filter((p) => /[^\x20-\x7e]/.test(p));
   if (nonAscii.length) console.log(`::warning::${nonAscii.length} URL(s) contain non-ASCII characters (${nonAscii.slice(0, 3).join(', ')}). Use Pinyin, English or numbers: encoded Chinese characters break when URLs are shared.`);

@@ -11,12 +11,14 @@
 
 import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { htmlFiles, pageKind, attr, metaContent, assetsIgnore, parseRedirects, parseHeaders, compilePattern } from './site-files.mjs';
 import {
   RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, trainingPolicy, CONTENT_SIGNALS, RETIRED_TOKENS, parseContentSignal,
-  AGENT_LINK_RELS, parseLinkHeader, visibleText, normalise, ogContent, robotsDirectives,
-  parseRobots, robotsAllows, parseSitemap, W3C_DATE, jsonLd, typesOf, missingProps, isEntity, isArticle, RTL_LANGS,
+  AGENT_LINK_RELS, parseLinkHeader, visibleText, normalise, ogContent, robotsDirectives, usageScopeProblems, USAGE_TRAINING_TOKEN,
+  parseRobots, robotsAllows, parseSitemap, W3C_DATE, jsonLd, typesOf, missingProps, isEntity, isArticle, RTL_LANGS, LLMS_TXT, BUILD_CHECKS,
 } from './discovery.mjs';
+import { TRAINING_OPT_OUT } from './standards.mjs';
 
 const OUT = process.env.SHIP_GATE_DIR || '.ship-gate';
 const run = JSON.parse(readFileSync(join(OUT, 'run.json'), 'utf8'));
@@ -27,7 +29,7 @@ const ignoreLinks = cfg.ignoreLinks ?? [];
 const searchCrawlers = [...SEARCH_CRAWLERS, ...(cfg.searchCrawlers ?? [])];
 
 const findings = Object.fromEntries(Object.keys(RULES).map((k) => [k, []]));
-const add = (rule, where, msg) => findings[rule].push(`${where}: ${msg}`);
+const add = (rule, where, msg) => findings[rule].push({ where, msg });
 const notes = [];
 
 // ── The build ──
@@ -53,6 +55,21 @@ const redirects = parseRedirects(read('_redirects') ?? '').rules;
 const redirectRules = redirects.map((r) => compilePattern(r.from));
 const onSite = (href) => href === siteUrl || href.startsWith(siteUrl + '/');
 const pathOf = (url) => dec(new URL(url).pathname);
+// The indexable page a link lands on: the file that serves the path, after one static redirect hop.
+const pathOfRel = new Map(files.map((f) => [f.rel, f.path]));
+const pageAt = (path) => {
+  let rel = served(path);
+  if (!rel) {
+    const r = redirects.find((x) => x.from === path && x.status !== 200 && x.to.startsWith('/'));
+    if (r) rel = served(r.to.split(/[?#]/)[0]);
+  }
+  const p = rel ? pathOfRel.get(rel) : undefined;
+  return p !== undefined && pageByPath.has(p) ? p : null;
+};
+// Markup a reader sees: no comments, scripts, styles, templates or noscript fallbacks.
+const shown = (html) => html.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style|template|noscript)\b[\s\S]*?<\/\1>/gi, ' ');
+const FAQ_QUESTION = new RegExp(BUILD_CHECKS.faqPattern.question);
+const linksOf = new Map(); // page path → Set of page paths it links to
 
 // ── robots.txt ──
 const robotsText = read('robots.txt');
@@ -73,6 +90,8 @@ for (const bot of AI_SEARCH_CRAWLERS) {
   if (blocked.length) add('ai-search-crawlers', 'robots.txt', `blocks ${bot} from ${blocked.length} indexable page(s) (${blocked.slice(0, 3).join(', ')}${blocked.length > 3 ? ', …' : ''}). It fetches pages to answer and cite; blocking it removes the site from that product's answers. To opt out of model training only, block the training tokens (${AI_TRAINING_TOKENS.join(', ')}) instead.`);
 }
 if (robotsText !== null) for (const f of trainingPolicy(robots, cfg.aiTraining ?? 'block')) add(f.rule, 'robots.txt', f.msg);
+for (const u of usageScopeProblems(robotsText ?? ''))
+  add('ai-training-optout-scope', 'robots.txt', `line ${u.line}: "${u.text}" names ${USAGE_TRAINING_TOKEN} inside a group for "User-agent: *", where it has no effect: the AI-preferences opt-out is read from its own group ("User-agent: ${USAGE_TRAINING_TOKEN}" followed by Disallow lines). ${Object.entries(TRAINING_OPT_OUT.honouredBy).map(([v, d]) => `${v}: ${d}`).join('; ')}.`);
 if (robotsText !== null && robots.groups.length) {
   const named = new Set(robots.groups.flatMap((g) => g.agents));
   const explicit = AI_AGENT_TOKENS.filter((t) => named.has(t.toLowerCase()));
@@ -96,12 +115,14 @@ const sitemapPaths = cfg.sitemap ? [cfg.sitemap]
 if (sitemapPaths.length === 0) for (const p of ['/sitemap-index.xml', '/sitemap.xml']) if (isFile(p.slice(1))) { sitemapPaths.push(p); break; }
 const listed = new Map(); // path → lastmod
 const seen = new Set();
+let builtAt = 0; // the newest sitemap file's mtime: when the build wrote it
 const readSitemap = (path, from) => {
   if (seen.has(path)) return;
   seen.add(path);
   if (/\.gz$/i.test(path)) { add('sitemap', path, 'is gzipped; Ship Gate reads plain XML sitemaps only. Emit an uncompressed sitemap.'); return; }
   const xml = read(path.replace(/^\//, ''));
   if (xml === null) { add('sitemap', path, `${from ? `listed in ${from}, but ` : ''}not in the build.`); return; }
+  builtAt = Math.max(builtAt, statSync(join(root, path.replace(/^\//, ''))).mtimeMs);
   const { kind, entries } = parseSitemap(xml);
   if (!kind) { add('sitemap', path, 'is neither a <urlset> nor a <sitemapindex>.'); return; }
   if (entries.length === 0) add('sitemap', path, 'lists nothing.');
@@ -169,6 +190,7 @@ for (const p of pages) {
 
   // Internal links resolve to a built file or a _redirects rule.
   const broken = new Set();
+  const outLinks = new Set();
   for (const m of html.matchAll(/<a\b[^>]*>/gi)) {
     const raw = attr(m[0], 'href');
     if (!raw || /^(#|mailto:|tel:|sms:|javascript:|data:)/i.test(raw)) continue;
@@ -177,6 +199,8 @@ for (const p of pages) {
     if (url.origin !== siteUrl) continue;
     const path = url.pathname;
     if (ignoreLinks.some((pre) => path.startsWith(pre))) continue;
+    const target = pageAt(path);
+    if (target && target !== at) outLinks.add(target);
     if (served(path) || redirectRules.some((match) => match(path))) continue;
     broken.add(raw);
   }
@@ -198,8 +222,8 @@ for (const p of pages) {
     if (!/schema\.org/.test(JSON.stringify(context ?? ''))) add('structured-data', at, `JSON-LD node ${typesOf(node).join('/') || '(untyped)'} has no schema.org @context.`);
     if (!typesOf(node).length) add('structured-data', at, 'JSON-LD node without @type.');
   }
-  for (const node of ld.all) {
-    const m = missingProps(node);
+  for (const { node, ...place } of ld.placed) {
+    const m = missingProps(node, place);
     if (m.length) add('structured-data', at, `${typesOf(node).join('/')} is missing ${m.join(', ')}.`);
   }
   const text = normalise(visibleText(html));
@@ -222,8 +246,30 @@ for (const p of pages) {
   for (const a of ld.all.filter((n) => typesOf(n).some(isArticle)))
     if (!a.dateModified) add('article-dates', at, `${typesOf(a)[0]} has no dateModified; answer engines favour content they can date.`);
 
-  const words = visibleText(html).split(/\s+/).filter(Boolean).length;
-  if (words < 50) add('rendered-content', at, `${words} words of text in the HTML. Crawlers for AI answers mostly do not run JavaScript; render the content at build time.`);
+  // <img> without width and height: the browser can't reserve its box, so the page shifts as it
+  // loads (CLS). Local images only: the build knows their size.
+  const noDims = [];
+  for (const m of shown(html).matchAll(/<img\b[^>]*>/gi)) {
+    const src = attr(m[0], 'src') ?? (attr(m[0], 'srcset') ?? '').trim().split(/[\s,]+/)[0] ?? '';
+    if (!src) continue;
+    let url;
+    try { url = new URL(src.replace(/&amp;/g, '&'), siteUrl + at); } catch { continue; }
+    if (url.protocol !== 'data:' && url.origin !== siteUrl) continue;
+    if (!/\swidth\s*=\s*["']?\d/i.test(m[0]) || !/\sheight\s*=\s*["']?\d/i.test(m[0])) noDims.push(src.startsWith('data:') ? 'data: URL' : src.slice(0, 80));
+  }
+  if (noDims.length) add('img-dimensions', at, `${noDims.length} <img> without width and height (${noDims.slice(0, 3).join(', ')}${noDims.length > 3 ? ', …' : ''}). Set both, or the page shifts as each image loads (CLS); Astro's <Image> sets them.`);
+
+  // A visible FAQ without FAQPage markup: question-and-answer pairs (an h2-h4 phrased as a question,
+  // then answer text before the next heading) in <main>, outside header, nav, footer and aside.
+  const main = shown(html).match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ?? shown(html);
+  const content = main.replace(/<(header|nav|footer|aside)\b[\s\S]*?<\/\1>/gi, ' ');
+  const pairs = content.split(/(?=<h[1-6]\b)/i).map((part) => part.match(/^<h([2-4])\b[^>]*>([\s\S]*?)<\/h\1>([\s\S]*)$/i))
+    .filter((m) => m && FAQ_QUESTION.test(visibleText(m[2])) && visibleText(m[3]).length > 0).map((m) => visibleText(m[2]));
+  if (pairs.length >= BUILD_CHECKS.faqPattern.minPairs && !ld.all.some((n) => typesOf(n).includes('FAQPage')))
+    add('faq-markup-missing', at, `${pairs.length} question-and-answer pairs ("${pairs[0].slice(0, 50)}", …) read as an FAQ, but the page has no FAQPage JSON-LD. Answer engines read the pairs from it (Google retired FAQ rich results on 2026-05-07; the markup still states them).`);
+
+  // The built link graph: which indexable pages this page links to.
+  linksOf.set(at, outLinks);
 
   const d = robotsDirectives(html);
   if (d.includes('nosnippet') || d.some((x) => /^max-snippet:\s*0$/.test(x)))
@@ -248,6 +294,45 @@ if (sitemapPaths.length && !findings.sitemap.length) {
   const noLastmod = [...listed].filter(([, l]) => l === undefined).map(([p]) => p);
   if (noLastmod.length) add('sitemap-lastmod', 'sitemap', `${noLastmod.length} URL(s) without lastmod (${noLastmod.slice(0, 3).join(', ')}). Bing and AI search use it to schedule recrawls.`);
   for (const [p, l] of listed) if (l && l.slice(0, 10) > tomorrow) add('sitemap-lastmod', p, `lastmod ${l} is in the future.`);
+  // A bulk stamp (every URL one lastmod) or the build's own time tells crawlers every page changed
+  // on every build, so they learn to ignore the signal. lastmod should track each page's real edits.
+  // Missing lastmods are ignored (sitemap-lastmod reports them). A shared date that is the repository's
+  // first commit is a young site, not a stamp; a site that derives lastmod from git history
+  // (web-baseline's src/data/lastmod.json) has honest dates however many match.
+  const { minUrls, shareRatio, buildTimeWindowSeconds } = BUILD_CHECKS.sitemapBulkLastmod;
+  const stamped = [...listed.values()].filter(Boolean);
+  const tally = new Map();
+  for (const l of stamped) tally.set(l, (tally.get(l) ?? 0) + 1);
+  const [top, topCount] = [...tally].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
+  const git = (...a) => { try { return execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } };
+  const firstCommit = () => (git('rev-parse', '--is-shallow-repository') === 'false' ? git('log', '--reverse', '--format=%cs').split('\n')[0] : '');
+  if (stamped.length >= minUrls && topCount / stamped.length >= shareRatio && !existsSync('src/data/lastmod.json') && top.slice(0, 10) !== firstCommit())
+    add('sitemap-lastmod-bulk', 'sitemap', `${topCount} of the ${stamped.length} URLs with a lastmod share ${top}: a bulk stamp, not a record of what changed. Derive each page's lastmod from its content (git history or a content date), or leave it out.`);
+  else {
+    const atBuild = [...listed].filter(([, l]) => l && l.includes('T') && Math.abs(Date.parse(l) - builtAt) <= buildTimeWindowSeconds * 1000).map(([p]) => p);
+    if (atBuild.length) add('sitemap-lastmod-bulk', 'sitemap', `${atBuild.length} URL(s) carry the build's own time as lastmod (${atBuild.slice(0, 3).join(', ')}${atBuild.length > 3 ? ', …' : ''}). A build is not an edit: use the page's own date.`);
+  }
+}
+
+// The built link graph: a page no other page links to is an orphan (crawlers find it only through
+// the sitemap), and one more than clickDepth.max clicks from the home page is buried. Pages whose
+// canonical names another page are left out: they are not meant to rank.
+if (pageByPath.has('/')) {
+  const inbound = new Map([...pageByPath.keys()].map((p) => [p, 0]));
+  for (const targets of linksOf.values()) for (const t of targets) inbound.set(t, inbound.get(t) + 1);
+  const depth = new Map([['/', 0]]);
+  for (let queue = ['/']; queue.length;) {
+    const next = [];
+    for (const p of queue) for (const t of linksOf.get(p) ?? []) if (!depth.has(t)) { depth.set(t, depth.get(p) + 1); next.push(t); }
+    queue = next;
+  }
+  const max = BUILD_CHECKS.clickDepth.max;
+  for (const p of pageByPath.keys()) {
+    if (p === '/' || (canonicalOf.get(p) ?? p) !== p) continue;
+    if (inbound.get(p) === 0) add('orphan-pages', p, 'no other page in the build links to it; crawlers reach it only through the sitemap. Link it from a related page or a hub.');
+    else if (!depth.has(p)) add('click-depth', p, 'linked from other pages, but none of them can be reached from the home page.');
+    else if (depth.get(p) > max) add('click-depth', p, `${depth.get(p)} clicks from the home page (at most ${max}). Link it from a page nearer the top.`);
+  }
 }
 
 // hreflang: every alternate is a page in the build, and names this page back (Google ignores
@@ -274,10 +359,12 @@ for (const r of redirects) {
 const llms = read('llms.txt');
 if (llms === null) add('llms-txt', 'llms.txt', 'not in the build. Optional, but cheap: a Markdown index of the pages you want AI tools to read.');
 else {
+  // The llmstxt.org format, as standards/standards.json reads it (llmsTxt).
   const lines = llms.split(/\r?\n/).filter((l) => l.trim());
-  if (!/^# \S/.test(lines[0] ?? '')) add('llms-txt-format', 'llms.txt', 'must start with a "# Site name" heading.');
-  if (!lines.some((l) => /^> \S/.test(l))) add('llms-txt-format', 'llms.txt', 'has no "> summary" blockquote line.');
-  if (!/\]\([^)\s]+\)/.test(llms)) add('llms-txt-format', 'llms.txt', 'links to no pages.');
+  if (LLMS_TXT.requireH1 && !/^# \S/.test(lines[0] ?? '')) add('llms-txt-format', 'llms.txt', 'must start with a "# Site name" heading.');
+  if (LLMS_TXT.requireSummary && !lines.some((l) => /^> \S/.test(l))) add('llms-txt-format', 'llms.txt', 'has no "> summary" blockquote line.');
+  if (LLMS_TXT.requireLinks && !/\]\([^)\s]+\)/.test(llms)) add('llms-txt-format', 'llms.txt', 'links to no pages.');
+  if (LLMS_TXT.requireSections && !lines.some((l) => /^## \S/.test(l))) add('llms-txt-format', 'llms.txt', 'has no "## Section" heading.');
   // Markdown and text mirrors duplicate the HTML pages. robots.txt Disallow does not keep a URL
   // out of the index (and hides any noindex); an X-Robots-Tag or canonical Link header does.
   const headers = parseHeaders(read('_headers') ?? '').rules.map((r) => ({ ...r, match: compilePattern(r.pattern) }));
@@ -298,10 +385,13 @@ else {
 // ── Report ──
 let failed = 0;
 const rows = [];
+const json = {}; // reports/discovery.json, read by results.mjs
 for (const [id, rule] of Object.entries(RULES)) {
   const level = levels[id] ?? rule.level;
-  const found = findings[id] ?? [];
-  const result = rule.where === 'live' ? '➖ post-deploy' : level === 'off' ? '➖ off' : found.length === 0 ? '✅ pass' : level === 'error' ? '❌ fail' : '⚠️ warn';
+  const found = (findings[id] ?? []).map((f) => `${f.where}: ${f.msg}`);
+  const result = rule.where === 'live' ? '➖ post-deploy' : rule.where === 'browser' ? '➖ browser suite' : level === 'off' ? '➖ off'
+    : found.length === 0 ? '✅ pass' : level === 'error' ? '❌ fail' : '⚠️ warn';
+  json[id] = { category: rule.category, level, where: rule.where ?? 'build', count: found.length, samples: [...new Set((findings[id] ?? []).map((f) => f.where))].slice(0, 10) };
   if (level !== 'off') {
     for (const f of found.slice(0, 20)) console.log(`::${level === 'error' ? 'error' : 'warning'}::[${rule.category} ${id}] ${f}`);
     if (found.length > 20) console.log(`::${level === 'error' ? 'error' : 'warning'}::[${rule.category} ${id}] …and ${found.length - 20} more.`);
@@ -310,11 +400,12 @@ for (const [id, rule] of Object.entries(RULES)) {
   rows.push(`| ${rule.category} | ${rule.title} (\`${id}\`) | ${result} | ${level === 'off' || !found.length ? '' : found[0].replace(/\|/g, '\\|').slice(0, 140)} |`);
 }
 for (const n of notes) console.log(n);
-const md = ['## Discovery readiness (SEO, AEO, GEO, AIO)', '',
+const md = ['## Discovery readiness (SEO, AEO, GEO, AIO, perf)', '',
   `${pages.length} indexable page(s), ${listed.size} sitemap URL(s).`, '',
   '| Area | Check | Result | First finding |', '|---|---|---|---|', ...rows, '', ...notes.map((n) => `- ${n}`), ''].join('\n');
 mkdirSync(join(OUT, 'reports'), { recursive: true });
 writeFileSync(join(OUT, 'reports', 'discovery.md'), md);
+writeFileSync(join(OUT, 'reports', 'discovery.json'), JSON.stringify({ pages: pages.length, sitemapUrls: listed.size, rules: json }, null, 2));
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n');
 console.log(`Discovery scan: ${pages.length} indexable page(s).`);
 if (failed) { console.log(`Discovery scan: ${failed} rule(s) failed. See reports/discovery.md for the table.`); process.exit(1); }

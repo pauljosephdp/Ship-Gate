@@ -33,7 +33,17 @@ jobs:
         # Written outside the checkout: a file in the repo fails the site's own conformance check.
         # Add working-directory: site here too if the site is not at the repo root.
         run: node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("ship-gate.config.json","utf8"));c.lighthouseUrls="all";c.e2ePages="all";fs.writeFileSync(process.env.RUNNER_TEMP+"/ship-gate.full.json",JSON.stringify(c,null,2))'
-      - uses: pauljosephdp/Ship-Gate@v3.15.0
+      - uses: pauljosephdp/Ship-Gate@v4.0.0
         with:
           config: ${{ runner.temp }}/ship-gate.full.json
           # working-directory: site
+      # Every check's result, green or red, for website-audit: it reads the latest of these
+      # instead of re-testing what the build proves (README → Results for website-audit).
+      - name: Upload results for website-audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ship-gate-results
+          path: ${{ env.SHIP_GATE_DIR || format('{0}/ship-gate', runner.temp) }}/reports/results.json
+          retention-days: 35
+          if-no-files-found: warn

@@ -10,8 +10,15 @@ fail=0
 EXEMPT=" ${SHIP_GATE_EXEMPT:-} "
 # Committed secrets and anything that skips the PR gate are never exempt.
 NEVER_EXEMPT=" posthog-key env-file push-to-main "
+# Each finding is also logged, one "ID<TAB>fail|warn" line, to reports/guards.tsv in the run's Ship Gate
+# folder, so results.mjs can report every guard on its own. No folder (prepare failed), no log.
+LOG_DIR="${SHIP_GATE_DIR:-${RUNNER_TEMP:+$RUNNER_TEMP/ship-gate}}"
+GUARD_LOG=""
+if [ -n "$LOG_DIR" ] && mkdir -p "$LOG_DIR/reports" 2>/dev/null; then GUARD_LOG="$LOG_DIR/reports/guards.tsv"; : > "$GUARD_LOG"; fi
+log() { [ -z "$GUARD_LOG" ] || printf '%s\t%s\n' "$1" "$2" >> "$GUARD_LOG"; }
 err() {
-  if [[ "$EXEMPT" == *" $1 "* && "$NEVER_EXEMPT" != *" $1 "* ]]; then echo "::warning::[exempt: $1] $2"; else echo "::error::$2"; fail=1; fi
+  if [[ "$EXEMPT" == *" $1 "* && "$NEVER_EXEMPT" != *" $1 "* ]]; then echo "::warning::[exempt: $1] $2"; log "$1" warn
+  else echo "::error::$2"; fail=1; log "$1" fail; fi
 }
 # scan PATTERN PATH... — grep only paths that exist (a missing path makes grep exit 2 and hide real matches)
 scan() { local pat=$1; shift; local paths=(); for p in "$@"; do [ -e "$p" ] && paths+=("$p"); done
@@ -22,6 +29,14 @@ DIRS="src public"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 POLICIES=" ${SHIP_GATE_POLICIES:-} "
 policy() { [[ "$POLICIES" == *" $1 "* ]]; }
+# Guards a site's standard checks instead ("standard": "web-baseline" → conform:check, which the
+# contract check proved runs in this gate with every rule enforced). Skipped here, not exempted: one
+# check, one owner. Only guards the standard cannot waive are delegated (prepare.mjs, STANDARDS_DELEGATED).
+DELEGATED=" ${SHIP_GATE_DELEGATED:-} "
+delegated() {
+  if [[ "$DELEGATED" == *" $1 "* ]]; then echo "Guard $1: checked by the site's standard (conform:check), not here."; log "$1" delegated; return 0; fi
+  return 1
+}
 
 # secrets_missing "NAME..." — prints what the wrangler config's secrets.required lacks, or
 # that there is no readable wrangler config; prints nothing when every name is declared.
@@ -119,13 +134,13 @@ while IFS= read -r f; do
   grep -q '__DEPLOY_ENV__' "$f" \
     || err posthog-env-tag "$f uses posthog-node without tagging events with __DEPLOY_ENV__ — preview traffic would pollute production analytics."
 done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
-# The Worker's runtime secrets are declared in the wrangler config (secrets.required), so
-# wrangler deploy and versions upload (every preview) fail when one is unset, instead of
-# shipping a Worker that silently sends nothing. A warning in v3; an error from v4.
+# posthog-secrets: the Worker's runtime secrets are declared in the wrangler config
+# (secrets.required), so wrangler deploy and versions upload (every preview) fail when one is
+# unset, instead of shipping a Worker that silently sends nothing. A warning in v3; an error from v4.
 need="POSTHOG_API_KEY"
 policy turnstile-forms && need="$need ${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
 missing="$(secrets_missing "$need")"
-[ -z "$missing" ] || echo "::warning::posthog-hybrid: $missing. Declare the Worker's runtime secrets in the wrangler config (secrets.required listing ${need// /, } and any other secret the Worker reads) so a deploy or preview upload without them fails loudly. Note that wrangler dev then loads only the listed secrets. This becomes an error in Ship Gate v4."
+[ -z "$missing" ] || err posthog-secrets "posthog-hybrid: $missing. Declare the Worker's runtime secrets in the wrangler config (secrets.required listing ${need// /, } and any other secret the Worker reads) so a deploy or preview upload without them fails loudly. Note that wrangler dev then loads only the listed secrets."
 fi
 
 # 2. [tags-via-zaraz] No third-party tags loaded directly. All tags, GTM included, go through Zaraz. No sGTM in this stack.
@@ -163,7 +178,8 @@ done
 # 6. Node version pinned exactly, at or above Astro 7's floor (22.12.0).
 NODE_FILE=""
 for f in .nvmrc .node-version; do [ -f "$f" ] && { NODE_FILE=$f; break; }; done
-if [ -z "$NODE_FILE" ]; then
+if delegated node-pin; then :
+elif [ -z "$NODE_FILE" ]; then
   err node-pin "No .nvmrc or .node-version — pin the Node version (Astro 7 needs 22.12.0 or later)."
 else
   v="$(tr -d ' \r\n' < "$NODE_FILE")"; v="${v#v}"

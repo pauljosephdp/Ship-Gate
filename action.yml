@@ -398,6 +398,22 @@ runs:
         # Machine-readable copy for callers (and Ship Gate's own fixture tests).
         echo "$table" > "${SHIP_GATE_DIR:-$RUNNER_TEMP}/summary.md"
         echo "failed=$failed" >> "$GITHUB_OUTPUT"
+        echo "outcomes=$OUTCOMES" >> "$GITHUB_OUTPUT"
+
+    # reports/results.json: every check's id, area, level, status, count and samples, for
+    # website-audit, which reads Ship Gate's results instead of re-testing what the build proves
+    # (README → Results for website-audit). Never fails the gate.
+    - name: Results for website-audit
+      if: always()
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STAGE: ${{ steps.site.outputs.stage }}
+        OUTCOMES: ${{ steps.summary.outputs.outcomes }}
+        SHIP_GATE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        SHIP_GATE_CONFIG: ${{ inputs.config }}
+      run: node "$GITHUB_ACTION_PATH/scripts/results.mjs"
 
     # At most one run's reports per branch: a failed run's reports replace the branch's
     # older ones, and a green run clears them. Other branches' reports are left alone,

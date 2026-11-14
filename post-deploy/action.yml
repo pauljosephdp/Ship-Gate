@@ -1,14 +1,13 @@
 name: Ship Gate — post-deploy
 description: >
-  After a merge to main: waits until production serves the merged commit
-  (build-sha meta tag), smoke-checks key URLs, checks the robots.txt,
-  sitemaps, Link headers and Markdown negotiation production serves to
-  crawlers and agents and that no WAF refuses plain requests, reports
-  freshness headers and (optional) field Core Web Vitals, and
-  (posthog-server-only policy) that production HTML is PostHog-free, or
-  (posthog-hybrid policy) that production starts PostHog with a live key, and
-  (analytics-always-on policy) warns when Zaraz is missing.
-  On failure: roll back, then fix forward.
+  Deploy health after a merge to main: waits until production serves the
+  merged commit (build-sha meta tag), smoke-checks key URLs, checks that
+  robots.txt and its sitemaps answer with the right type and that no WAF
+  refuses plain requests, and (posthog-server-only policy) that production
+  HTML is PostHog-free, or (posthog-hybrid policy) that production starts
+  PostHog with a live key. Live behaviour (crawler rules as served, Link
+  headers, Markdown negotiation, field Core Web Vitals, Zaraz) is
+  website-audit's. On failure: roll back, then fix forward.
 author: Ship Gate
 inputs:
   working-directory:
@@ -25,11 +24,6 @@ inputs:
   wait-minutes:
     description: How long to wait for the deploy pipeline to serve the new commit.
     default: "10"
-  crux-api-key:
-    description: >
-      Optional Google API key with the Chrome UX Report API enabled. When set, field Core Web
-      Vitals (p75 LCP, INP, CLS on phones) are reported, warning on any miss. Pass a secret.
-    default: ""
 runs:
   using: composite
   steps:
@@ -40,5 +34,4 @@ runs:
       env:
         SHA: ${{ inputs.sha }}
         WAIT_MINUTES: ${{ inputs.wait-minutes }}
-        CRUX_API_KEY: ${{ inputs.crux-api-key }}
       run: bash "$GITHUB_ACTION_PATH/../scripts/post-deploy.sh" "${{ inputs.config }}"

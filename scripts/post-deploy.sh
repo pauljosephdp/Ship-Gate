@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Ship Gate's post-deploy check: what production actually serves after a deploy.
+# Ship Gate's post-deploy check: deploy health. Production serves the merged commit, its key URLs
+# answer 200, robots.txt and its sitemaps answer with the right type, no WAF refuses a plain
+# request, and the PostHog key policy holds. Live behaviour beyond that (crawler rules as served,
+# Link headers, Markdown negotiation, freshness headers, field Core Web Vitals, Zaraz) is
+# website-audit's: it needs production over time, not one deploy.
 # One implementation for both callers:
 #   - the post-deploy action (post-deploy/action.yml), on GitHub Actions;
 #   - a Cloudflare Workers Builds deploy command, right after `wrangler deploy`
@@ -7,7 +11,7 @@
 #
 #   post-deploy.sh [CONFIG]   run from the site directory
 # Env: SHA (commit production must serve; defaults to GITHUB_SHA, then
-# WORKERS_CI_COMMIT_SHA), WAIT_MINUTES (default 10), CRUX_API_KEY (optional).
+# WORKERS_CI_COMMIT_SHA), WAIT_MINUTES (default 10).
 # Every check runs even after one fails; the exit code says whether any failed.
 set -uo pipefail
 CONFIG="${1:-ship-gate.config.json}"
@@ -51,11 +55,11 @@ for p in $SHIP_GATE_SMOKE_PATHS; do
 done
 echo "::endgroup::"
 
-step "Production serves crawlers and agents (robots.txt, sitemaps, Link, Markdown)"
+step "Production serves robots.txt and its sitemaps"
 node "$GATE/scripts/check-live.mjs" || status=1
 echo "::endgroup::"
 
-step "Production answers plain requests; freshness headers; field Core Web Vitals"
+step "Production answers plain requests (no 403 or 429)"
 node "$GATE/scripts/check-headers-live.mjs" || status=1
 echo "::endgroup::"
 
@@ -74,11 +78,6 @@ fi
 if policy posthog-hybrid; then
   step "Production starts PostHog (posthog-hybrid)"
   node "$GATE/scripts/check-posthog-live.mjs" || status=1
-  echo "::endgroup::"
-fi
-if policy analytics-always-on; then
-  step "Production carries Zaraz (analytics-always-on)"
-  node "$GATE/scripts/check-analytics-live.mjs" || status=1
   echo "::endgroup::"
 fi
 

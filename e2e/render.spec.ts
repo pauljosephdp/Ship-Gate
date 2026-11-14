@@ -7,9 +7,9 @@
 //   invisible to them. Thresholds: buildChecks.renderedContent in standards/standards.json.
 // - lazy-first-viewport: an <img loading="lazy"> in the first viewport, on desktop or mobile, delays
 //   the very paint it appears to help (often the LCP image).
-// - content-parity: a content block visible on desktop has no visible match on mobile (removed, not
-//   reflowed). Mobile-first indexing reads the mobile page. Navigation, header, footer and asides are
-//   left out, and so is progressive disclosure (aria-expanded, <details>, accordions).
+// - content-parity: the main content's words on mobile against desktop: 15% or more missing on
+//   mobile warns (removed, not reflowed). Mobile-first indexing reads the mobile page. Text behind a
+//   disclosure control counts as present; outside <main>, header, nav, footer and asides are left out.
 // - first-party-only (policy): every page the sitemap lists loads nothing from another origin, apart
 //   from allowedOrigins.
 // Levels come from the site's discovery levels (run.json), so discoveryOverrides apply. Each page
@@ -53,23 +53,26 @@ const lazyInView = (page: Page) => page.evaluate(() => [...document.querySelecto
   .filter((img) => { const r = img.getBoundingClientRect(); return r.top < innerHeight && r.bottom >= 0 && r.left < innerWidth && r.right >= 0; })
   .map((img) => (img.getAttribute('src') ?? img.currentSrc ?? '').slice(0, 80)));
 
-// Content blocks (website-audit's U-19 method): text blocks of at least minBlockChars in the main
-// content, keyed by tag and their first matchChars characters, with whether they are visible and
-// whether they sit behind a disclosure control.
-const blocks = (page: Page) => page.evaluate(({ minBlockChars, matchChars }) => {
-  const EXCLUDE = 'nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"]';
-  const root = document.querySelector('main, article, [role="main"]') ?? document.body;
-  return [...root.querySelectorAll<HTMLElement>('p, li, td, th, h1, h2, h3, h4, h5, h6, blockquote, dt, dd')].flatMap((el) => {
-    if (el.closest(EXCLUDE)) return [];
-    const text = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
-    if (text.length < minBlockChars) return [];
-    const s = getComputedStyle(el), r = el.getBoundingClientRect();
-    let toggle = false;
-    for (let n: Element | null = el, hops = 0; n && hops < 4; n = n.parentElement, hops++)
-      if (n.hasAttribute('aria-expanded') || n.tagName === 'DETAILS' || /accordion|collaps|toggle|expand/i.test(n.className?.toString() ?? '')) { toggle = true; break; }
-    return [{ key: `${el.tagName.toLowerCase()}|${text.slice(0, matchChars)}`, visible: s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0, toggle }];
-  });
-}, checks.contentParity);
+// The words of the main content (<main>, else the body without header, nav, footer and aside) a reader
+// can get at: visible text, and text behind a disclosure control (<details>, a panel an aria-controls
+// names, accordion or collapse classes), which mobile layouts fold away on purpose. Case-folded, split on
+// anything that is not a letter or digit.
+const mainWords = (page: Page) => page.evaluate(() => {
+  const root = document.querySelector('main, [role="main"]') ?? document.body;
+  const CHROME = 'nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"], script, style, noscript, template';
+  const controlled = new Set([...document.querySelectorAll('[aria-controls]')].flatMap((c) => (c.getAttribute('aria-controls') ?? '').split(/\s+/)));
+  const disclosed = (el: Element) => !!el.closest('details, [class*="accordion"], [class*="collaps"], [class*="toggle"], [class*="expand"]')
+    || [...controlled].some((id) => id && el.closest(`#${CSS.escape(id)}`));
+  const words: string[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const el = n.parentElement;
+    if (!el || (root === document.body && el.closest(CHROME)) || el.closest('script, style, noscript, template')) continue;
+    if (!el.checkVisibility() && !disclosed(el)) continue;
+    words.push(...(n.textContent ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+  }
+  return words;
+});
 
 for (const path of run.pages) {
   test(`${path}: no-JS content, lazy first viewport, desktop and mobile parity`, async ({ page, browser, baseURL }, info) => {
@@ -83,7 +86,7 @@ for (const path of run.pages) {
     for (const src of await lazyInView(page)) findings['lazy-first-viewport'].push(`desktop (1440×900): ${src} is loading="lazy" in the first viewport. Load it eagerly (and fetchpriority="high" if it is the largest image).`);
     await settle(page);
     const rendered = await counts(page);
-    const desktopBlocks = await blocks(page);
+    const desktopWords = await mainWords(page);
 
     // The same page with JavaScript off: what a crawler that does not render reads.
     const nojs = await browser.newContext({ baseURL, javaScriptEnabled: false });
@@ -98,18 +101,22 @@ for (const path of run.pages) {
     if (wordRatio < minWordRatio || linkRatio < minLinkRatio)
       findings['rendered-content'].push(`without JavaScript the page has ${raw.words} of ${rendered.words} words (${wordRatio.toFixed(2)}, needs ${minWordRatio}) and ${raw.links} of ${rendered.links} links (${linkRatio.toFixed(2)}, needs ${minLinkRatio}). Crawlers for AI answers mostly do not run JavaScript: render the content at build time.`);
 
-    // Mobile (Pixel 7): first viewport, then parity with the desktop blocks.
+    // Mobile (Pixel 7): first viewport, then parity with the desktop words.
     const mobile = await browser.newContext({ ...devices['Pixel 7'], baseURL });
     const mp = await mobile.newPage();
     await sameOriginOnly(mp);
     await mp.goto(path);
     for (const src of await lazyInView(mp)) findings['lazy-first-viewport'].push(`mobile (Pixel 7): ${src} is loading="lazy" in the first viewport. Load it eagerly.`);
     await settle(mp);
-    const mobileVisible = new Set((await blocks(mp)).filter((b) => b.visible).map((b) => b.key));
+    const mobileLeft = new Map<string, number>();
+    for (const w of await mainWords(mp)) mobileLeft.set(w, (mobileLeft.get(w) ?? 0) + 1);
     await mobile.close();
-    const missing = desktopBlocks.filter((b) => b.visible && !b.toggle && !mobileVisible.has(b.key));
-    if (missing.length)
-      findings['content-parity'].push(`${missing.length} content block(s) visible on desktop are missing on mobile: ${missing.slice(0, 3).map((b) => `"${b.key.split('|')[1].slice(0, 40)}…"`).join(', ')}. Google indexes the mobile page: reflow the content, or put it behind a disclosure control.`);
+    // Words of the desktop text with no match left on mobile (counted, so a repeated word must repeat).
+    const missing: string[] = [];
+    for (const w of desktopWords) { const k = mobileLeft.get(w) ?? 0; if (k > 0) mobileLeft.set(w, k - 1); else missing.push(w); }
+    const share = desktopWords.length ? missing.length / desktopWords.length : 0;
+    if (share >= checks.contentParity.maxMissingRatio)
+      findings['content-parity'].push(`mobile is missing ${missing.length} of the ${desktopWords.length} words of the desktop main content (${Math.round(share * 100)}%, warns from ${Math.round(checks.contentParity.maxMissingRatio * 100)}%), e.g. "${missing.slice(0, 8).join(' ')}". Google indexes the mobile page: reflow the content, or put it behind a disclosure control.`);
 
     report(path, findings, info);
   });

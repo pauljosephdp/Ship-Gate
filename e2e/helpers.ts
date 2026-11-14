@@ -25,7 +25,7 @@ export const run = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.met
   // standards/standards.json buildChecks: the render spec's thresholds.
   buildChecks: {
     renderedContent: { minWordRatio: number; minLinkRatio: number };
-    contentParity: { minBlockChars: number; matchChars: number };
+    contentParity: { maxMissingRatio: number };
   };
   // posthog-hybrid only; null otherwise.
   posthog: null | {

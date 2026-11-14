@@ -22,6 +22,13 @@ DIRS="src public"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 POLICIES=" ${SHIP_GATE_POLICIES:-} "
 policy() { [[ "$POLICIES" == *" $1 "* ]]; }
+# Guards a site's standard checks instead ("standard": "web-baseline" → conform:check, which the
+# contract check proved runs in this gate). Skipped here, not exempted: one check, one owner.
+DELEGATED=" ${SHIP_GATE_DELEGATED:-} "
+delegated() {
+  if [[ "$DELEGATED" == *" $1 "* ]]; then echo "Guard $1: checked by the site's standard (conform:check), not here."; return 0; fi
+  return 1
+}
 
 # secrets_missing "NAME..." — prints what the wrangler config's secrets.required lacks, or
 # that there is no readable wrangler config; prints nothing when every name is declared.
@@ -98,7 +105,8 @@ if [ "$EMBED" = npm ]; then
 fi
 # Every browser init tags its events with the deploy environment, like the server's.
 inits="$(grep -rlE 'posthog\.init\(' src 2>/dev/null | grep -vE "$SERVER_PATHS" || true)"
-[ -n "$inits" ] \
+# posthog-layout: the component is wired into the source. The PostHog scan still proves every built page carries it.
+delegated posthog-layout || [ -n "$inits" ] \
   || err posthog-missing "No posthog.init( in src — add the PostHog component (templates/caller/posthog) to the base layout's <head>."
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -119,13 +127,15 @@ while IFS= read -r f; do
   grep -q '__DEPLOY_ENV__' "$f" \
     || err posthog-env-tag "$f uses posthog-node without tagging events with __DEPLOY_ENV__ — preview traffic would pollute production analytics."
 done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
-# The Worker's runtime secrets are declared in the wrangler config (secrets.required), so
-# wrangler deploy and versions upload (every preview) fail when one is unset, instead of
-# shipping a Worker that silently sends nothing. A warning in v3; an error from v4.
-need="POSTHOG_API_KEY"
-policy turnstile-forms && need="$need ${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
-missing="$(secrets_missing "$need")"
-[ -z "$missing" ] || echo "::warning::posthog-hybrid: $missing. Declare the Worker's runtime secrets in the wrangler config (secrets.required listing ${need// /, } and any other secret the Worker reads) so a deploy or preview upload without them fails loudly. Note that wrangler dev then loads only the listed secrets. This becomes an error in Ship Gate v4."
+# posthog-secrets: the Worker's runtime secrets are declared in the wrangler config
+# (secrets.required), so wrangler deploy and versions upload (every preview) fail when one is
+# unset, instead of shipping a Worker that silently sends nothing. A warning in v3; an error from v4.
+if ! delegated posthog-secrets; then
+  need="POSTHOG_API_KEY"
+  policy turnstile-forms && need="$need ${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
+  missing="$(secrets_missing "$need")"
+  [ -z "$missing" ] || err posthog-secrets "posthog-hybrid: $missing. Declare the Worker's runtime secrets in the wrangler config (secrets.required listing ${need// /, } and any other secret the Worker reads) so a deploy or preview upload without them fails loudly. Note that wrangler dev then loads only the listed secrets."
+fi
 fi
 
 # 2. [tags-via-zaraz] No third-party tags loaded directly. All tags, GTM included, go through Zaraz. No sGTM in this stack.
@@ -153,7 +163,7 @@ if policy turnstile-forms && ! policy posthog-hybrid && scan 'cf-turnstile|<Turn
 fi
 
 # 4. No committed env or Worker secret files.
-git -C "$ROOT" ls-files | grep -E '(^|/)(\.env|\.dev\.vars)(\..+)?$' | grep -vE '\.example$' && err env-file "Env/secret file committed. Remove it and rotate its secrets."
+delegated env-file || { git -C "$ROOT" ls-files | grep -E '(^|/)(\.env|\.dev\.vars)(\..+)?$' | grep -vE '\.example$' && err env-file "Env/secret file committed. Remove it and rotate its secrets."; }
 
 # 5. [workers-builds-only] Deploy target is Workers, not Pages.
 policy workers-builds-only && for w in wrangler.toml wrangler.json wrangler.jsonc; do
@@ -163,7 +173,8 @@ done
 # 6. Node version pinned exactly, at or above Astro 7's floor (22.12.0).
 NODE_FILE=""
 for f in .nvmrc .node-version; do [ -f "$f" ] && { NODE_FILE=$f; break; }; done
-if [ -z "$NODE_FILE" ]; then
+if delegated node-pin; then :
+elif [ -z "$NODE_FILE" ]; then
   err node-pin "No .nvmrc or .node-version — pin the Node version (Astro 7 needs 22.12.0 or later)."
 else
   v="$(tr -d ' \r\n' < "$NODE_FILE")"; v="${v#v}"
@@ -203,7 +214,8 @@ fi
 
 # 9. Tailwind 4 reads its config from CSS (@theme). A tailwind.config.* file beside Tailwind 4 is
 #    ignored unless a stylesheet loads it with @config: a half-finished v3 migration. A warning.
-tw_major="$(node -e 'const p = require("./package.json"); const v = { ...p.dependencies, ...p.devDependencies }.tailwindcss;
+tw_major=""
+delegated tailwind-config || tw_major="$(node -e 'const p = require("./package.json"); const v = { ...p.dependencies, ...p.devDependencies }.tailwindcss;
   const m = /(\d+)/.exec(v ?? ""); if (m) console.log(m[1]);' 2>/dev/null)"
 if [ -n "$tw_major" ] && [ "$tw_major" -ge 4 ]; then
   for f in tailwind.config.js tailwind.config.cjs tailwind.config.mjs tailwind.config.ts; do

@@ -68,8 +68,7 @@ const pageAt = (path) => {
 };
 // Markup a reader sees: no comments, scripts, styles, templates or noscript fallbacks.
 const shown = (html) => html.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style|template|noscript)\b[\s\S]*?<\/\1>/gi, ' ');
-const FAQ_HEADING = new RegExp(BUILD_CHECKS.faqPattern.heading, 'i');
-const FAQ_QUESTION = new RegExp(BUILD_CHECKS.faqPattern.questionStart, 'i');
+const FAQ_QUESTION = new RegExp(BUILD_CHECKS.faqPattern.question);
 const linksOf = new Map(); // page path → Set of page paths it links to
 
 // ── robots.txt ──
@@ -260,12 +259,14 @@ for (const p of pages) {
   }
   if (noDims.length) add('img-dimensions', at, `${noDims.length} <img> without width and height (${noDims.slice(0, 3).join(', ')}${noDims.length > 3 ? ', …' : ''}). Set both, or the page shifts as each image loads (CLS); Astro's <Image> sets them.`);
 
-  // A visible FAQ (an FAQ heading, or a run of question headings) without FAQPage markup.
-  const headings = [...shown(html).matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)].map((m) => ({ level: +m[1], text: visibleText(m[2]) }));
-  const questions = headings.filter((h) => h.level >= 2 && h.level <= 4 && (h.text.trim().endsWith('?') || FAQ_QUESTION.test(h.text)));
-  const faqHeading = headings.find((h) => FAQ_HEADING.test(h.text));
-  if ((faqHeading || questions.length >= BUILD_CHECKS.faqPattern.minQuestionHeadings) && !ld.all.some((n) => typesOf(n).includes('FAQPage')))
-    add('faq-markup-missing', at, `${faqHeading ? `"${faqHeading.text.slice(0, 60)}"` : `${questions.length} question headings`} read as an FAQ, but the page has no FAQPage JSON-LD. Answer engines read question-and-answer pairs from it (Google retired FAQ rich results on 2026-05-07; the markup still states the pairs).`);
+  // A visible FAQ without FAQPage markup: question-and-answer pairs (an h2-h4 phrased as a question,
+  // then answer text before the next heading) in <main>, outside header, nav, footer and aside.
+  const main = shown(html).match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ?? shown(html);
+  const content = main.replace(/<(header|nav|footer|aside)\b[\s\S]*?<\/\1>/gi, ' ');
+  const pairs = content.split(/(?=<h[1-6]\b)/i).map((part) => part.match(/^<h([2-4])\b[^>]*>([\s\S]*?)<\/h\1>([\s\S]*)$/i))
+    .filter((m) => m && FAQ_QUESTION.test(visibleText(m[2])) && visibleText(m[3]).length > 0).map((m) => visibleText(m[2]));
+  if (pairs.length >= BUILD_CHECKS.faqPattern.minPairs && !ld.all.some((n) => typesOf(n).includes('FAQPage')))
+    add('faq-markup-missing', at, `${pairs.length} question-and-answer pairs ("${pairs[0].slice(0, 50)}", …) read as an FAQ, but the page has no FAQPage JSON-LD. Answer engines read the pairs from it (Google retired FAQ rich results on 2026-05-07; the markup still states them).`);
 
   // The built link graph: which indexable pages this page links to.
   linksOf.set(at, outLinks);

@@ -95,3 +95,34 @@ structure scans pass.
 Not run here: the `fixture` CI jobs (they run on the PR), the reviewer subagent (this session could not start
 one; the diff was reviewed against this plan by hand), and agent evals (`CLAUDE.md`, `REVIEW.md` and
 `.claude/` are unchanged).
+
+## Review fixes (2026-11-14)
+A fresh-context review of the branch raised eight findings; each is a commit after the proof above.
+1. `structured-data` failed nested references: `jsonLdScope` in `standards.json` limits the Organization and
+   LocalBusiness rows to the top of a block and `publisher`, and the Offer row to a Product's or Event's
+   `offers`, where `priceSpecification` (price and currency) may carry the price.
+2. Delegation matched the script name only. web-baseline's `conform.mjs` (read in `pauljosephdp/Skills`) enforces
+   every phase only with `--final`, and a recorded deviation can waive a forbidden path or required content.
+   So the contract requires `conform.mjs ... --final`, and only `node-pin` (no deviation applies) is delegated;
+   `env-file`, `tailwind-config`, `posthog-secrets` and the layout wiring stay guards. Departs from the spec's
+   requirement 10, which named five guards.
+3. `sitemap-lastmod-bulk`: 10 or more URLs with a `lastmod`, 90% on one value; exempt when that is the first
+   commit's date (in a full clone) or the site has `src/data/lastmod.json`.
+4. `faq-markup-missing`: 2 or more question-and-answer pairs in `<main>`, outside the page chrome.
+5. `market-cn`: resources only; a blocked URL in script that is not visibly loaded warns.
+6. CHANGELOG migration lists the AI-search widening, the training token and the JSON-LD scope.
+7. `results.json`: `guard:<id>` per guard (`reports/guards.tsv`, ids in `scripts/gate-rules.mjs`), `browser:<check>`
+   per page-test check (sorted by assertion message, since `e2e/page.spec.ts` is protected), and a render test
+   that threw fails its rules.
+8. `content-parity`: the main content's words per viewport, warn from 15% missing on mobile.
+
+Proof after the fixes:
+```
+Self-test: 643 passed, 0 failed.
+```
+`node --test test/*.test.mjs` → `# pass 21`, `# fail 0`; ShellCheck → no output; `check-readme.sh origin/main` →
+`README.md is up to date.` The render spec on the broken fixture copy: 120 desktop-only words of 720 →
+`mobile is missing 120 of the 720 words … (17%, warns from 15%)`, 80 words in a closed `<details>` not
+counted missing, and 60 of 660 (9%) quiet. `results.mjs` on that run's page test: `browser:smoke`, `browser:csp`
+and `browser:reflow` fail on `/`, `browser:axe` passes.
+

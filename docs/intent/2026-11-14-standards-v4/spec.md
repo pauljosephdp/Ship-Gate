@@ -27,9 +27,9 @@
 8. axe's `target-size` (WCAG 2.5.8) already runs under `wcag22aa`: nothing added.
 9. Stack policy `first-party-only`: every sitemap page loads only first-party resources; `allowedOrigins`
    lists the exceptions.
-10. `"standard": "web-baseline"` delegates `tailwind-config`, `env-file`, `node-pin`, `posthog-secrets` and
-    the PostHog layout wiring to web-baseline's `conform:check`; the contract check fails when no site check
-    phase lists `conform:check`.
+10. `"standard": "web-baseline"` delegates the guards its `conform:check` enforces without exception. After review
+    that is `node-pin` only, behind a `conform:check` script that runs `conform.mjs --final` (plan.md, Review
+    fixes 2); the contract check fails when no site check phase lists `conform:check` or the script differs.
 11. `posthog-secrets` becomes an error (exemptible), as v3 promised for v4.
 12. Post-deploy keeps deploy health only: build SHA, smoke 200s, `robots.txt` and sitemaps answer 200 with the
     right type, no 403/429 to a plain request, PostHog key policy. Removed: CrUX field CWV (and the

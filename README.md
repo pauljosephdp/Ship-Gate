@@ -393,11 +393,12 @@ CSP still reports a disallowed URL before any request is made.
 - `lazy-first-viewport` (warn): an `<img loading="lazy">` inside the first
   viewport, on desktop (1440×900) or on a Pixel 7, read at load. It delays the
   paint it seems to help, often the LCP image.
-- `content-parity` (warn): a text block of the main content visible on
-  desktop has no visible match on a Pixel 7 (matched by tag and first 60
-  characters, website-audit's method). Navigation, header, footer and asides
-  are left out, and so is progressive disclosure (`aria-expanded`,
-  `<details>`, accordion classes). Google indexes the mobile page.
+- `content-parity` (warn): the words of the main content (`<main>`, else the
+  body without header, nav, footer and aside), case-folded, on a Pixel 7
+  against desktop. Mobile missing 15% or more of desktop's words warns
+  (`buildChecks.contentParity`). Text behind a disclosure control
+  (`<details>`, a panel an `aria-controls` names, accordion or collapse
+  classes) counts as present. Google indexes the mobile page.
 - **Target size** needs nothing new: axe's `target-size` rule (WCAG 2.5.8,
   24×24 CSS px) runs under the `wcag22aa` tag the smoke test already uses.
 
@@ -473,7 +474,7 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | SEO | `sitemap` | error | no sitemap, or it doesn't parse, lists another origin, or has a malformed `lastmod`; sitemap indexes are followed |
 | SEO | `sitemap-coverage` | error | an indexable, self-canonical page is missing, or the sitemap lists a noindex, redirecting, canonicalised or missing URL |
 | SEO | `sitemap-lastmod` | warn | a URL has no `lastmod`, or one in the future |
-| SEO | `sitemap-lastmod-bulk` | warn | 5 or more URLs all share one `lastmod` (a bulk stamp), or a `lastmod` carries the build's own time (within 2 minutes of the sitemap being written) |
+| SEO | `sitemap-lastmod-bulk` | warn | of 10 or more URLs that carry a `lastmod`, 90% share one value (a bulk stamp; missing ones are `sitemap-lastmod`'s), unless that value is the repository's first commit date or the site derives `lastmod` from git (`src/data/lastmod.json`, web-baseline's `gen-lastmod`); or a `lastmod` carries the build's own time (within 2 minutes of the sitemap being written) |
 | SEO | `sitemap-xml` | warn | `/sitemap.xml` is neither built nor redirected to the sitemap (agents probe that path without reading `robots.txt`) |
 | SEO | `sitemap-live` | error | after deploy: a sitemap named in production `robots.txt` doesn't answer 200 with XML |
 | SEO | `canonical` | error | not exactly one canonical, not on `siteUrl`, or it names a URL that redirects or is not an indexable page |
@@ -490,7 +491,7 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | AEO | `site-entity` | error | the home page declares no Organization, LocalBusiness or Person, or its `url` is off-site |
 | AEO | `entity-sameas` | warn | that entity has no `sameAs` profile links |
 | AEO | `faq-visible` | error | a FAQPage question is not visible on the page (structured data must describe visible content). Text is read as rendered, so inline markup such as `CuSO<sub>4</sub>` matches `CuSO4` |
-| AEO | `faq-markup-missing` | warn | a visible FAQ (a heading such as "FAQ" or "Frequently asked questions", or 3 or more h2–h4 question headings) with no FAQPage JSON-LD. Google retired FAQ rich results on 7 May 2026; answer engines still read the pairs |
+| AEO | `faq-markup-missing` | warn | a visible FAQ with no FAQPage JSON-LD: 2 or more question-and-answer pairs (an h2–h4 ending in `?`, then answer text) in `<main>` (or the body), outside header, nav, footer and aside. An "FAQ" heading alone is not one. Google retired FAQ rich results on 7 May 2026; answer engines still read the pairs |
 | AEO | `breadcrumbs` | warn | a page two or more levels deep has no BreadcrumbList |
 | GEO | `ai-search-crawlers` | error | `robots.txt` blocks an AI search or user-fetch crawler from an indexable page: the rest of `groups.searchMustAllow` (OAI-SearchBot, Claude-SearchBot, PerplexityBot, Applebot, DuckAssistBot, Amzn-SearchBot, MistralAI-Index) and `groups.userFetchShouldAllow` (ChatGPT-User, Claude-User, Perplexity-User) |
 | GEO | `ai-training` | error | a token in `groups.trainingOnly` (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, MistralAI-Training) can fetch `/`, or a `Content-Signal` says `ai-train=yes`; with `"aiTraining": "reserve"`, a training token that can fetch `/` is governed by a group with no `ai-train=no` signal; with `"aiTraining": "allow"`, the reverse of the default |
@@ -520,12 +521,17 @@ warns and is ignored.
 TechArticle, and Report and ScholarlyArticle under the Article row) need
 `headline`, `datePublished` and `author`. Organization needs `name` and `url`
 (v4; v3 needed `name` only), Person `name`, and LocalBusiness types `name` and
-`address`. Every schema.org subtype counts (Hotel, Dentist, Attorney, Plumber…
+`address`. `jsonLdScope` says where a row applies: the Organization and
+LocalBusiness rows only at the top of a JSON-LD block (or its `@graph`) and in
+`publisher`, so a nested reference such as a Person's `worksFor` or `alumniOf`
+needs no `url`; the Offer row only in a Product's or Event's `offers`. Every schema.org subtype counts (Hotel, Dentist, Attorney, Plumber…
 answer to LocalBusiness; other Organization subtypes to Organization), from
 `scripts/schema-org-types.json`; regenerate it with
 `node tools/schema-org-types.mjs` after a schema.org release. WebSite needs `name` and
 `url`. Product needs `name` plus `offers`, `review` or `aggregateRating`, and
-Offer `price` and `priceCurrency`. Event needs `name`, `startDate` and
+its Offer `price` and `priceCurrency`, directly or in a `priceSpecification`
+that carries both (an Offer in `makesOffer` describes a service, and is not
+checked). Event needs `name`, `startDate` and
 `location`. FAQPage needs Questions with `name` and `acceptedAnswer` (with
 `text`), and BreadcrumbList needs `position`, `name` and `item`. Service needs
 `name`. Recipe and VideoObject get Google's required properties.
@@ -732,10 +738,10 @@ A failed run also carries it in the usual reports artifact.
 | `shipGate` | The Ship Gate version that ran (the newest `CHANGELOG.md` heading of the pinned tag) |
 | `stage` | `full`, `browser` or `scans` (the action's `stage` input) |
 | `siteUrl`, `commit`, `finishedAt` | The site, the commit checked, and when the run finished (ISO 8601, UTC) |
-| `checks[].id` | A discovery rule id (`canonical`, `img-dimensions`, …), `first-party-only`, `structure:<check>` (`one-h1`, `heading-order`, `noopener`, `title`, `meta-description`, `title-unique`, `meta-description-unique`, `template-token`, `edge-files`, `llms-links`), `browser:page`, `browser:edge` or `browser:on-demand` (a Playwright spec), `lighthouse:<audit>` (a failed Lighthouse assertion), or `step:<name>` (each row of the summary table: `step:contract`, `step:guards`, `step:build`, `step:browser`, `step:lighthouse`, …) |
+| `checks[].id` | A discovery rule id (`canonical`, `img-dimensions`, …), `first-party-only`, `guard:<id>` (each guard `guards.sh` can raise: `guard:env-file`, `guard:node-pin`, `guard:direct-tags`, …), `structure:<check>` (`one-h1`, `heading-order`, `noopener`, `title`, `meta-description`, `title-unique`, `meta-description-unique`, `template-token`, `edge-files`, `llms-links`), `browser:<check>` for the page test's checks (`smoke`, `axe`, `consent`, `csp`, `keyboard`, `reflow`, `posthog`, `turnstile`; a failed assertion is sorted by its message) and the `edge` and `on-demand` specs, `lighthouse:<audit>` (a failed Lighthouse assertion), or `step:<name>` (each row of the summary table: `step:contract`, `step:guards`, `step:build`, `step:browser`, `step:lighthouse`, …) |
 | `checks[].category` | `SEO`, `AEO`, `GEO`, `AIO`, `perf`, `structure`, `a11y`, `security`, `policy`, `build` or `site` |
 | `checks[].level` | `error` (fails the gate) or `warn`; a rule a site turned off reports its default level with status `not-run` |
-| `checks[].status` | `pass`, `fail`, `warn`, or `not-run` (an earlier failure, the stage, a live-only rule, or a rule turned off) |
+| `checks[].status` | `pass`, `fail`, `warn`, or `not-run` (an earlier failure, the stage, a live-only rule, a rule turned off, a policy the site doesn't use, or a guard its standard checks). A render test that failed before recording its page (the page didn't load) reads `fail` for every rule it owns, never `pass` |
 | `checks[].count`, `samples` | How many findings, and up to 10 pages or files they are on |
 
 ### Stack policies
@@ -749,7 +755,7 @@ checks:
 | `tags-via-zaraz` | No tag loads directly. GTM (loader URLs and inline `GTM-XXXX` ids), Google Analytics, Meta, Hotjar, LinkedIn, TikTok, Microsoft Clarity and HubSpot tracking (`hs-scripts`, `hs-analytics`) go through Cloudflare Zaraz. HubSpot form embeds (`js-*.hsforms.net`) are allowed: they are the portfolio's form standard until HubSpot's forms API is available. They render their own form, so list only Turnstile forms in `formPages`. A tag host that loads nothing passes: `_headers` comment lines and `Content-Security-Policy` values (a client-side Zaraz tool such as Clarity needs its hosts in the CSP), and a bare `www.clarity.ms` in prose or a link. Clarity's loader (`clarity.ms/tag`) still fails |
 | `turnstile-forms` | Every `<form>` carries Cloudflare Turnstile (a non-public form opts out with `<!-- turnstile-exempt: reason -->`), and the widget renders on every `formPages` page. The site's Turnstile env vars get Cloudflare's always-pass test keys. When a page carries the widget, a wrangler config without `secrets.required` listing the `turnstileEnv` secret warns, so a deploy without it fails instead of rejecting every submission |
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
-| `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: `chinaBlockedHosts` in `standards/standards.json` (Google, its Fonts, Maps, reCAPTCHA and tags, YouTube, Facebook, Instagram, WhatsApp, X/Twitter, LinkedIn, Vimeo, Gravatar, Typekit, Dropbox, Medium, Slack, Notion, Figma, WordPress.org and others; v4 adds website-audit's hosts to v3's). A blocked font or script stalls the page until it times out. Links and JSON-LD `sameAs` load nothing and pass. `chinaUnreliableHosts` (jsDelivr, unpkg) warn; non-ASCII URLs warn |
+| `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: `chinaBlockedHosts` in `standards/standards.json` (Google, its Fonts, Maps, reCAPTCHA and tags, YouTube, Facebook, Instagram, WhatsApp, X/Twitter, LinkedIn, Vimeo, Gravatar, Typekit, Dropbox, Medium, Slack, Notion, Figma, WordPress.org and others; v4 adds website-audit's hosts to v3's). A blocked font or script stalls the page until it times out. Only resources count: the URL attributes of loading elements (`script`, `img`, `iframe`, `source`, `video`, `audio`, `embed`, `object`, and `link` with a loading `rel` such as `stylesheet` or `preload`), CSS `@import` and `url()` (in files, `<style>` and `style=""`), and in script a URL passed to `fetch()`, `import()`, `importScripts()`, `sendBeacon()`, `new Worker()` or `EventSource`, or assigned to `.src`. Links (`<a href>`, `data-href`, JSON-LD `sameAs`, social meta) load nothing and pass; any other blocked URL in script (a share link) warns. `chinaUnreliableHosts` (jsDelivr, unpkg) warn; non-ASCII URLs warn |
 | `rtl-logical-css` | Warns with a count of physical `left`/`right` declarations in the built CSS (`margin-left`, `padding-right`, `left:`, `text-align: left`, `float: right`, `border-left`), which don't mirror under `dir="rtl"`. Use logical properties (`margin-inline-start`, `inset-inline-start`, `text-align: start`). Never fails: some physical values are right |
 | `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. A wrangler config without `secrets.required` listing `POSTHOG_API_KEY` (and, with `turnstile-forms`, the `turnstileEnv` secret) fails (`posthog-secrets`, an error from v4; exemptible with a date). Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
 | `consent-before-tracking` | The browser consent check: no non-essential cookie and no tracker (the consent-sensitive `trackerVendors` categories) before the visitor chooses. Strictly necessary cookies go in `consentEssentialCookies` |
@@ -902,23 +908,26 @@ These apply to every site:
   would arrive twice.
 
 **Delegated to web-baseline** (v4). A site that runs the web-baseline standard
-says so, and Ship Gate stops running the source guards web-baseline's own
-`conform:check` owns, so each check has one owner:
+says so, and Ship Gate stops running a source guard web-baseline's own
+`conform:check` enforces without exception, so the check has one owner:
 
 ```json
 "standard": "web-baseline",
 "checks": { "postBuild": ["conform:check"] }
 ```
 
-Skipped then: `tailwind-config` (web-baseline forbids the file outright),
-`env-file` (its strict allowlist fails any unlisted path, a committed `.env`
-included), `node-pin` (it pins the portfolio's Node line), `posthog-secrets`
-(it requires `secrets.required`) and the PostHog layout wiring (`posthog.init(`
-in a component the layouts render; the PostHog scan still proves every built
-page carries the key). The log names each skipped guard. This is not an
-exemption: the check still runs, inside this gate, as one of the site's
-checks, and the contract check fails when no `checks` phase lists
-`conform:check`. Every other guard, and every policy, runs as before.
+with `"conform:check": "node scripts/standard/conform.mjs --ci --final"` in
+`package.json`. The contract check fails when no `checks` phase lists
+`conform:check`, or when its script does not run `scripts/standard/conform.mjs`
+with `--final` (`--ci` alone enforces only the run's current phase). Only
+`node-pin` is delegated: web-baseline pins the portfolio's Node line, and no
+recorded deviation can waive it. The other overlaps stay Ship Gate guards,
+because a deviation (`docs/baseline/deviations.json`) can accept them in
+web-baseline: `tailwind-config` (a forbidden path), `posthog-secrets` and the
+PostHog layout wiring (required content). `env-file` is never delegated: a
+committed secret is never exemptible. The log names the skipped guard. This is
+not an exemption: the check still runs, inside this gate, as one of the site's
+checks.
 
 The contract check also refuses any script CI runs that writes to production:
 `build`, `check`, `lint`, `test`, `preview`, the install scripts `npm ci` runs
@@ -978,7 +987,7 @@ Never exemptible: a committed env file, a workflow pushing to `main`, and (with
 | `siteUrl` | required | Production origin, e.g. `https://example.com` |
 | `pages` | required | One path per key template: home, service or product, contact, article |
 | `policies` | `[]` | Stack policies this site follows; see Stack policies |
-| `standard` | none | `"web-baseline"`: hands the guards web-baseline's `conform:check` owns to it (Guards → Delegated to web-baseline); `conform:check` must be in a `checks` phase |
+| `standard` | none | `"web-baseline"`: hands `node-pin` to web-baseline's `conform:check` (Guards → Delegated to web-baseline); `conform:check` must be in a `checks` phase and run `conform.mjs --final` |
 | `allowedOrigins` | `[]` | With `first-party-only`: third-party https origins the site may load, e.g. `"https://challenges.cloudflare.com"` |
 | `formPages` | `[]` | Every page with a public form (the `turnstile-forms` policy checks the widget there) |
 | `smokePaths` | `/`, `/robots.txt`, `/sitemap-index.xml` | Checked on production after deploy |

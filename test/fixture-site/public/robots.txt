@@ -10,6 +10,7 @@ User-agent: Applebot-Extended
 User-agent: CCBot
 User-agent: meta-externalagent
 User-agent: Bytespider
+User-agent: MistralAI-Training
 Disallow: /
 
 Sitemap: https://example.com/sitemap.xml

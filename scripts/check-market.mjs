@@ -4,7 +4,8 @@
 //   node check-market.mjs        (reads $SHIP_GATE_DIR/run.json, written after the build)
 //
 // market-cn: no page, stylesheet or script loads a resource from a host that mainland China
-//   blocks (Google, YouTube, Facebook, Instagram, X/Twitter, Vimeo, Gravatar). A blocked font or
+//   blocks (chinaBlockedHosts in standards/standards.json: Google, YouTube, Meta, X, LinkedIn,
+//   Vimeo, Gravatar and others; the list website-audit reads too). A blocked font or
 //   script stalls rendering until it times out. Links to those sites are fine: they load nothing.
 //   URLs with non-ASCII characters warn: they break when shared through Chinese platforms.
 //   Guard "blocked-in-cn" may be exempted with a reason and date.
@@ -15,6 +16,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { htmlFiles, assetsIgnore } from './site-files.mjs';
+import { CHINA_BLOCKED, CHINA_UNRELIABLE, hostPattern } from './standards.mjs';
 
 const OUT = process.env.SHIP_GATE_DIR || '.ship-gate';
 const { root, policies = [], exempt = [] } = JSON.parse(readFileSync(join(OUT, 'run.json'), 'utf8'));
@@ -39,9 +41,9 @@ let failed = false;
 
 if (policies.includes('market-cn')) {
   // Hosts blocked by the Great Firewall. A "//" must precede the host, so only URLs match.
-  const BLOCKED = /\/\/(?:[a-z0-9-]+\.)*(google\.com|googleapis\.com|gstatic\.com|googletagmanager\.com|google-analytics\.com|doubleclick\.net|googlesyndication\.com|youtube\.com|youtube-nocookie\.com|ytimg\.com|youtu\.be|facebook\.com|facebook\.net|fbcdn\.net|instagram\.com|cdninstagram\.com|twitter\.com|x\.com|twimg\.com|vimeo\.com|vimeocdn\.com|gravatar\.com)(?=[/:"'?#\s)]|$)/gi;
+  const BLOCKED = new RegExp(hostPattern(CHINA_BLOCKED), 'gi');
   // Public CDNs that are unreliable from the mainland: warn, don't fail.
-  const SLOW = /\/\/(cdn\.jsdelivr\.net|unpkg\.com)(?=[/"'?#\s)]|$)/gi;
+  const SLOW = new RegExp(hostPattern(CHINA_UNRELIABLE), 'gi');
   // In HTML, only what the browser loads: links, social meta and JSON-LD sameAs load nothing.
   const loaded = (html) => html
     .replace(/<a\b[^>]*>/gi, ' ')

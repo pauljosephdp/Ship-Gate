@@ -1,0 +1,132 @@
+{
+  "_doc": "One rule set for Ship-Gate (the merge gate) and website-audit (the live auditor). Ship-Gate owns this file; website-audit carries a generated copy (references/standards/standards.json + GENERATED.json, written by its sync script) and validate fails on a hand edit. Every entry names its primary source and the date it was checked. A change here is a Ship-Gate release.",
+  "version": "1.0.0",
+  "checked": "2026-11-14",
+  "agents": [
+    {"token": "Googlebot", "vendor": "Google", "roles": ["search"], "robots": "obeys", "rendersJs": true, "verify": "reverse DNS *.googlebot.com / crawl-*.googlebot.com", "ipList": "https://developers.google.com/static/crawling/ipranges/common-crawlers.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; Googlebot/2.1; +http://www.google.com/bot.html", "source": "https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers"},
+    {"token": "Google-Extended", "vendor": "Google", "roles": ["training", "grounding"], "robots": "control-token", "note": "Never fetches; Googlebot fetches. Controls Gemini training and grounding; no effect on Search.", "source": "https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers"},
+    {"token": "Google-CloudVertexBot", "vendor": "Google", "roles": ["owner-requested-crawl"], "robots": "obeys", "verify": "reverse DNS as Googlebot", "source": "https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers"},
+    {"token": "Google-Agent", "vendor": "Google", "roles": ["agent"], "robots": "ignores", "verify": "user-triggered-agents.json; reverse DNS google-proxy-*.google.com", "ipList": "https://developers.google.com/static/crawling/ipranges/user-triggered-agents.json", "source": "https://developers.google.com/crawling/docs/crawlers-fetchers/google-user-triggered-fetchers", "added": "2026-03-20"},
+    {"token": "Google-NotebookLM", "vendor": "Google", "roles": ["user-fetch"], "robots": "ignores", "source": "https://developers.google.com/crawling/docs/crawlers-fetchers/google-user-triggered-fetchers"},
+    {"token": "bingbot", "vendor": "Microsoft", "roles": ["search", "ai-answers"], "robots": "obeys", "verify": "bingbot.json", "ipList": "https://www.bing.com/toolbox/bingbot.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm", "note": "Fetches for Copilot too; NOARCHIVE/NOCACHE control Copilot use (secondary source, unverified).", "source": "https://www.bing.com/webmasters/help/webmaster-guidelines-30fba23a"},
+    {"token": "GPTBot", "vendor": "OpenAI", "roles": ["training"], "robots": "obeys", "ipList": "https://openai.com/gptbot.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.4; +https://openai.com/gptbot", "source": "https://developers.openai.com/api/docs/bots"},
+    {"token": "OAI-SearchBot", "vendor": "OpenAI", "roles": ["search"], "robots": "obeys", "ipList": "https://openai.com/searchbot.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36; compatible; OAI-SearchBot/1.4; +https://openai.com/searchbot", "source": "https://developers.openai.com/api/docs/bots"},
+    {"token": "ChatGPT-User", "vendor": "OpenAI", "roles": ["user-fetch"], "robots": "may-ignore", "ipList": "https://openai.com/chatgpt-user.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot", "source": "https://developers.openai.com/api/docs/bots"},
+    {"token": "OAI-AdsBot", "vendor": "OpenAI", "roles": ["ads"], "robots": "unstated", "ipList": "https://openai.com/adsbot.json", "source": "https://developers.openai.com/api/docs/bots"},
+    {"token": "ClaudeBot", "vendor": "Anthropic", "roles": ["training"], "robots": "obeys", "ipList": "https://claude.com/crawling/bots.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ClaudeBot/1.0; +claudebot@anthropic.com", "source": "https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler"},
+    {"token": "Claude-SearchBot", "vendor": "Anthropic", "roles": ["search"], "robots": "obeys", "ipList": "https://claude.com/crawling/bots.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; Claude-SearchBot/1.0; +https://www.anthropic.com/searchbot", "source": "https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler"},
+    {"token": "Claude-User", "vendor": "Anthropic", "roles": ["user-fetch"], "robots": "obeys", "ipList": "https://claude.com/crawling/bots.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; Claude-User/1.0; +Claude-User@anthropic.com", "source": "https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler"},
+    {"token": "Claude-Agent", "vendor": "Anthropic", "roles": ["agent"], "robots": "not-addressed", "verify": "token in the UA, then IP in claude.com/.well-known/sail", "ipList": "https://claude.com/.well-known/sail", "source": "https://support.claude.com/en/articles/18234133"},
+    {"token": "PerplexityBot", "vendor": "Perplexity", "roles": ["search"], "robots": "obeys", "ipList": "https://www.perplexity.ai/perplexitybot.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot", "source": "https://docs.perplexity.ai/guides/bots"},
+    {"token": "Perplexity-User", "vendor": "Perplexity", "roles": ["user-fetch"], "robots": "may-ignore", "ipList": "https://www.perplexity.ai/perplexity-user.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; Perplexity-User/1.0; +https://perplexity.ai/perplexity-user", "source": "https://docs.perplexity.ai/guides/bots"},
+    {"token": "Applebot", "vendor": "Apple", "roles": ["search", "ai-answers", "possible-training"], "robots": "obeys", "rendersJs": true, "verify": "reverse DNS *.applebot.apple.com + forward lookup", "ipList": "https://search.developer.apple.com/applebot.json", "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15 (Applebot/0.1; +http://www.apple.com/go/applebot)", "note": "nosnippet opts a page out of AI-answer context.", "source": "https://support.apple.com/en-us/119829"},
+    {"token": "Applebot-Extended", "vendor": "Apple", "roles": ["training"], "robots": "control-token", "source": "https://support.apple.com/en-us/119829"},
+    {"token": "meta-externalagent", "vendor": "Meta", "roles": ["training", "indexing"], "robots": "obeys", "ua": "meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)", "source": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers"},
+    {"token": "meta-externalfetcher", "vendor": "Meta", "roles": ["user-fetch", "agent"], "robots": "may-ignore", "source": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers"},
+    {"token": "meta-webindexer", "vendor": "Meta", "roles": ["search"], "robots": "unstated", "source": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers"},
+    {"token": "meta-externalads", "vendor": "Meta", "roles": ["ads"], "robots": "obeys", "source": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers"},
+    {"token": "Amazonbot", "vendor": "Amazon", "roles": ["search", "possible-training"], "robots": "obeys", "ipList": "https://developer.amazon.com/amazonbot/ip-addresses/", "ua": "Mozilla/5.0 (compatible; Amazonbot/0.1; +https://developer.amazon.com/support/amazonbot)", "source": "https://developer.amazon.com/amazonbot"},
+    {"token": "Amzn-SearchBot", "vendor": "Amazon", "roles": ["search"], "robots": "obeys", "ipList": "https://developer.amazon.com/amazonbot/searchbot-ip-addresses/", "source": "https://developer.amazon.com/amazonbot"},
+    {"token": "Amzn-User", "vendor": "Amazon", "roles": ["user-fetch"], "robots": "may-ignore", "ipList": "https://developer.amazon.com/amazonbot/live-ip-addresses/", "source": "https://developer.amazon.com/amazonbot"},
+    {"token": "DuckAssistBot", "vendor": "DuckDuckGo", "roles": ["ai-answers"], "robots": "obeys", "ipList": "https://duckduckgo.com/duckassistbot.json", "source": "https://duckduckgo.com/duckduckgo-help-pages/results/duckassistbot"},
+    {"token": "MistralAI-User", "vendor": "Mistral", "roles": ["user-fetch"], "robots": "unstated", "ipList": "https://mistral.ai/mistralai-user-ips.json", "ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; MistralAI-User/1.0; +https://docs.mistral.ai/robots", "source": "https://docs.mistral.ai/robots"},
+    {"token": "MistralAI-Index", "vendor": "Mistral", "roles": ["search"], "robots": "obeys", "ipList": "https://mistral.ai/mistralai-index-ips.json", "source": "https://docs.mistral.ai/robots"},
+    {"token": "MistralAI-Training", "vendor": "Mistral", "roles": ["training"], "robots": "obeys", "source": "https://docs.mistral.ai/robots"},
+    {"token": "CCBot", "vendor": "Common Crawl", "roles": ["training"], "robots": "obeys", "verify": "reverse DNS *.crawl.commoncrawl.org", "ipList": "https://index.commoncrawl.org/ccbot.json", "ua": "CCBot/2.0 (https://commoncrawl.org/faq/)", "source": "https://commoncrawl.org/ccbot"},
+    {"token": "Bytespider", "vendor": "ByteDance", "roles": ["training"], "robots": "undocumented", "note": "No vendor documentation; third-party directories only.", "source": null},
+    {"token": "DeepSeekBot", "vendor": "DeepSeek", "roles": ["training"], "robots": "undocumented", "note": "No vendor documentation; reported crawling without a published UA.", "source": null}
+  ],
+  "groups": {
+    "searchMustAllow": ["Googlebot", "bingbot", "OAI-SearchBot", "Claude-SearchBot", "PerplexityBot", "Applebot", "DuckAssistBot", "Amzn-SearchBot", "MistralAI-Index"],
+    "userFetchShouldAllow": ["ChatGPT-User", "Claude-User", "Perplexity-User"],
+    "trainingOnly": ["GPTBot", "ClaudeBot", "Google-Extended", "Applebot-Extended", "CCBot", "MistralAI-Training"],
+    "mixedSearchAndTraining": ["Applebot", "Amazonbot", "meta-externalagent"],
+    "robotsIgnored": ["Google-Agent", "Claude-Agent", "ChatGPT-User", "Perplexity-User", "meta-externalfetcher", "Amzn-User", "Google-NotebookLM"]
+  },
+  "retiredTokens": {"claude-web": "ClaudeBot, Claude-SearchBot and Claude-User", "anthropic-ai": "ClaudeBot"},
+  "trainingOptOut": {
+    "usageGroup": "__usage_ai-training",
+    "honouredBy": {"Anthropic": "2026-10-30", "Google": "planned early 2027", "OpenAI": "announced, unverified"},
+    "rule": "A `User-Agent: __usage_ai-training` group with Disallow lines; a rule under `User-Agent: *` does not apply to it.",
+    "source": "https://datatracker.ietf.org/doc/draft-kelley-aipref-training-preference-signal/",
+    "contentSignal": "Cloudflare Content-Signal (search=, ai-input=, ai-train=): no AI vendor has committed to honour it; report, never rely on it alone."
+  },
+  "cwv": {
+    "good": {"lcpMs": 2500, "inpMs": 200, "cls": 0.1, "percentile": 75, "source": "https://web.dev/articles/vitals"},
+    "labGate": {"cls": 0.05, "lcpMsWarn": 4000, "tbtMsWarn": 300, "note": "Ship-Gate's Lighthouse assertions on the served build; stricter than field 'good' on purpose."}
+  },
+  "jsonLdRequired": {
+    "Article": ["headline", "datePublished", "author"],
+    "NewsArticle": ["headline", "datePublished", "author"],
+    "BlogPosting": ["headline", "datePublished", "author"],
+    "TechArticle": ["headline", "datePublished", "author"],
+    "Organization": ["name", "url"],
+    "LocalBusiness": ["name", "address"],
+    "Person": ["name"],
+    "WebSite": ["name", "url"],
+    "Product": ["name", "offers|review|aggregateRating"],
+    "Offer": ["price", "priceCurrency"],
+    "Event": ["name", "startDate", "location"],
+    "Recipe": ["name", "image"],
+    "VideoObject": ["name", "thumbnailUrl", "uploadDate"],
+    "FAQPage": ["mainEntity"],
+    "Question": ["name", "acceptedAnswer"],
+    "BreadcrumbList": ["itemListElement"],
+    "Service": ["name"]
+  },
+  "retiredRichResults": [
+    {"type": "FAQPage", "retired": "2026-05-07", "source": "https://developers.google.com/search/updates"},
+    {"type": "HowTo", "retired": "unverified date", "source": null},
+    {"type": "Course info", "retired": "2025-09-09"}, {"type": "Estimated salary", "retired": "2025-09-09"},
+    {"type": "Learning video", "retired": "2025-09-09"}, {"type": "Special announcement", "retired": "2025-09-09"},
+    {"type": "Vehicle listing", "retired": "2025-09-09"}, {"type": "Practice problem", "retired": "2026-01-06"}
+  ],
+  "llmsTxt": {"requireH1": true, "requireSummary": true, "requireLinks": true, "requireSections": false, "missingLevel": "warn", "note": "llmstxt.org allows zero or more H2 sections. No AI vendor documents reading llms.txt; Google says AI features need no special files.", "source": "https://llmstxt.org"},
+  "redirects": {"permanent": [301, 308], "temporary": [302, 303, 307], "source": "https://developers.google.com/search/docs/crawling-indexing/301-redirects"},
+  "robotsTxt": {"maxBytes": 512000, "on5xx": "Google pauses crawling 12h, then uses its cached copy up to 30 days", "on4xx": "treated as no restrictions", "source": "https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec"},
+  "sitemaps": {"maxUrls": 50000, "maxBytes": 52428800, "lastmodRule": "accurate per page or omitted; Google ignores priority and changefreq", "source": "https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap"},
+  "metaDescription": {"required": true, "unique": true, "advisoryBand": [140, 160], "note": "The band is editorial advice, never a gate."},
+  "title": {"maxChars": 75, "unique": true},
+  "securityHeaders": {
+    "build": ["X-Content-Type-Options", "Referrer-Policy", "frame-protection (X-Frame-Options or CSP frame-ancestors)", "Content-Security-Policy"],
+    "live": ["Strict-Transport-Security"],
+    "recommended": ["Permissions-Policy"]
+  },
+  "chinaBlockedHosts": {
+    "_doc": "Hosts blocked or unreliable from mainland China; a font, script or image from one stalls the page until it times out. An entry matches the host and its subdomains; an entry with a path (cloudfront.net/gtm) matches that path prefix too. Merged 2026-11-14 from Ship-Gate scripts/check-market.mjs and website-audit scripts/check_compliance.py (CHINA_BLOCKED). market-cn fails on these.",
+    "hosts": ["google.com", "googleapis.com", "gstatic.com", "googletagmanager.com", "google-analytics.com", "doubleclick.net", "googlesyndication.com",
+              "recaptcha.net", "youtube.com", "youtube-nocookie.com", "ytimg.com", "youtu.be", "facebook.com", "facebook.net", "fbcdn.net",
+              "instagram.com", "cdninstagram.com", "whatsapp.com", "twitter.com", "x.com", "twimg.com", "linkedin.com", "licdn.com",
+              "vimeo.com", "vimeocdn.com", "gravatar.com", "wordpress.org", "dropbox.com", "medium.com", "slack.com", "notion.so",
+              "figma.com", "typekit.net", "cloudfront.net/gtm"]
+  },
+  "chinaUnreliableHosts": {
+    "_doc": "Public CDNs that are unreliable from mainland China: market-cn warns, never fails. From Ship-Gate scripts/check-market.mjs.",
+    "hosts": ["cdn.jsdelivr.net", "unpkg.com"]
+  },
+  "trackerVendors": {
+    "_doc": "Third-party trackers by category. An entry matches a request's host, a subdomain of it, or a dot-separated run of its labels (adservice.google matches adservice.google.com; criteo matches static.criteo.net); an entry with a path also needs that path prefix (facebook.com/tr). Never matched on the path alone, so a site's own /hubspot-badge.svg is not a tracker. HubSpot form embeds (hsforms.net, hsforms.com) are forms, not tags, and are not listed. Merged 2026-11-14 from Ship-Gate scripts/prepare.mjs (TRACKER_HOSTS, the consent-before-tracking list) and website-audit scripts/check_compliance.py (TRACKER_VENDORS). Ship-Gate's consent test fails on the consentSensitive categories before consent.",
+    "consentSensitive": ["analytics", "advertising", "social_remarketing", "session_replay"],
+    "categories": {
+      "analytics": ["google-analytics.com", "googletagmanager.com", "analytics.google.com", "segment.com", "segment.io", "mixpanel.com", "amplitude.com",
+                    "hotjar.com", "hotjar.io", "clarity.ms", "matomo", "plausible.io", "fullstory.com", "heap.io", "quantserve.com", "statcounter.com",
+                    "mouseflow.com", "luckyorange.com", "crazyegg.com", "kissmetrics", "posthog.com", "hubspot.com", "hs-scripts.com", "hs-analytics.net"],
+      "advertising": ["doubleclick.net", "googlesyndication.com", "googleadservices.com", "adservice.google", "adnxs.com", "criteo", "taboola", "outbrain",
+                      "rubiconproject", "pubmatic", "openx.net", "bidswitch", "adroll", "amazon-adsystem.com", "media.net", "sharethrough", "teads"],
+      "social_remarketing": ["facebook.net", "facebook.com/tr", "connect.facebook", "linkedin.com/px", "ads.linkedin.com", "snap.licdn.com",
+                             "analytics.twitter.com", "static.ads-twitter.com", "t.co/i/adsct", "tiktok.com/i18n/pixel", "analytics.tiktok.com",
+                             "pinterest.com/ct", "reddit.com/pixel", "bat.bing.com", "clarity.ms"],
+      "session_replay": ["fullstory.com", "logrocket", "smartlook", "inspectlet", "sessioncam", "quantummetric"],
+      "chat_support": ["intercom", "drift.com", "crisp.chat", "tawk.to", "zendesk", "hubspot.com/hs-script", "livechatinc", "tidio"],
+      "fonts_cdn": ["fonts.googleapis.com", "fonts.gstatic.com", "use.typekit", "cdnjs.cloudflare.com", "unpkg.com", "jsdelivr.net", "ajax.googleapis.com"]
+    }
+  },
+  "buildChecks": {
+    "_doc": "Thresholds for the build-provable checks Ship-Gate took over from website-audit on 2026-11-14 (one owner per check). Each names the script its value came from; website-audit reads Ship-Gate's results for these instead of re-testing them.",
+    "sitemapBulkLastmod": {"minUrls": 5, "buildTimeWindowSeconds": 120, "from": "website-audit scripts/verify_site.py (bulk_stamped: 5 or more URLs, one distinct lastmod); the build-time window is Ship-Gate's"},
+    "renderedContent": {"minWordRatio": 0.7, "minLinkRatio": 0.5, "from": "website-audit scripts/capture_site.py (no_js_baseline, PASS at word_ratio >= 0.7 and link_ratio >= 0.5)"},
+    "clickDepth": {"max": 3, "from": "website-audit scripts/build_link_graph.py (U-17, deeper than 3 clicks)"},
+    "faqPattern": {"heading": "\\b(faqs?|frequently asked questions?|common questions?|questions? (?:and|&) answers?)\\b", "questionStart": "^\\s*(who|what|why|how|when|where|which|can|could|should|would|do|does|did|is|are|was|were|will|has|have|am)\\b", "minQuestionHeadings": 3, "from": "website-audit scripts/check_onpage_aeo.py (U-03: an FAQ heading, or 3 or more h2-h4 question headings)"},
+    "contentParity": {"minBlockChars": 20, "matchChars": 60, "from": "website-audit scripts/capture_site.py (U-19)"}
+  }
+}

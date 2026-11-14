@@ -29,7 +29,7 @@
    lists the exceptions.
 10. `"standard": "web-baseline"` delegates the guards its `conform:check` enforces without exception. After review
     that is `node-pin` only, behind a `conform:check` script that runs `conform.mjs --final` (plan.md, Review
-    fixes 2); the contract check fails when no site check phase lists `conform:check` or the script differs.
+    fixes 2); the contract check fails unless `checks.preBuild` or `checks.postBuild` lists `conform:check` and its script is the conform call alone with `--final` (no `--report`, nothing chained).
 11. `posthog-secrets` becomes an error (exemptible), as v3 promised for v4.
 12. Post-deploy keeps deploy health only: build SHA, smoke 200s, `robots.txt` and sitemaps answer 200 with the
     right type, no 403/429 to a plain request, PostHog key policy. Removed: CrUX field CWV (and the
@@ -64,7 +64,7 @@
 - **Organization needs `url`.** The contract's table requires `url` on Organization (today: `name` only).
   A nested publisher Organization without `url` now fails `structured-data`. Owner: Paul. Resolved: the
   contract is the rule; the migration note says so.
-- **`env-file` is never exemptible**, yet delegation skips it. Delegation is not an exemption: the check
+- **`env-file` is never exemptible**, so it is never delegated (Review fix 2); only `node-pin` is. Delegation is not an exemption: the check
   still runs, in web-baseline's strict allowlist, inside the same gate, and the contract check proves it is
   wired. Owner: Paul (asked for it).
 - **Protected fixture tests.** `test/break-fixture.sh` and `test/expect-gate.sh` are protected, so this change

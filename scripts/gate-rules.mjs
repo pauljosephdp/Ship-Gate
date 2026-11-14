@@ -18,8 +18,8 @@ export const POLICIES = {
 };
 // "standard": a site that runs a standard whose own check owns some of Ship Gate's source guards.
 // Those guards are skipped (not exempted: the standard's check still runs, inside this gate, as one of
-// the site's checks). The contract fails unless that check is wired into a phase AND its script runs
-// the standard's checker in the mode that enforces every rule (`run`). A guard is delegated only when
+// the site's checks). The contract fails unless that check is listed in checks.preBuild or checks.postBuild
+// AND its script is the standard's checker alone, in the mode that enforces every rule (`run`). A guard is delegated only when
 // the standard cannot waive it either: web-baseline's conform.mjs --final enforces every phase, but a
 // recorded deviation (docs/baseline/deviations.json) can accept a forbidden path (tailwind.config.*)
 // or missing required content (secrets.required, the PostHog layout wiring), so those guards stay

@@ -7,7 +7,7 @@
 //   blocks (chinaBlockedHosts in standards/standards.json: Google, YouTube, Meta, X, LinkedIn,
 //   Vimeo, Gravatar and others; the list website-audit reads too). A blocked font or
 //   script stalls rendering until it times out. Links to those sites are fine: they load nothing.
-//   A blocked URL in script that is not visibly loaded warns (a share link reads the same).
+//   In a bundle, a blocked URL that is not visibly loaded warns; in an inline <script>, it fails unless it is a link.
 //   URLs with non-ASCII characters warn: they break when shared through Chinese platforms.
 //   Guard "blocked-in-cn" may be exempted with a reason and date.
 // rtl-logical-css: counts left/right physical properties in the built CSS. They do not mirror
@@ -49,7 +49,8 @@ if (policies.includes('market-cn')) {
   // meta) loads nothing. In HTML: the URL attributes of loading elements, CSS in <style> and style="",
   // and script. In CSS: @import and url(). In script (inline or a bundle) a link can't be told from a
   // load by its text, so a URL passed to fetch(), import(), importScripts(), sendBeacon(), new Worker()
-  // or EventSource, or assigned to .src, is a resource; any other blocked URL in script warns.
+  // or EventSource, assigned to .src, or named by a static import/export is a resource. In a bundle any
+  // other blocked URL warns; in a hand-written inline <script> it fails unless it is in a link context.
   const LOADING = /<(script|img|source|iframe|video|audio|embed|object|input|track)\b[^>]*>/gi;
   const LINK_LOADS = /\brel\s*=\s*["']?[^"'>]*\b(stylesheet|preload|modulepreload|icon|apple-touch-icon|manifest|prefetch)\b/i;
   const LOAD_CALL = /(?:\b(?:fetch|import|importScripts|sendBeacon|Worker|EventSource)\s*\(\s*|\.src\s*=\s*)["'`](?:https?:)?$/;

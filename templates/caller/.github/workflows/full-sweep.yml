@@ -33,7 +33,7 @@ jobs:
         # Written outside the checkout: a file in the repo fails the site's own conformance check.
         # Add working-directory: site here too if the site is not at the repo root.
         run: node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("ship-gate.config.json","utf8"));c.lighthouseUrls="all";c.e2ePages="all";fs.writeFileSync(process.env.RUNNER_TEMP+"/ship-gate.full.json",JSON.stringify(c,null,2))'
-      - uses: pauljosephdp/Ship-Gate@v3.15.0
+      - uses: pauljosephdp/Ship-Gate@v4.0.0
         with:
           config: ${{ runner.temp }}/ship-gate.full.json
           # working-directory: site

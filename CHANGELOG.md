@@ -1,5 +1,39 @@
 # Changelog
 
+## v4.0.0 — 2026-11-14
+
+One rule file, one owner per check. Ship Gate and the website-audit skill (`pauljosephdp/Skills`) ran about 20 of the same checks with different rules. Now anything provable from the build, or the build served on `localhost`, is Ship Gate's; anything that needs production, the edge, field data or Search Console is website-audit's; both read `standards/standards.json`, owned here. This removes checks callers relied on, so it is a major. Intent, spec and plan: `docs/intent/2026-11-14-standards-v4/`.
+
+**Migration (what a site changes to stay green)**
+- **`robots.txt`:** add `User-agent: MistralAI-Training` to the group that disallows the training crawlers. `ai-training` now requires `groups.trainingOnly` (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, CCBot, MistralAI-Training); meta-externalagent and Bytespider are no longer required, and blocking them stays fine. web-baseline's robots generator needs the same line.
+- **JSON-LD:** an Organization node (any Organization subtype that isn't a LocalBusiness) needs `url`, and an Offer `price` and `priceCurrency` (`jsonLdRequired`). A nested publisher Organization without `url` now fails `structured-data`.
+- **`<img>`:** every local image needs `width` and `height` (`img-dimensions`, error). Astro's `<Image>` sets them.
+- **`posthog-hybrid`:** `secrets.required` listing `POSTHOG_API_KEY` (and the Turnstile secret with `turnstile-forms`) is now an error, `posthog-secrets` (exemptible with a date), as v3 announced.
+- **`market-cn`:** more hosts fail (website-audit's list merged in): LinkedIn (`linkedin.com`, `licdn.com`), WhatsApp, reCAPTCHA's `recaptcha.net`, Typekit, Dropbox, Medium, Slack, Notion, Figma, WordPress.org and `cloudfront.net/gtm`.
+- **`consent-before-tracking`:** the tracker list is `trackerVendors`' consent-sensitive categories, a superset of v3's (Segment, Mixpanel, Amplitude, FullStory, LogRocket, Criteo, Taboola, Bing UET, Pinterest and Reddit pixels, and others).
+- **Post-deploy callers:** remove `crux-api-key` from `post-deploy.yml` (the input is gone; GitHub warns on an unknown input). Re-copy `templates/caller/.github/workflows/post-deploy.yml`.
+- **`discoveryOverrides`:** an entry for `markdown-negotiation` warns and is ignored; remove it.
+- **Full sweep:** re-copy `templates/caller/.github/workflows/full-sweep.yml` (it uploads `ship-gate-results`).
+- **web-baseline sites:** add `"standard": "web-baseline"` (with `conform:check` in `checks.postBuild`, as the template has it) to hand web-baseline the guards it owns.
+
+**Added**
+- `standards/standards.json`: crawler agents and groups, retired tokens, the AI-training opt-out, JSON-LD required properties, retired rich results, llms.txt, CWV, redirects, robots.txt and sitemap limits, meta description and title, security headers, and, merged from both codebases, `chinaBlockedHosts`, `chinaUnreliableHosts` and `trackerVendors`, plus `buildChecks` (thresholds of the checks moved in). `scripts/standards.mjs` derives every list the scripts read; `test/standards.test.mjs` checks the file and that no script keeps its own copy.
+- Discovery rules moved in from website-audit, all from the build: `sitemap-lastmod-bulk` (warn: 5 or more URLs share one `lastmod`, or a `lastmod` is the build's own time), `img-dimensions` (error), `faq-markup-missing` (warn: a visible FAQ without FAQPage markup), `orphan-pages` and `click-depth` (warn: the built link graph, more than 3 clicks).
+- `ai-training-optout-scope` (warn): a `__usage_ai-training` line under `User-agent: *` has no effect.
+- `e2e/render.spec.ts`, against the served build: `rendered-content` is now the no-JS ratio (warn under 70% of words or 50% of links), replacing v3's 50-word floor; `lazy-first-viewport` (warn); `content-parity` (warn: desktop content missing on mobile). axe's `target-size` (WCAG 2.5.8) already ran under `wcag22aa`; nothing added.
+- Stack policy `first-party-only`, with `allowedOrigins`: every sitemap page loads only first-party resources.
+- `"standard": "web-baseline"`: `tailwind-config`, `env-file`, `node-pin`, `posthog-secrets` and the PostHog layout wiring are left to web-baseline's `conform:check`, which the contract requires in a `checks` phase.
+- `reports/results.json` on every `verify` run (schema in the README, Results for website-audit), written by `scripts/results.mjs` in an always-on step that never fails the gate. The caller `full-sweep.yml` uploads it as `ship-gate-results` on every run for 35 days. The structure scan writes `structure.json` and the discovery scan `discovery.json` for it; Playwright also writes a JSON report.
+
+**Removed (now website-audit's)**
+- Post-deploy: field Core Web Vitals from the Chrome UX Report (and the `crux-api-key` input), the Zaraz check (`check-analytics-live.mjs`), the `ETag`/`Last-Modified` warning, live Markdown negotiation, the live `Link` header, and the live re-evaluation of `robots-blocks-page`, `ai-search-crawlers` and `ai-training`. Post-deploy keeps deploy health: the build SHA, smoke 200s, `robots.txt` and sitemaps answering with the right type, no 403/429 to a plain request, and the PostHog key policy.
+- The `markdown-negotiation` rule.
+
+**Changed**
+- `ai-search-crawlers` checks `groups.searchMustAllow` (beyond Googlebot and bingbot) plus `groups.userFetchShouldAllow`: Amzn-SearchBot and MistralAI-Index are new.
+- `link-headers`, `ai-training` and `ai-uses-allowed` are build rules only.
+- The llms.txt rules read `llmsTxt` (sections stay optional).
+
 ## v3.15.0 — 2026-11-13
 
 **Changed**

@@ -879,9 +879,18 @@ res_dir="$(mktemp -d)"; mkdir -p "$res_dir/reports/render"
   && SHIP_GATE_DIR="$res_dir" node "$HERE/check-discovery.mjs" >/dev/null 2>&1; \
   SHIP_GATE_DIR="$res_dir" node "$HERE/check-structure.mjs" >/dev/null 2>&1; rm -rf "$d" )
 printf '{"path":"/about/","findings":{"rendered-content":["without JavaScript the page has 3 of 300 words"],"lazy-first-viewport":[],"content-parity":[]}}' > "$res_dir/reports/render/about.json"
-printf '{"suites":[{"file":"page.spec.ts","specs":[{"title":"/about/: smoke, axe","file":"page.spec.ts","tests":[{"status":"unexpected"},{"status":"expected"}]}]},{"file":"edge.spec.ts","specs":[{"title":"edge","file":"edge.spec.ts","tests":[{"status":"expected"}]}]}]}' > "$res_dir/reports/playwright.json"
+# Playwright's JSON report: /about/ fails axe and the 320px reflow, / warns on keyboard; the render test for
+# /contact/ threw before writing its file; the edge spec passed.
+cat > "$res_dir/reports/playwright.json" <<'JSON'
+{"suites":[{"file":"page.spec.ts","specs":[
+  {"title":"/about/: smoke, axe, consent, CSP, keyboard and reflow","file":"page.spec.ts","tests":[{"status":"unexpected","results":[{"errors":[{"message":"Error: axe (WCAG 2.2 AA)\n\nexpect(received)"},{"message":"Error: 320px: page is 40px wider than the viewport"}]}]}]},
+  {"title":"/: smoke, axe, consent, CSP, keyboard and reflow","file":"page.spec.ts","tests":[{"status":"expected","results":[{"errors":[],"annotations":[{"type":"warning","description":"/: <a> shows no visible change when focused."}]}]}]}]},
+ {"file":"render.spec.ts","specs":[{"title":"/contact/: no-JS content, lazy first viewport, desktop and mobile parity","file":"render.spec.ts","tests":[{"status":"unexpected","results":[{"errors":[{"message":"Error: expect(received).toBe(expected)"}]}]}]}]},
+ {"file":"edge.spec.ts","specs":[{"title":"security headers on the home page","file":"edge.spec.ts","tests":[{"status":"expected","results":[{"errors":[]}]}]}]}]}
+JSON
+printf 'env-file\tfail\nnode-pin\twarn\n' > "$res_dir/reports/guards.tsv"
 out="$(cd "$res_dir" && SHIP_GATE_DIR="$res_dir" STAGE=full SHIP_GATE_COMMIT=abc1234 \
-  OUTCOMES="Contract and config=success |Structure scan=success |Discovery (SEO, AEO, GEO, AIO)=success |Smoke, axe, reflow, CSP, edge=failure |Lighthouse=skipped" \
+  OUTCOMES="Contract and config=success |Stack guards=failure |Structure scan=success |Discovery (SEO, AEO, GEO, AIO)=success |Smoke, axe, reflow, CSP, edge=failure |Lighthouse=skipped" \
   node "$HERE/results.mjs" 2>&1)"; code=$?
 check "results.json written" "has:Results:" "$code" "$out"
 res_check() { # name, node expression over r (results.json) and c (id → check) that must be true
@@ -892,11 +901,22 @@ res_check "results: header fields"            "/^v\\d+\\.\\d+\\.\\d+\$/.test(r.s
 res_check "results: every check has the schema" "r.checks.every(x=>typeof x.id==='string'&&typeof x.category==='string'&&['error','warn'].includes(x.level)&&['pass','fail','warn','not-run'].includes(x.status)&&Number.isInteger(x.count)&&Array.isArray(x.samples)&&x.samples.length<=10)"
 res_check "results: a build rule's warning"   "c['sitemap-lastmod'].status==='warn' && c['sitemap-lastmod'].count===1 && c['sitemap-lastmod'].category==='SEO'"
 res_check "results: a passing build rule"     "c['canonical'].status==='pass' && c['canonical'].level==='error'"
-res_check "results: a browser rule, from the render spec" "c['rendered-content'].status==='warn' && c['rendered-content'].samples[0]==='/about/'"
+res_check "results: a browser rule, from the render spec" "c['rendered-content'].count===2 && c['rendered-content'].samples[0]==='/about/'"
 res_check "results: live rules are not run in verify" "c['sitemap-live'].status==='not-run'"
 res_check "results: structure checks"         "c['structure:one-h1'].status==='pass'"
-res_check "results: a failed browser test"    "c['browser:page'].status==='fail' && c['browser:page'].samples[0]==='/about/' && c['browser:edge'].status==='pass'"
+res_check "results: each page check on its own" "c['browser:axe'].status==='fail' && c['browser:axe'].samples[0]==='/about/' && c['browser:reflow'].status==='fail' && c['browser:smoke'].status==='pass' && c['browser:csp'].status==='pass' && c['browser:edge'].status==='pass'"
+res_check "results: keyboard warnings"         "c['browser:keyboard'].status==='warn' && c['browser:keyboard'].samples[0]==='/'"
+res_check "results: a policy's check not in use" "c['browser:consent'].status==='not-run' && c['browser:posthog'].status==='not-run'"
+res_check "results: a render test that threw fails its rules" "['rendered-content','lazy-first-viewport','content-parity'].every(k=>c[k].status==='fail' && c[k].samples.includes('/contact/'))"
+res_check "results: each guard on its own"    "c['guard:env-file'].status==='fail' && c['guard:node-pin'].status==='warn' && c['guard:push-to-main'].status==='pass' && c['guard:direct-tags'].status==='not-run' && c['guard:posthog-secrets'].status==='not-run'"
 res_check "results: step outcomes"            "c['step:browser'].status==='fail' && c['step:lighthouse'].status==='not-run' && c['step:contract'].status==='pass'"
+gl="$(mktemp -d)"; d="$(baseline)"; (cd "$d" && echo 'A=1' > .env && git add -A >/dev/null 2>&1 && SHIP_GATE_DIR="$gl" SHIP_GATE_POLICIES="" bash "$GUARDS" >/dev/null 2>&1); rm -rf "$d"
+if grep -qx $'env-file\tfail' "$gl/reports/guards.tsv" 2>/dev/null; then ok "guards.sh logs each finding for results.json"
+else bad "guards.sh logs each finding for results.json" "no env-file line in guards.tsv" "$(cat "$gl/reports/guards.tsv" 2>&1)"; fi
+rm -rf "$gl"
+missing_ids="$(for id in $(grep -oE 'err [a-z-]+' "$HERE/guards.sh" | cut -d' ' -f2 | sort -u); do
+  node -e "import('$HERE/gate-rules.mjs').then(m=>process.exit('$id' in m.SOURCE_GUARDS?0:1))" || echo "$id"; done)"
+if [ -z "$missing_ids" ]; then ok "every guard guards.sh raises is in SOURCE_GUARDS"; else bad "every guard guards.sh raises is in SOURCE_GUARDS" "missing" "$missing_ids"; fi
 out="$(cd "$(mktemp -d)" && SHIP_GATE_DIR="$(pwd)/sg" OUTCOMES="Contract and config=failure" node "$HERE/results.mjs" 2>&1)"; code=$?
 check "results: written even when the contract failed" "has:Results:" "$code" "$out"
 rm -rf "$res_dir"

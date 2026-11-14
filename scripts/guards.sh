@@ -10,8 +10,15 @@ fail=0
 EXEMPT=" ${SHIP_GATE_EXEMPT:-} "
 # Committed secrets and anything that skips the PR gate are never exempt.
 NEVER_EXEMPT=" posthog-key env-file push-to-main "
+# Each finding is also logged, one "ID<TAB>fail|warn" line, to reports/guards.tsv in the run's Ship Gate
+# folder, so results.mjs can report every guard on its own. No folder (prepare failed), no log.
+LOG_DIR="${SHIP_GATE_DIR:-${RUNNER_TEMP:+$RUNNER_TEMP/ship-gate}}"
+GUARD_LOG=""
+if [ -n "$LOG_DIR" ] && mkdir -p "$LOG_DIR/reports" 2>/dev/null; then GUARD_LOG="$LOG_DIR/reports/guards.tsv"; : > "$GUARD_LOG"; fi
+log() { [ -z "$GUARD_LOG" ] || printf '%s\t%s\n' "$1" "$2" >> "$GUARD_LOG"; }
 err() {
-  if [[ "$EXEMPT" == *" $1 "* && "$NEVER_EXEMPT" != *" $1 "* ]]; then echo "::warning::[exempt: $1] $2"; else echo "::error::$2"; fail=1; fi
+  if [[ "$EXEMPT" == *" $1 "* && "$NEVER_EXEMPT" != *" $1 "* ]]; then echo "::warning::[exempt: $1] $2"; log "$1" warn
+  else echo "::error::$2"; fail=1; log "$1" fail; fi
 }
 # scan PATTERN PATH... — grep only paths that exist (a missing path makes grep exit 2 and hide real matches)
 scan() { local pat=$1; shift; local paths=(); for p in "$@"; do [ -e "$p" ] && paths+=("$p"); done
@@ -27,7 +34,7 @@ policy() { [[ "$POLICIES" == *" $1 "* ]]; }
 # check, one owner. Only guards the standard cannot waive are delegated (prepare.mjs, STANDARDS_DELEGATED).
 DELEGATED=" ${SHIP_GATE_DELEGATED:-} "
 delegated() {
-  if [[ "$DELEGATED" == *" $1 "* ]]; then echo "Guard $1: checked by the site's standard (conform:check), not here."; return 0; fi
+  if [[ "$DELEGATED" == *" $1 "* ]]; then echo "Guard $1: checked by the site's standard (conform:check), not here."; log "$1" delegated; return 0; fi
   return 1
 }
 

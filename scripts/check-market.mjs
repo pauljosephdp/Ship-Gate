@@ -53,6 +53,11 @@ if (policies.includes('market-cn')) {
   const LOADING = /<(script|img|source|iframe|video|audio|embed|object|input|track)\b[^>]*>/gi;
   const LINK_LOADS = /\brel\s*=\s*["']?[^"'>]*\b(stylesheet|preload|modulepreload|icon|apple-touch-icon|manifest|prefetch)\b/i;
   const LOAD_CALL = /(?:\b(?:fetch|import|importScripts|sendBeacon|Worker|EventSource)\s*\(\s*|\.src\s*=\s*)["'`](?:https?:)?$/;
+  // A static import or re-export is a load too: import x from "url", import "url", export { x } from "url".
+  const STATIC_IMPORT = /(?:\bimport\s*(?:[\w$*{},\s]+?\s*from\s*)?|\bexport\s*[\w$*{},\s]+?\s*from\s*)["'`](?:https?:)?$/;
+  // In a hand-written inline <script>, a blocked URL is a load (loader snippets pass it as an argument),
+  // unless it sits in a link context: window.open(), an href or location, or a share URL.
+  const LINK_CONTEXT = /(?:\bopen\s*\(\s*|\bhref\s*[=:]\s*|\blocation(?:\.href)?\s*=\s*|share[\w.]*\s*[=:(]\s*)["'`](?:https?:)?$/i;
   const attrUrls = (tag) => [...tag.matchAll(/\b(src|srcset|href|poster|data)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)].map((m) => m[3] ?? m[4] ?? m[5] ?? '');
   const cssLoads = (css) => [...css.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)|url\(\s*["']?([^"')\s]+)/gi)].map((m) => m[1] ?? m[2]).join(' ');
   // Returns { sure: text of URLs the page loads, maybe: script text whose URLs may be links }.
@@ -63,13 +68,16 @@ if (policies.includes('market-cn')) {
     let sure = [...html.matchAll(LOADING)].flatMap((m) => attrUrls(m[0])).join(' ');
     sure += ' ' + [...html.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0]).filter((t) => LINK_LOADS.test(t)).flatMap(attrUrls).join(' ');
     sure += ' ' + cssLoads([...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>|\bstyle\s*=\s*"([^"]*)"/gi)].map((m) => m[1] ?? m[2]).join('\n'));
-    const inline = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter((m) => !/application\/(ld\+)?json/i.test(m[1])).map((m) => scriptLoads(m[2]));
+    const inline = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter((m) => !/application\/(ld\+)?json/i.test(m[1])).map((m) => scriptLoads(m[2], true));
     return { sure: [sure, ...inline.map((x) => x.sure)].join(' '), maybe: inline.map((x) => x.maybe).join(' ') };
   }
-  function scriptLoads(js) {
+  function scriptLoads(js, inline = false) {
     const sure = [], maybe = [];
-    for (const m of js.matchAll(new RegExp(hostPattern([...CHINA_BLOCKED, ...CHINA_UNRELIABLE]), 'gi')))
-      (LOAD_CALL.test(js.slice(Math.max(0, m.index - 40), m.index)) ? sure : maybe).push(m[0]);
+    for (const m of js.matchAll(new RegExp(hostPattern([...CHINA_BLOCKED, ...CHINA_UNRELIABLE]), 'gi'))) {
+      const near = js.slice(Math.max(0, m.index - 40), m.index), wide = js.slice(Math.max(0, m.index - 300), m.index);
+      const load = LOAD_CALL.test(near) || STATIC_IMPORT.test(wide) || (inline && !LINK_CONTEXT.test(near));
+      (load ? sure : maybe).push(m[0]);
+    }
     return { sure: sure.join(' '), maybe: maybe.join(' ') };
   }
   const hits = new Map(), slow = new Map(), unsure = new Map();

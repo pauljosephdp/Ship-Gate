@@ -28,7 +28,9 @@ export const POLICIES = {
 export const STANDARDS_DELEGATED = {
   'web-baseline': {
     check: 'conform:check',
-    run: /\bnode\s+(?:\.\/)?scripts\/standard\/conform\.mjs\b[^&|;]*\s--final\b/,
+    // The whole script is the conform call: nothing chained after it (|| true, ; exit 0) and no --report,
+    // which makes conform exit 0, so a failing rule fails the check.
+    run: /^\s*node\s+(?:\.\/)?scripts\/standard\/conform\.mjs(?=[^&|;]*\s--final\b)(?![^&|;]*\s--report\b)[^&|;]*$/,
     runText: 'node scripts/standard/conform.mjs --ci --final',
     guards: ['node-pin'],
   },

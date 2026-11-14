@@ -15,8 +15,8 @@
    consent-sensitive categories of `trackerVendors` (through `run.json`).
 5. New rule `ai-training-optout-scope` (GEO, warn): a line naming `__usage_ai-training` inside a group that
    applies to `User-agent: *` has no effect; the opt-out needs its own `User-agent: __usage_ai-training` group.
-6. Checks moved in (build): `sitemap-lastmod-bulk` (SEO, warn: at least 5 URLs share one `lastmod`, or a
-   `lastmod` carries the build's own time), `img-dimensions` (perf, error: a local `<img>` without `width` and
+6. Checks moved in (build): `sitemap-lastmod-bulk` (SEO, warn: 10 or more URLs carry a `lastmod` and 90%
+   of those share one value; exempt when that value is the first commit's date or `src/data/lastmod.json` exists), `img-dimensions` (perf, error: a local `<img>` without `width` and
    `height`), `faq-markup-missing` (AEO, warn: a visible FAQ pattern with no FAQPage JSON-LD),
    `orphan-pages` (SEO, warn: an indexable page no other page links to) and `click-depth` (SEO, warn: more
    than 3 clicks from `/`, or unreachable from it), from the built link graph.

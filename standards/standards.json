@@ -75,10 +75,11 @@
     "Service": ["name"]
   },
   "jsonLdScope": {
-    "_doc": "Where a jsonLdRequired row applies. A row listed here applies only to nodes at these positions; any other row applies at any depth. 'top' is a node at the top of a JSON-LD block or its @graph; a property name is the value of that property on a parent node, and 'of' narrows the parent's @type. A nested Organization in alumniOf, worksFor or memberOf is a reference, not the site's entity, so it needs no url; an Offer in makesOffer describes a service, not a priced item. An Offer may carry its price in priceSpecification, which then needs price and priceCurrency. Added 2026-11-14 after a review found false fails at depth.",
+    "_doc": "Where a jsonLdRequired row applies. A row listed here applies only to nodes at these positions; any other row applies at any depth. 'top' is a node at the top of a JSON-LD block or its @graph; a property name is the value of that property on a parent node, and 'of' narrows the parent's @type. A nested Organization in alumniOf, worksFor or memberOf is a reference, not the site's entity, so it needs no url; an Offer in makesOffer describes a service, not a priced item. An Offer may carry its price in priceSpecification, which then needs price and priceCurrency. A Question is checked only as an FAQPage's mainEntity: a QAPage's Question may carry suggestedAnswer instead of acceptedAnswer. Added 2026-11-14 after a review found false fails at depth.",
     "Organization": {"at": ["top", "publisher"]},
     "LocalBusiness": {"at": ["top", "publisher"]},
-    "Offer": {"at": ["offers"], "of": ["Product", "Event"]}
+    "Offer": {"at": ["offers"], "of": ["Product", "Event"]},
+    "Question": {"at": ["mainEntity"], "of": ["FAQPage"]}
   },
   "retiredRichResults": [
     {"type": "FAQPage", "retired": "2026-05-07", "source": "https://developers.google.com/search/updates"},

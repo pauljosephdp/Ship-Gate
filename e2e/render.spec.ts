@@ -61,7 +61,11 @@ const mainWords = (page: Page) => page.evaluate(() => {
   const root = document.querySelector('main, [role="main"]') ?? document.body;
   const CHROME = 'nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"], script, style, noscript, template';
   const controlled = new Set([...document.querySelectorAll('[aria-controls]')].flatMap((c) => (c.getAttribute('aria-controls') ?? '').split(/\s+/)));
-  const disclosed = (el: Element) => !!el.closest('details, [class*="accordion"], [class*="collaps"], [class*="toggle"], [class*="expand"]')
+  // A panel a control folds: <details>, or an element whose own class names it as an accordion or collapse
+  // panel (whole class tokens, so border-collapse or nav-toggle-ready on a wrapper does not count).
+  const PANEL = /^(accordion|accordion-(?:body|content|panel|item)|collapse|collapsible|collapsed|expandable)$/;
+  const disclosed = (el: Element) => !!el.closest('details')
+    || (() => { for (let a: Element | null = el; a; a = a.parentElement) if ([...a.classList].some((c) => PANEL.test(c))) return true; return false; })()
     || [...controlled].some((id) => id && el.closest(`#${CSS.escape(id)}`));
   const words: string[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -131,7 +135,8 @@ for (const path of run.policies.includes('first-party-only') ? run.sitemapPages 
     const foreign = new Set<string>();
     page.on('request', (r) => {
       const u = new URL(r.url());
-      if (u.protocol === 'data:' || u.protocol === 'blob:' || u.origin === first || run.allowedOrigins.includes(u.origin)) return;
+      const prod = run.siteUrl ? new URL(run.siteUrl).origin : '';
+      if (u.protocol === 'data:' || u.protocol === 'blob:' || u.origin === first || u.origin === prod || run.allowedOrigins.includes(u.origin)) return;
       foreign.add(u.origin);
     });
     await sameOriginOnly(page);

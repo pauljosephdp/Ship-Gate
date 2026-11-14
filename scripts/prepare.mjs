@@ -453,8 +453,9 @@ for (const phase of PHASES) {
 }
 
 if (delegated) {
-  const wired = PHASES.some((ph) => (checks[ph] ?? []).includes(delegated.check));
-  if (!wired) err(`standard "${standard}" hands ${delegated.guards.join(', ')} to its ${delegated.check} script, but no checks phase lists "${delegated.check}". Add it to checks.postBuild, or remove "standard".`);
+  // preBuild or postBuild only: the scans stage and the Workers Builds fast stage run no browser phase.
+  const wired = ['preBuild', 'postBuild'].some((ph) => (checks[ph] ?? []).includes(delegated.check));
+  if (!wired) err(`standard "${standard}" hands ${delegated.guards.join(', ')} to its ${delegated.check} script, but neither checks.preBuild nor checks.postBuild lists "${delegated.check}". Add it to checks.postBuild, or remove "standard".`);
   else if (!delegated.run.test(scripts[delegated.check] ?? ''))
     err(`standard "${standard}": the "${delegated.check}" script must run "${delegated.runText}" (every rule enforced) to take over ${delegated.guards.join(', ')}; it runs "${scripts[delegated.check] ?? ''}". Change the script, or remove "standard".`);
   else console.log(`standard "${standard}": ${delegated.guards.join(', ')} checked by ${delegated.check}, not by Ship Gate's guards.`);

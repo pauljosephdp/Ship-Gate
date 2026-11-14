@@ -11,6 +11,7 @@
 
 import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { htmlFiles, pageKind, attr, metaContent, assetsIgnore, parseRedirects, parseHeaders, compilePattern } from './site-files.mjs';
 import {
   RULES, SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, trainingPolicy, CONTENT_SIGNALS, RETIRED_TOKENS, parseContentSignal,
@@ -294,10 +295,18 @@ if (sitemapPaths.length && !findings.sitemap.length) {
   for (const [p, l] of listed) if (l && l.slice(0, 10) > tomorrow) add('sitemap-lastmod', p, `lastmod ${l} is in the future.`);
   // A bulk stamp (every URL one lastmod) or the build's own time tells crawlers every page changed
   // on every build, so they learn to ignore the signal. lastmod should track each page's real edits.
-  const { minUrls, buildTimeWindowSeconds } = BUILD_CHECKS.sitemapBulkLastmod;
+  // Missing lastmods are ignored (sitemap-lastmod reports them). A shared date that is the repository's
+  // first commit is a young site, not a stamp; a site that derives lastmod from git history
+  // (web-baseline's src/data/lastmod.json) has honest dates however many match.
+  const { minUrls, shareRatio, buildTimeWindowSeconds } = BUILD_CHECKS.sitemapBulkLastmod;
   const stamped = [...listed.values()].filter(Boolean);
-  if (stamped.length >= minUrls && stamped.length === listed.size && new Set(stamped).size === 1)
-    add('sitemap-lastmod-bulk', 'sitemap', `all ${stamped.length} URLs share lastmod ${stamped[0]}: a bulk stamp, not a record of what changed. Derive each page's lastmod from its content (git history or a content date), or leave it out.`);
+  const tally = new Map();
+  for (const l of stamped) tally.set(l, (tally.get(l) ?? 0) + 1);
+  const [top, topCount] = [...tally].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
+  const git = (...a) => { try { return execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } };
+  const firstCommit = () => (git('rev-parse', '--is-shallow-repository') === 'false' ? git('log', '--reverse', '--format=%cs').split('\n')[0] : '');
+  if (stamped.length >= minUrls && topCount / stamped.length >= shareRatio && !existsSync('src/data/lastmod.json') && top.slice(0, 10) !== firstCommit())
+    add('sitemap-lastmod-bulk', 'sitemap', `${topCount} of the ${stamped.length} URLs with a lastmod share ${top}: a bulk stamp, not a record of what changed. Derive each page's lastmod from its content (git history or a content date), or leave it out.`);
   else {
     const atBuild = [...listed].filter(([, l]) => l && l.includes('T') && Math.abs(Date.parse(l) - builtAt) <= buildTimeWindowSeconds * 1000).map(([p]) => p);
     if (atBuild.length) add('sitemap-lastmod-bulk', 'sitemap', `${atBuild.length} URL(s) carry the build's own time as lastmod (${atBuild.slice(0, 3).join(', ')}${atBuild.length > 3 ? ', …' : ''}). A build is not an edit: use the page's own date.`);

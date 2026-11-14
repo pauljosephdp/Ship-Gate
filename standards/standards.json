@@ -129,7 +129,7 @@
   },
   "buildChecks": {
     "_doc": "Thresholds for the build-provable checks Ship-Gate took over from website-audit on 2026-11-14 (one owner per check). Each names the script its value came from; website-audit reads Ship-Gate's results for these instead of re-testing them.",
-    "sitemapBulkLastmod": {"minUrls": 5, "buildTimeWindowSeconds": 120, "from": "website-audit scripts/verify_site.py (bulk_stamped: 5 or more URLs, one distinct lastmod); the build-time window is Ship-Gate's"},
+    "sitemapBulkLastmod": {"minUrls": 10, "shareRatio": 0.9, "buildTimeWindowSeconds": 120, "from": "website-audit scripts/verify_site.py (bulk_stamped: one lastmod across the sampled URLs that carry one); Ship-Gate reads the whole sitemap, so 10 or more URLs with a lastmod, 90% of them on one value. Not flagged when that value is the repository's first commit date or the site derives lastmod from git (src/data/lastmod.json, web-baseline's gen-lastmod). The build-time window is Ship-Gate's"},
     "renderedContent": {"minWordRatio": 0.7, "minLinkRatio": 0.5, "from": "website-audit scripts/capture_site.py (no_js_baseline, PASS at word_ratio >= 0.7 and link_ratio >= 0.5)"},
     "clickDepth": {"max": 3, "from": "website-audit scripts/build_link_graph.py (U-17, deeper than 3 clicks)"},
     "faqPattern": {"heading": "\\b(faqs?|frequently asked questions?|common questions?|questions? (?:and|&) answers?)\\b", "questionStart": "^\\s*(who|what|why|how|when|where|which|can|could|should|would|do|does|did|is|are|was|were|will|has|have|am)\\b", "minQuestionHeadings": 3, "from": "website-audit scripts/check_onpage_aeo.py (U-03: an FAQ heading, or 3 or more h2-h4 question headings)"},

@@ -222,8 +222,8 @@ for (const p of pages) {
     if (!/schema\.org/.test(JSON.stringify(context ?? ''))) add('structured-data', at, `JSON-LD node ${typesOf(node).join('/') || '(untyped)'} has no schema.org @context.`);
     if (!typesOf(node).length) add('structured-data', at, 'JSON-LD node without @type.');
   }
-  for (const node of ld.all) {
-    const m = missingProps(node);
+  for (const { node, ...place } of ld.placed) {
+    const m = missingProps(node, place);
     if (m.length) add('structured-data', at, `${typesOf(node).join('/')} is missing ${m.join(', ')}.`);
   }
   const text = normalise(visibleText(html));

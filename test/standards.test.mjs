@@ -78,3 +78,11 @@ test('no script keeps its own copy of a list the rule file owns', () => {
     assert.doesNotMatch(src, /TRACKER_HOSTS\s*=/, `${f} lists trackers itself`);
   }
 });
+
+test('JSON-LD scope: every scoped row exists, and names positions', () => {
+  for (const [row, scope] of Object.entries(STANDARDS.jsonLdScope).filter(([k]) => k !== '_doc')) {
+    assert.ok(row in STANDARDS.jsonLdRequired, `jsonLdScope.${row} has no jsonLdRequired row`);
+    assert.ok(Array.isArray(scope.at) && scope.at.length, `jsonLdScope.${row}.at`);
+    if (scope.of) assert.ok(Array.isArray(scope.of), `jsonLdScope.${row}.of`);
+  }
+});

@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { escapeRe, attr, metaTags } from './site-files.mjs';
 import {
   SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, RETIRED_TOKENS, TRAINING_OPT_OUT,
-  JSON_LD_REQUIRED, LLMS_TXT, BUILD_CHECKS,
+  JSON_LD_REQUIRED, JSON_LD_SCOPE, LLMS_TXT, BUILD_CHECKS,
 } from './standards.mjs';
 export { SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, RETIRED_TOKENS, LLMS_TXT, BUILD_CHECKS };
 
@@ -283,9 +283,10 @@ export const W3C_DATE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]
 // ── JSON-LD ──
 export const typesOf = (node) => [].concat(node?.['@type'] ?? []).filter((t) => typeof t === 'string')
   .map((t) => t.replace(/^.*[/:#]/, ''));
-// Every JSON-LD block on the page. Returns { tops: [{ node, context }], all: [typed nodes], problems }.
+// Every JSON-LD block on the page. Returns { tops: [{ node, context }], all: [typed nodes],
+// placed: [{ node, top, key, parentTypes }] (each typed node and where it sits), problems }.
 export function jsonLd(html) {
-  const tops = [], all = [], problems = [];
+  const tops = [], all = [], placed = [], problems = [];
   const blocks = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
     .filter((m) => /^application\/ld\+json$/i.test((attr(`<x ${m[1]}>`, 'type') ?? '').trim()));
   blocks.forEach((m, i) => {
@@ -297,14 +298,18 @@ export function jsonLd(html) {
       for (const node of Array.isArray(top['@graph']) ? top['@graph'] : [top]) tops.push({ node, context: node?.['@context'] ?? context });
     }
   });
-  const walk = (v) => {
-    if (Array.isArray(v)) return v.forEach(walk);
+  // A node's place: top of its block (or @graph), or the value of `key` on a parent of parentTypes.
+  // An untyped wrapper passes its own place on, so an array or a plain object adds no level.
+  const walk = (v, place) => {
+    if (Array.isArray(v)) return v.forEach((x) => walk(x, place));
     if (!v || typeof v !== 'object') return;
-    if (typesOf(v).length) all.push(v);
-    for (const [k, x] of Object.entries(v)) if (k !== '@context') walk(x);
+    const types = typesOf(v);
+    if (types.length) { all.push(v); placed.push({ node: v, ...place }); }
+    for (const [k, x] of Object.entries(v)) if (k !== '@context')
+      walk(x, types.length ? { top: false, key: k, parentTypes: types } : place);
   };
-  tops.forEach((t) => walk(t.node));
-  return { tops, all, problems };
+  tops.forEach((t) => walk(t.node, { top: true, key: null, parentTypes: [] }));
+  return { tops, all, placed, problems };
 }
 
 const has = (v) => v !== undefined && v !== null && !(typeof v === 'string' && !v.trim()) && !(Array.isArray(v) && v.length === 0);
@@ -321,17 +326,33 @@ export const isArticle = (t) => ARTICLE.includes(t);
 // standards/standards.json (Google's required properties where it defines them, otherwise the ones
 // that identify the thing). A subtype answers to its family's row: Article types to Article,
 // LocalBusiness types (Hotel, Dentist…) to LocalBusiness, other Organization types to Organization.
-// "a|b" means at least one of them.
+// "a|b" means at least one of them. jsonLdScope limits a row to some positions (inScope): a nested
+// Organization in worksFor or alumniOf is a reference, and an Offer outside a Product's or Event's
+// offers is not a priced item.
 const rowFor = (t) => (JSON_LD_REQUIRED[t] ? t : isArticle(t) ? 'Article' : LOCAL_BUSINESS.includes(t) ? 'LocalBusiness'
   : t !== 'Person' && isEntity(t) ? 'Organization' : null);
 const anyOf = (alts) => (alts.length > 1 ? `${alts.slice(0, -1).join(', ')} or ${alts.at(-1)}` : alts[0]);
-export function missingProps(node) {
+const inScope = (row, place) => {
+  const scope = JSON_LD_SCOPE[row];
+  if (!scope || !place) return true;
+  return scope.at.some((at) => (at === 'top' ? place.top : !place.top && place.key === at))
+    && (!scope.of || scope.of.some((t) => place.parentTypes.includes(t)));
+};
+export function missingProps(node, place) {
   const types = typesOf(node), miss = new Set();
-  for (const row of new Set(types.map(rowFor).filter(Boolean)))
+  for (const row of new Set(types.map(rowFor).filter(Boolean))) {
+    if (!inScope(row, place)) continue;
+    // An Offer may state its price in priceSpecification, which then needs both parts.
+    if (row === 'Offer' && has(node.priceSpecification)) {
+      const spec = [].concat(node.priceSpecification)[0];
+      for (const k of ['price', 'priceCurrency']) if (!has(node[k]) && !has(spec?.[k])) miss.add(`priceSpecification.${k}`);
+      continue;
+    }
     for (const req of JSON_LD_REQUIRED[row]) {
       const alts = req.split('|');
       if (!alts.some((k) => has(node[k]))) miss.add(anyOf(alts));
     }
+  }
   if (types.includes('FAQPage')) {
     const qs = [].concat(node.mainEntity ?? []);
     if (qs.length === 0) miss.add('mainEntity');

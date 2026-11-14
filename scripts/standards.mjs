@@ -25,6 +25,7 @@ export const AI_AGENT_TOKENS = agents.map((a) => a.token).filter((t) => !NOT_AI_
 export const RETIRED_TOKENS = STANDARDS.retiredTokens;
 export const TRAINING_OPT_OUT = STANDARDS.trainingOptOut;
 export const JSON_LD_REQUIRED = STANDARDS.jsonLdRequired;
+export const JSON_LD_SCOPE = STANDARDS.jsonLdScope;
 export const LLMS_TXT = STANDARDS.llmsTxt;
 export const BUILD_CHECKS = STANDARDS.buildChecks;
 export const CHINA_BLOCKED = STANDARDS.chinaBlockedHosts.hosts;

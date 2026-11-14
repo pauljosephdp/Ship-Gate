@@ -133,6 +133,15 @@ expect_guard "turnstile: policy off, no warning" "nowarn:secrets.required"   ":"
 expect_guard "Tailwind 4 with legacy config"     "warn:tailwind.config.js sits beside Tailwind 4" "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"^4.3.3\"/' package.json && echo 'export default {}' > tailwind.config.js"
 expect_guard "Tailwind 4 config via @config"     "nowarn:tailwind.config"    "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"^4.3.3\"/' package.json && echo 'export default {}' > tailwind.config.js && mkdir -p src/styles && echo '@config \"../../tailwind.config.js\";' > src/styles/global.css"
 expect_guard "Tailwind 3 config, quiet"          "nowarn:tailwind.config"    "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"3.4.17\"/' package.json && echo 'export default {}' > tailwind.config.js"
+DELEGATE_ALL="tailwind-config env-file node-pin posthog-secrets posthog-layout"
+SHIP_GATE_DELEGATED="$DELEGATE_ALL" \
+expect_guard "delegated: env file is conform:check's" "has:Guard env-file: checked by the site's standard" "echo 'A=1' > .env"
+SHIP_GATE_DELEGATED="$DELEGATE_ALL" \
+expect_guard "delegated: Node pin is conform:check's" "has:Guard node-pin: checked by the site's standard" "rm .nvmrc"
+SHIP_GATE_DELEGATED="$DELEGATE_ALL" \
+expect_guard "delegated: Tailwind config is conform:check's" "nowarn:tailwind.config" "sed -i 's/\"posthog-node\": \"^5.0.0\"/\"posthog-node\": \"^5.0.0\", \"tailwindcss\": \"^4.3.3\"/' package.json && echo 'export default {}' > tailwind.config.js"
+SHIP_GATE_DELEGATED="$DELEGATE_ALL" \
+expect_guard "delegated: push to main still fails"  "pushes to main"           "wf auto.yml '      - run: git push origin HEAD:main'"
 expect_guard "Clarity loaded directly"            "Third-party tag"           "echo '<script src=\"https://www.clarity.ms/tag/abc\"></script>' > src/pages/c.astro"
 expect_guard "Clarity hosts in CSP allowed"      pass                        "mkdir -p public && printf '/*\\n  Content-Security-Policy: script-src '\\''self'\\'' https://www.clarity.ms https://scripts.clarity.ms\\n' > public/_headers"
 expect_guard "tag host in _headers comment"      pass                        "mkdir -p public && printf '/*\\n# google-analytics.com was removed when GA4 moved to Zaraz\\n  X-Frame-Options: DENY\\n' > public/_headers"
@@ -176,8 +185,8 @@ expect_guard "content file: posthog.init"         "Client-side PostHog snippet" 
 expect_guard "posthog.com in a component fails"   "outside server paths"      "mkdir -p src/components && echo '<a href=\"https://posthog.com/privacy\">x</a>' > src/components/Footer.astro"
 
 # posthog-hybrid: the baseline's server wrapper plus a browser component that calls posthog.init.
-HYB="sed -i 's/\"dependencies\": {/\"dependencies\": { \"posthog-js\": \"1\",/' package.json && mkdir -p src/components && printf '<script>\nimport posthog from \"posthog-js\";\nposthog.init(import.meta.env.PUBLIC_POSTHOG_KEY, {});\nposthog.register({ environment: __DEPLOY_ENV__ });\n</script>\n' > src/components/PostHog.astro"
-HYB_ONLY="mkdir -p src/components && printf '<script is:inline>posthog.init(key, o); posthog.register({ environment });</script>\n<!-- __DEPLOY_ENV__ -->\n' > src/components/PostHog.astro"
+HYB="sed -i 's/\"dependencies\": {/\"dependencies\": { \"posthog-js\": \"1\",/' package.json && mkdir -p src/components && printf '<script>\nimport posthog from \"posthog-js\";\nposthog.init(import.meta.env.PUBLIC_POSTHOG_KEY, {});\nposthog.register({ environment: __DEPLOY_ENV__ });\n</script>\n' > src/components/PostHog.astro && echo '{ \"name\": \"site\", \"secrets\": { \"required\": [\"POSTHOG_API_KEY\"] } }' > wrangler.jsonc"
+HYB_ONLY="mkdir -p src/components && printf '<script is:inline>posthog.init(key, o); posthog.register({ environment });</script>\n<!-- __DEPLOY_ENV__ -->\n' > src/components/PostHog.astro && echo '{ \"name\": \"site\", \"secrets\": { \"required\": [\"POSTHOG_API_KEY\"] } }' > wrangler.jsonc"
 export SHIP_GATE_POSTHOG_EMBED=npm
 POLICIES=posthog-hybrid \
 expect_guard "hybrid: browser + server PostHog passes" pass                   "$HYB"
@@ -204,23 +213,38 @@ expect_guard "hybrid: personal key never exempt"  "Hard-coded PostHog key"    "$
 SECRETS_JSONC="echo '{ \"name\": \"site\", // the Worker
   \"main\": \"./src/worker.ts\", \"secrets\": { \"required\": [\"POSTHOG_API_KEY\", \"TURNSTILE_SECRET_KEY\",], }, }' > wrangler.jsonc"
 SECRETS_TOML="rm wrangler.jsonc && printf 'name = \"site\"\n\n[secrets]\nrequired = [ \"POSTHOG_API_KEY\" ]\n\n[vars]\nX = \"1\"\n' > wrangler.toml"
+NO_SECRETS="echo '{ \"name\": \"site\" }' > wrangler.jsonc"
 POLICIES=posthog-hybrid \
-expect_guard "hybrid: no secrets.required warns"  "warn:secrets.required lacks POSTHOG_API_KEY" "$HYB"
+expect_guard "hybrid: no secrets.required fails (v4)" "secrets.required lacks POSTHOG_API_KEY" "$HYB && $NO_SECRETS"
 POLICIES=posthog-hybrid \
-expect_guard "hybrid: no wrangler config warns"   "warn:no wrangler config"   "$HYB && rm wrangler.jsonc"
+expect_guard "hybrid: no wrangler config fails"   "no wrangler config"        "$HYB && rm wrangler.jsonc"
+EXEMPT=posthog-secrets POLICIES=posthog-hybrid \
+expect_guard "hybrid: posthog-secrets exemptible"  "warn:[exempt: posthog-secrets]" "$HYB && $NO_SECRETS"
+SHIP_GATE_DELEGATED="tailwind-config env-file node-pin posthog-secrets posthog-layout" POLICIES=posthog-hybrid \
+expect_guard "hybrid: secrets and layout delegated" "has:checked by the site's standard" "$HYB && rm src/components/PostHog.astro && $NO_SECRETS"
 POLICIES="posthog-hybrid turnstile-forms" \
 expect_guard "hybrid: secrets in jsonc, quiet"    "nowarn:secrets.required"   "$HYB && $SECRETS_JSONC"
 POLICIES=posthog-hybrid \
 expect_guard "hybrid: secrets in toml, quiet"     "nowarn:secrets.required"   "$HYB && $SECRETS_TOML"
 POLICIES="posthog-hybrid turnstile-forms" \
-expect_guard "hybrid: turnstile secret missing"   "warn:lacks TURNSTILE_SECRET_KEY" "$HYB && $SECRETS_TOML"
+expect_guard "hybrid: turnstile secret missing"   "lacks TURNSTILE_SECRET_KEY" "$HYB && $SECRETS_TOML"
 SHIP_GATE_TURNSTILE_SECRET=TURNSTILE_SECRET POLICIES="posthog-hybrid turnstile-forms" \
-expect_guard "hybrid: turnstileEnv secret name"   "warn:lacks TURNSTILE_SECRET" "$HYB && $SECRETS_JSONC"
+expect_guard "hybrid: turnstileEnv secret name"   "lacks TURNSTILE_SECRET" "$HYB && $SECRETS_JSONC"
 unset SHIP_GATE_POSTHOG_EMBED
 
 echo "Config and contract (prepare.mjs)"
 expect_prepare "conforming site passes"           pass ":"
 expect_prepare "no lint script needed"            pass ":"
+CONFORM="sed -i 's#\"test\": \"vitest run\",#\"test\": \"vitest run\", \"conform:check\": \"node scripts/conform.mjs\",#' package.json"
+expect_prepare "standard web-baseline, conform:check wired" "has:checked by conform:check" "$CONFORM && cfg '\"standard\":\"web-baseline\",\"checks\":{\"postBuild\":[\"conform:check\"]}'"
+expect_prepare "standard web-baseline without conform:check" "no checks phase lists \"conform:check\"" "$CONFORM && cfg '\"standard\":\"web-baseline\"'"
+expect_prepare "unknown standard"                 "standard must be one of"   "cfg '\"standard\":\"house-style\"'"
+expect_prepare "first-party-only with allowedOrigins" pass                   "cfg '\"policies\":[\"first-party-only\"],\"allowedOrigins\":[\"https://challenges.cloudflare.com\"]'"
+expect_prepare "allowedOrigins must be origins"   "allowedOrigins must be a list of https origins" "cfg '\"policies\":[\"first-party-only\"],\"allowedOrigins\":[\"https://cdn.example.com/lib.js\"]'"
+expect_prepare "first-party-only + Turnstile needs its origin" "needs \"https://challenges.cloudflare.com\" in allowedOrigins" "cfg '\"policies\":[\"first-party-only\",\"turnstile-forms\"]'"
+expect_prepare "first-party-only + PostHog EU host" "needs posthog.apiHost to be a same-origin proxy" "cfg '\"policies\":[\"first-party-only\",\"posthog-hybrid\"]'"
+expect_prepare "first-party-only + PostHog proxy"  pass                        "cfg '\"policies\":[\"first-party-only\",\"posthog-hybrid\"],\"posthog\":{\"apiHost\":\"/ph\"}'"
+expect_prepare "retired rule override warns"      "warn:no longer runs markdown-negotiation" "cfg '\"discoveryOverrides\":[{\"rule\":\"markdown-negotiation\",\"level\":\"error\"}]'"
 expect_prepare "missing check script"             "missing the \"check\" script" "sed -i 's/\"check\": \"astro check\", //' package.json"
 expect_prepare "preview server needs preview"     "missing the \"preview\" script" "sed -i 's/\"preview\": \"astro preview\",//' package.json && cfg '\"server\":\"preview\"'"
 expect_prepare "static server needs no preview"   pass                        "sed -i 's/\"preview\": \"astro preview\",//' package.json"
@@ -474,6 +498,8 @@ built_case "market-cn: Google Fonts stylesheet"   "blocked in mainland China" $M
 built_case "market-cn: YouTube image in CSS"      "blocked in mainland China" $M "mkdir -p dist/client/_astro && echo '.hero{background:url(//i.ytimg.com/vi/x/0.jpg)}' > dist/client/_astro/a.css" "$CN"
 built_case "market-cn: links and sameAs load nothing" pass                $M "page /x.html 'Page x of the site' 'A page with social links for the self-test run.' '<a href=\"https://www.youtube.com/@example\">YouTube</a><script type=\"application/ld+json\">{\"sameAs\":[\"https://x.com/example\"]}</script>'" "$CN"
 built_case "market-cn: jsdelivr warns"            "warn:unreliable from mainland China" $M "page /x.html 'Page x of the site' 'A page with a public CDN script for the self-test.' '<script src=\"https://cdn.jsdelivr.net/npm/a@1/a.js\"></script>'" "$CN"
+built_case "market-cn: LinkedIn tag (website-audit's hosts)" "licdn.com, blocked in mainland China" $M "page /x.html 'Page x of the site' 'A page with a LinkedIn tag for the self-test run.' '<script src=\"https://snap.licdn.com/li.lms-analytics/insight.min.js\"></script>'" "$CN"
+built_case "market-cn: unpkg subdomain warns"     "warn:unreliable from mainland China" $M "page /x.html 'Page x of the site' 'A page with a public CDN script for the self-test.' '<script src=\"https://unpkg.com/a@1/a.js\"></script>'" "$CN"
 built_case "market-cn: exemption warns"           "warn:[exempt: blocked-in-cn]" $M "page /x.html 'Page x of the site' 'A page with a Google font for the self-test run.' '$GFONT'" "\"policies\":[\"market-cn\"],\"guardExemptions\":[{\"guard\":\"blocked-in-cn\",\"reason\":\"Fonts self-hosted next sprint\",\"restoreBy\":\"$FUTURE\"}]"
 built_case "market-cn off: Google Fonts allowed"  pass                    $M "page /x.html 'Page x of the site' 'A page with a Google font for the self-test run.' '$GFONT'"
 built_case "rtl-logical-css: physical CSS warns"  "warn:won't mirror under dir" $M "mkdir -p dist/client/_astro && echo '.a{margin-left:1rem;text-align:left}.b{left:0}' > dist/client/_astro/a.css" '"policies":["rtl-logical-css"]'
@@ -564,7 +590,7 @@ discovered() {
   dpage /index.html "Home"; dpage /about/index.html "About"
   inject dist/client/index.html '</head>' "$ORG"
   echo png > dist/client/og.png
-  printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt
+  printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nUser-agent: MistralAI-Training\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt
   printf '/\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n' > dist/client/_headers
   sitemap / /about/
   printf '# Example\n\n> The example site.\n\n- [About](/about/)\n' > dist/client/llms.txt
@@ -587,12 +613,12 @@ disco_case "robots.txt missing"                  "robots.txt: not in the build" 
 disco_case "robots.txt without Sitemap"          "no \"Sitemap:\" line"           "printf 'User-agent: *\nAllow: /\n' > dist/client/robots.txt"
 disco_case "robots.txt Sitemap off-site"         "is not an absolute URL on"      "printf 'User-agent: *\nAllow: /\nSitemap: https://cdn.example.net/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "robots.txt blocks everything"        "blocks Googlebot"               "printf 'User-agent: *\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "robots.txt blocks one page for Bing" "blocks Bingbot"                 "printf 'User-agent: bingbot\nDisallow: /about/\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "longest match: Allow beats Disallow" pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nDisallow: /\nAllow: /$\nAllow: /about/\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "robots.txt blocks one page for Bing" "blocks bingbot"                 "printf 'User-agent: bingbot\nDisallow: /about/\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "longest match: Allow beats Disallow" pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nDisallow: /\nAllow: /$\nAllow: /about/\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nUser-agent: MistralAI-Training\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "AI search crawler blocked"           "blocks OAI-SearchBot"           "printf 'User-agent: OAI-SearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "AI user-fetch crawler blocked"       "blocks Claude-User"             "printf 'User-agent: Claude-User\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "only training crawlers blocked"      pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
-disco_case "one training token unblocked"        "lets Bytespider train"          "sed -i '/^User-agent: Bytespider\$/d' dist/client/robots.txt"
+disco_case "AI user-fetch crawler blocked"       "blocks Claude-User"             "printf 'User-agent: Claude-User\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nUser-agent: MistralAI-Training\nDisallow: /\n\nUser-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "only training crawlers blocked"      pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nUser-agent: MistralAI-Training\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+disco_case "one training token unblocked"        "lets MistralAI-Training train"  "sed -i '/^User-agent: MistralAI-Training\$/d' dist/client/robots.txt"
 disco_case "no training block at all"            "AI training is off by default"  "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: OAI-SearchBot\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "aiTraining allow, training allowed"  pass                             "printf 'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\n\nUser-agent: GPTBot\nAllow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt" '"discovery":{"aiTraining":"allow"}'
 disco_case "aiTraining allow, GPTBot blocked"    "but discovery.aiTraining is \"allow\"" ":" '"discovery":{"aiTraining":"allow"}'
@@ -663,18 +689,39 @@ disco_case "LocalBusiness needs an address"      "missing address"              
 disco_case "site entity url off-site"            "url must be on"                 "sed -i 's#\"url\":\"https://example.com/\"#\"url\":\"https://example.org/\"#' dist/client/index.html"
 disco_case "site entity without sameAs (warn)"   "warn:no sameAs"                 "sed -i 's#,\"sameAs\":\[[^]]*\]##' dist/client/index.html"
 disco_case "nested page without breadcrumbs (warn)" "warn:BreadcrumbList"         "dpage /guides/setup/index.html Setup && sitemap / /about/ /guides/setup/"
-disco_case "thin page (warn)"                    "warn:words of text"             "sed -i \"s#\$WORDS#Short.#\" dist/client/about/index.html"
+disco_case "thin page: the no-JS ratio is the browser suite's" pass               "sed -i \"s#\$WORDS#Short.#\" dist/client/about/index.html"
+FIVE="dpage /a/index.html A && dpage /b/index.html B && dpage /c/index.html C && inject dist/client/index.html '</body>' '<a href=\"/a/\">a</a><a href=\"/b/\">b</a><a href=\"/c/\">c</a>'"
+disco_case "sitemap lastmod bulk-stamped (warn)"  "warn:all 5 URLs share lastmod 2026-09-01" "$FIVE && sitemap / /about/ /a/ /b/ /c/"
+disco_case "sitemap lastmods differ"              pass                             "$FIVE && sitemap / /about/ /a/ /b/ /c/ && sed -i '0,/2026-09-01/s//2026-08-14/' dist/client/sitemap.xml"
+disco_case "sitemap lastmod is the build time (warn)" "warn:carry the build's own time" "sed -i \"s#<lastmod>2026-09-01</lastmod>#<lastmod>\$(date -u +%FT%TZ)</lastmod>#\" dist/client/sitemap.xml"
+disco_case "local img without width and height"   "<img> without width and height (/og.png)" "inject dist/client/about/index.html '</body>' '<img src=\"/og.png\" alt=\"Logo\">'"
+disco_case "local img with width and height"      pass                             "inject dist/client/about/index.html '</body>' '<img src=\"/og.png\" alt=\"Logo\" width=\"40\" height=\"40\">'"
+disco_case "remote img is not the build's"        pass                             "inject dist/client/about/index.html '</body>' '<img src=\"https://cdn.other.example/a.png\" alt=\"Partner\">'"
+disco_case "img in noscript is not counted"       pass                             "inject dist/client/about/index.html '</body>' '<noscript><img src=\"/og.png\" alt=\"\"></noscript>'"
+disco_case "visible FAQ heading, no markup (warn)" "warn:read as an FAQ"           "inject dist/client/about/index.html '</body>' '<h2>Frequently asked questions</h2><p>Ask us anything.</p>'"
+disco_case "three question headings (warn)"       "warn:3 question headings"       "inject dist/client/about/index.html '</body>' '<h2>How does it work?</h2><h2>What does it cost?</h2><h2>Who is it for?</h2>'"
+disco_case "visible FAQ with FAQPage markup"      pass                             "inject dist/client/about/index.html '</head>' '$FAQ' && inject dist/client/about/index.html '</body>' '<h2>FAQ</h2><h3>How long does setup take&#x3F;</h3><p>About a week.</p>'"
+disco_case "orphan page (warn)"                   "warn:no other page in the build links to it" "dpage /lonely/index.html Lonely && sitemap / /about/ /lonely/"
+DEEP="for n in 1 2 3 4; do dpage /d\$n/index.html D\$n; done && inject dist/client/about/index.html '</body>' '<a href=\"/d1/\">d1</a>' && inject dist/client/d1/index.html '</body>' '<a href=\"/d2/\">d2</a>' && inject dist/client/d2/index.html '</body>' '<a href=\"/d3/\">d3</a>' && inject dist/client/d3/index.html '</body>' '<a href=\"/d4/\">d4</a>' && sitemap / /about/ /d1/ /d2/ /d3/ /d4/ && sed -i '0,/2026-09-01/s//2026-08-14/' dist/client/sitemap.xml"
+disco_case "page 4 clicks deep (warn)"            "warn:4 clicks from the home page" "$DEEP"
+disco_case "pages unreachable from home (warn)"   "warn:none of them can be reached from the home page" "dpage /x/index.html X && dpage /y/index.html Y && inject dist/client/x/index.html '</body>' '<a href=\"/y/\">y</a>' && inject dist/client/y/index.html '</body>' '<a href=\"/x/\">x</a>' && sitemap / /about/ /x/ /y/"
+disco_case "link through a redirect counts"       pass                             "dpage /new/index.html New && printf '/old /new/ 301\n' > dist/client/_redirects && inject dist/client/about/index.html '</body>' '<a href=\"/old\">old</a>' && sitemap / /about/ /new/"
+disco_case "usage opt-out under * (warn)"         "warn:where it has no effect"    "sed -i 's#^Allow: /\$#Allow: /\\nDisallow: /__usage_ai-training#' dist/client/robots.txt"
+disco_case "usage opt-out in its own group"       pass                             "printf '\\nUser-agent: __usage_ai-training\\nDisallow: /\\n' >> dist/client/robots.txt"
+disco_case "nested Organization without url"      "Organization is missing url"    "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"Organization\",\"name\":\"Partner\"}</script>'"
+disco_case "Offer without priceCurrency"          "Offer is missing priceCurrency" "inject dist/client/about/index.html '</head>' '<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"Product\",\"name\":\"Kit\",\"offers\":{\"@type\":\"Offer\",\"price\":\"10\"}}</script>'"
+disco_case "llms.txt: sections are optional"      pass                             ":"
 disco_case "nosnippet (warn)"                    "warn:stops Google quoting"      "inject dist/client/about/index.html '</head>' '<meta name=\"robots\" content=\"index, nosnippet\">'"
 disco_case "max-image-preview:none (warn)"       "warn:hides the page"            "inject dist/client/about/index.html '</head>' '<meta name=\"googlebot\" content=\"max-image-preview:none\">'"
 disco_case "no llms.txt (warn)"                  "warn:llms.txt: not in the build" "rm dist/client/llms.txt"
 disco_case "llms.txt malformed"                  "must start with"                "printf 'Example site\n- [About](/about/)\n' > dist/client/llms.txt"
-ROBOTS_BAIDU="printf 'User-agent: Baiduspider\nDisallow: /\n\nUser-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
+ROBOTS_BAIDU="printf 'User-agent: Baiduspider\nDisallow: /\n\nUser-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nUser-agent: MistralAI-Training\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n' > dist/client/robots.txt"
 disco_case "extra crawler blocked when listed"   "blocks Baiduspider"             "$ROBOTS_BAIDU" '"discovery":{"searchCrawlers":["Baiduspider"]}'
 disco_case "extra crawler not listed: unchecked" pass                             "$ROBOTS_BAIDU"
 disco_case "302 redirect (warn)"                 "warn:a temporary move"          "printf '/old /about/ 302\n' > dist/client/_redirects"
 disco_case "redirect with no status (warn)"      "warn:default when no status"    "printf '/old /about/\n' > dist/client/_redirects"
 disco_case "301, 308 and rewrites pass"          pass                             "printf '/old /about/ 301\n/new /about/ 308\n/alias /about/ 200\n' > dist/client/_redirects"
-RTL="dpage /ar/index.html Arabic && sed -i 's#<html lang=\"en\">#<html lang=\"ar\">#' dist/client/ar/index.html && sitemap / /about/ /ar/"
+RTL="dpage /ar/index.html Arabic && sed -i 's#<html lang=\"en\">#<html lang=\"ar\">#' dist/client/ar/index.html && sitemap / /about/ /ar/ && inject dist/client/index.html '</body>' '<a href=\"/ar/\">العربية</a>'"
 RTLDIR="$RTL && sed -i 's#<html lang=\"ar\">#<html lang=\"ar\" dir=\"rtl\">#' dist/client/ar/index.html"
 disco_case "RTL page without dir"                "has no dir=\"rtl\""             "$RTL"
 disco_case "RTL page with dir on html"           pass                             "$RTLDIR"
@@ -696,7 +743,7 @@ echo "Post-deploy live checks (check-live.mjs)"
 LIVE_SERVER='
 const http = require("http");
 const good = {
-  "/robots.txt": { type: "text/plain", body: "User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: SITE/sitemap.xml\n" },
+  "/robots.txt": { type: "text/plain", body: "User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nUser-agent: MistralAI-Training\nDisallow: /\n\nSitemap: SITE/sitemap.xml\n" },
   "/sitemap.xml": { type: "application/xml", body: "<urlset><url><loc>SITE/</loc></url></urlset>" },
   "/": { type: "text/html; charset=utf-8", body: "<!doctype html><h1>Home</h1>", link: "</llms.txt>; rel=\"describedby\"" },
   md: { type: "text/markdown; charset=utf-8", body: "# Home\n" },
@@ -727,23 +774,19 @@ live_case "production conforms"                  pass                           
 live_case "robots.txt served as HTML"            "expects text/plain"           '{"/robots.txt":{"type":"text/html","body":"User-agent: *\nAllow: /\n"}}'
 live_case "robots.txt without User-agent"        "no \"User-agent:\" line"      '{"/robots.txt":{"type":"text/plain","body":"Sitemap: SITE/sitemap.xml\n"}}'
 live_case "robots.txt answers 500"               "answered 500"                 '{"/robots.txt":{"status":500}}'
-live_case "robots.txt blocks an AI search bot"   "blocks PerplexityBot"         '{"/robots.txt":{"type":"text/plain","body":"User-agent: PerplexityBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n"}}'
+live_case "robots.txt missing warns"             "warn:serves no robots.txt"    '{"/robots.txt":{"status":404}}'
 live_case "sitemap in robots.txt is 404"         "answered 404"                 '{"/sitemap.xml":{"status":404}}'
 live_case "sitemap served as HTML"               "not XML"                      '{"/sitemap.xml":{"type":"text/html","body":"<urlset></urlset>"}}'
-live_case "no Link header (warn)"                "warn:sends no Link header"    '{"/":{"type":"text/html","body":"<h1>Home</h1>"}}'
-live_case "no Markdown negotiation (warn)"       "warn:got \"text/html\""       '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}'
-live_case "Markdown turned off by override"      pass                           '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}' '{"markdown-negotiation":"off"}'
-live_case "Markdown raised to error"             "got \"text/html\""            '{"md":{"type":"text/html","body":"<h1>Home</h1>"}}' '{"markdown-negotiation":"error"}'
-live_case "production lets GPTBot train"         "lets GPTBot train"            '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: ClaudeBot\nUser-agent: Google-Extended\nUser-agent: Applebot-Extended\nUser-agent: CCBot\nUser-agent: meta-externalagent\nUser-agent: Bytespider\nDisallow: /\n\nSitemap: SITE/sitemap.xml\n"}}'
-live_case "production search=no"                 "Content-Signal search=no"     '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=no, ai-input=yes, ai-train=yes\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' allow
-live_case "production allows training (allow)"   pass                           '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\n\nUser-agent: GPTBot\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' allow
-live_case "production reserves training (reserve)" pass                         '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: CCBot\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' reserve
-live_case "production reserve, group unsignalled" "the group governing GPTBot, CCBot declares no" '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nUser-agent: CCBot\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' reserve
-live_case "production reserve, ai-train=yes"      "ai-train=yes, but the site's policy is ai-train=no" '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}' '' reserve
-d="$(baseline)"; cd "$d" && cfg '"discoveryOverrides":[{"rule":"markdown-negotiation","level":"error"}]' && : > "$d/env"
+live_case "sitemap-live lowered to warn"         "warn:answered 404"            '{"/sitemap.xml":{"status":404}}' '{"sitemap-live":"warn"}'
+# v4: live behaviour is website-audit's. Production's crawler rules, Link header and Markdown
+# negotiation no longer fail or warn the deploy.
+live_case "served crawler rules are website-audit's" pass                       '{"/robots.txt":{"type":"text/plain","body":"User-agent: PerplexityBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}'
+live_case "served training rules are website-audit's" pass                      '{"/robots.txt":{"type":"text/plain","body":"User-agent: *\nAllow: /\n\nSitemap: SITE/sitemap.xml\n"}}'
+live_case "Link header and Markdown are website-audit's" pass                   '{"/":{"type":"text/html","body":"<h1>Home</h1>"},"md":{"type":"text/html","body":"<h1>Home</h1>"}}'
+d="$(baseline)"; cd "$d" && cfg "\"discoveryOverrides\":[{\"rule\":\"sitemap-live\",\"level\":\"warn\",\"reason\":\"The CDN rewrites the sitemap type until the move\",\"restoreBy\":\"$FUTURE\"}]" && : > "$d/env"
 out="$(GITHUB_ENV="$d/env" node "$PREPARE" post-deploy 2>&1)"; code=$?
 check "post-deploy exports discovery levels" pass "$code" "$out"
-if grep -q '^SHIP_GATE_DISCOVERY_LEVELS=.*"markdown-negotiation":"error"' "$d/env"; then ok "post-deploy levels carry the override"
+if grep -q '^SHIP_GATE_DISCOVERY_LEVELS=.*"sitemap-live":"warn"' "$d/env"; then ok "post-deploy levels carry the override"
 else bad "post-deploy levels carry the override" "SHIP_GATE_DISCOVERY_LEVELS missing or wrong" "$(cat "$d/env")"; fi
 cd / && rm -rf "$d"
 # `curl | grep -q` under the runner's pipefail reads a match as a miss: grep
@@ -779,18 +822,23 @@ ph_live_case "proxy not routed: empty 404"        "does not serve PostHog's asse
 ph_live_case "remote config answered by the site"  "came back as HTML"      "{$LIVE_HOME,\"/ingest/array/$LIVE_KEY/config.js\":{\"type\":\"text/html\",\"body\":\"<h1>Home</h1>\"}}"
 ph_live_case "production leaks a personal key"     "personal API key"       "{\"/\":{\"type\":\"text/html\",\"body\":\"<script>const p='${PHX}abcdefghijklmnopqrstuvwxyz0123'</script>\"}}"
 
-# check-analytics-live.mjs (analytics-always-on): Zaraz on production, a warning when missing.
-an_live_case() {
+# check-headers-live.mjs: a WAF or rate limit refusing a plain request fails; nothing else does.
+hd_live_case() {
   local name=$1 expect=$2 port pid out code
   exec 3< <(OVERRIDES="$3" node -e "$LIVE_SERVER")
   pid=$!; read -r port <&3
-  out="$(SHIP_GATE_SITE_URL="http://127.0.0.1:$port" node "$HERE/check-analytics-live.mjs" 2>&1)"; code=$?
+  out="$(SHIP_GATE_SITE_URL="http://127.0.0.1:$port" SHIP_GATE_SMOKE_PATHS="/" node "$HERE/check-headers-live.mjs" 2>&1)"; code=$?
   kill "$pid" 2>/dev/null; exec 3<&-
-  check "$name" "$expect" "$code" "$out"
+  if [ "$expect" = pass ] && grep -q '::warning::' <<<"$out"; then bad "$name" "expected a clean pass, got warnings" "$out"
+  else check "$name" "$expect" "$code" "$out"; fi
 }
-an_live_case "production carries Zaraz"           "nowarn:Zaraz"              "{\"/\":{\"type\":\"text/html\",\"body\":\"<script src=/cdn-cgi/zaraz/i.js></script>\"}}"
-an_live_case "production without Zaraz warns"     "warn:Zaraz is not on production" "{\"/\":{\"type\":\"text/html\",\"body\":\"<h1>Home</h1>\"}}"
-an_live_case "production home page down"           "Could not fetch production HTML" "{\"/\":{\"status\":500,\"type\":\"text/html\",\"body\":\"x\"}}"
+hd_live_case "plain requests answered, no ETag needed" pass                     '{}'
+hd_live_case "WAF answers 403"                    "answered 403"                '{"/":{"status":403,"type":"text/html","body":"denied"}}'
+hd_live_case "rate limit on robots.txt"           "answered 429"                '{"/robots.txt":{"status":429,"type":"text/plain","body":"slow down"}}'
+# v4: field Core Web Vitals, Zaraz and freshness headers are website-audit's.
+if [ -e "$HERE/check-analytics-live.mjs" ] || grep -qE 'chromeuxreport|CRUX_API_KEY|cdn-cgi/zaraz|etag' "$HERE/post-deploy.sh" "$HERE/check-headers-live.mjs" "$HERE/check-live.mjs" "$HERE/../post-deploy/action.yml"; then
+  bad "post-deploy checks deploy health only" "a CrUX, Zaraz or freshness check is left" ""
+else ok "post-deploy checks deploy health only"; fi
 
 echo "Release (release.sh)"
 # rel_case NAME EXPECT(pass|substring) CHANGELOG-TEXT — a dry run, so nothing is published
@@ -877,7 +925,7 @@ for f in 'prepare.mjs" verify' 'prepare.mjs" after-build' guards.sh check-dist.s
 done
 ok "gate-fast.sh covers the action's non-browser checks"
 # post-deploy.sh runs every live check the old action steps ran.
-for f in check-live.mjs check-headers-live.mjs check-posthog-live.mjs check-analytics-live.mjs SHIP_GATE_SMOKE_PATHS 'name=\"build-sha\"'; do
+for f in check-live.mjs check-headers-live.mjs check-posthog-live.mjs SHIP_GATE_SMOKE_PATHS 'name=\"build-sha\"'; do
   grep -qF -- "$f" "$HERE/post-deploy.sh" || bad "post-deploy.sh runs $f" "missing" ""
 done
 ok "post-deploy.sh covers the live checks"

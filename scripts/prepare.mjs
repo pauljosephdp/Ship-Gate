@@ -15,7 +15,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, appen
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { staticRoot, indexablePages, escapeRe } from './site-files.mjs';
-import { RULES as DISCOVERY_RULES, LEVELS as DISCOVERY_LEVELS, SEARCH_CRAWLERS, CRAWLER_TOKEN, AI_TRAINING_MODES } from './discovery.mjs';
+import { RULES as DISCOVERY_RULES, RETIRED_RULES, LEVELS as DISCOVERY_LEVELS, SEARCH_CRAWLERS, CRAWLER_TOKEN, AI_TRAINING_MODES, parseRobots, parseSitemap } from './discovery.mjs';
+import { CONSENT_TRACKERS, trackerMatches, BUILD_CHECKS } from './standards.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const [modeArg = 'verify', configPath = 'ship-gate.config.json'] = process.argv.slice(2);
@@ -58,13 +59,10 @@ const LEVEL_RANK = { warn: 1, error: 2 };
 const BLOCKED_URLS = ['*posthog*', '*hubspot*', '*hsforms*', '*hs-scripts*', '*hs-analytics*', '*clarity.ms*',
   '*googletagmanager*', '*google-analytics*', '*doubleclick.net*', '*connect.facebook.net*', '*hotjar*',
   '*snap.licdn.com*', '*analytics.tiktok.com*', '*/cdn-cgi/*', '*challenges.cloudflare.com*'];
-// The tracking vendors' hosts: under consent-before-tracking, none may load before consent.
-// Matched on the request's hostname (the host or a subdomain), so a site's own file named
-// after a vendor is not a tracker. HubSpot form embeds (hsforms.net, hsforms.com) are forms,
-// not tags, as in guards.sh; HubSpot tracking is still caught.
-const TRACKER_HOSTS = ['posthog.com', 'hubspot.com', 'hs-scripts.com', 'hs-analytics.net', 'clarity.ms',
-  'googletagmanager.com', 'google-analytics.com', 'doubleclick.net', 'connect.facebook.net', 'hotjar.com',
-  'hotjar.io', 'snap.licdn.com', 'analytics.tiktok.com'];
+// The trackers that may not load before consent (consent-before-tracking) are the consent-sensitive
+// categories of trackerVendors in standards/standards.json (CONSENT_TRACKERS), matched on the
+// request's host, never its path alone, so a site's own file named after a vendor is not a tracker.
+// HubSpot form embeds (hsforms.net, hsforms.com) are forms, not tags, as in guards.sh.
 
 // Stack policies: opinions about which vendors a site uses and how. Off by default, so
 // the core gate fits any Astro site; a site (or a portfolio) opts in by name.
@@ -78,6 +76,16 @@ export const POLICIES = {
   'rtl-logical-css': 'The site serves right-to-left languages: built CSS uses logical properties, not left/right',
   'consent-before-tracking': 'No tracking cookie or tracker loads before the visitor consents',
   'analytics-always-on': 'Google Analytics (a Zaraz tool in Consent Mode v2) and PostHog (posthog-hybrid) load on every page, with or without consent; neither stores anything until the visitor accepts',
+  'first-party-only': 'Every sitemap page loads only first-party resources (exceptions listed in allowedOrigins)',
+};
+// "standard": a site that runs a standard whose own check owns some of Ship Gate's source guards.
+// Those guards are skipped (not exempted: the standard's check still runs, inside this gate, as one of
+// the site's checks); the contract fails unless that check is wired into a phase.
+export const STANDARDS_DELEGATED = {
+  'web-baseline': {
+    check: 'conform:check',
+    guards: ['tailwind-config', 'env-file', 'node-pin', 'posthog-secrets', 'posthog-layout'],
+  },
 };
 
 // Guards a site may exempt for a while, with a reason and a restore date. A guard
@@ -91,6 +99,7 @@ export const GUARDS = {
   'posthog-missing': { policy: 'posthog-hybrid', what: 'PostHog not initialised on every page' },
   'posthog-server': { policy: 'posthog-hybrid', what: 'posthog-node missing, or used outside server paths' },
   'posthog-csp': { policy: 'posthog-hybrid', what: 'a Content-Security-Policy that blocks PostHog' },
+  'posthog-secrets': { policy: 'posthog-hybrid', what: 'POSTHOG_API_KEY (and the Turnstile secret) missing from the wrangler config\'s secrets.required' },
   'direct-tags': { policy: 'tags-via-zaraz', what: 'third-party tags loaded directly instead of through Zaraz' },
   turnstile: { policy: 'turnstile-forms', what: 'forms without Turnstile' },
   'pages-config': { policy: 'workers-builds-only', what: 'Pages config instead of Workers' },
@@ -166,6 +175,19 @@ if (!Array.isArray(policies) || policies.some((p) => !(p in POLICIES)))
 const policyOn = (p) => Array.isArray(policies) && policies.includes(p);
 if (policyOn('posthog-server-only') && policyOn('posthog-hybrid'))
   err('policies: posthog-server-only and posthog-hybrid contradict each other (no PostHog in the browser vs PostHog on every page). Keep one.');
+// first-party-only: third-party origins the site may still load, each a deliberate exception.
+const allowedOrigins = cfg.allowedOrigins ?? [];
+if (!isNameList(allowedOrigins, /^https:\/\/[a-z0-9.-]+(:\d+)?$/))
+  err('allowedOrigins must be a list of https origins with no path, e.g. "https://challenges.cloudflare.com".');
+else if (allowedOrigins.length && !policyOn('first-party-only'))
+  warn('allowedOrigins lists origins, but only the first-party-only policy uses it. Add the policy or remove the list.');
+if (policyOn('first-party-only') && policyOn('turnstile-forms') && Array.isArray(allowedOrigins) && !allowedOrigins.includes('https://challenges.cloudflare.com'))
+  err('policies: first-party-only with turnstile-forms needs "https://challenges.cloudflare.com" in allowedOrigins (Turnstile loads from it).');
+// standard: guards delegated to a standard's own check (see STANDARDS_DELEGATED).
+const standard = cfg.standard;
+if (standard !== undefined && !(standard in STANDARDS_DELEGATED))
+  err(`standard must be one of ${Object.keys(STANDARDS_DELEGATED).map((k) => `"${k}"`).join(', ')}, or left out.`);
+const delegated = standard in STANDARDS_DELEGATED ? STANDARDS_DELEGATED[standard] : null;
 
 // ── PostHog in the browser and on the server (posthog-hybrid) ──
 const posthogCfg = cfg.posthog ?? {};
@@ -197,6 +219,8 @@ if (alwaysOn && !policyOn('tags-via-zaraz'))
 if (alwaysOn && hybrid && posthog.cookieless === 'off')
   err('posthog.cookieless "off" sets PostHog cookies from the first page view; analytics-always-on loads PostHog before consent only because it stores nothing. Use "on_reject" or "always".');
 const posthogHosts = typeof posthog.apiHost === 'string' && posthog.apiHost.startsWith('/') ? [] : ['posthog.com'];
+if (hybrid && policyOn('first-party-only') && posthogHosts.length)
+  err('policies: first-party-only with posthog-hybrid needs posthog.apiHost to be a same-origin proxy path such as "/ph" (EU Cloud is another origin).');
 // Other search engines' crawlers the site must admit, on top of Googlebot and Bingbot.
 const searchCrawlers = cfg.discovery?.searchCrawlers ?? [];
 if (!isNameList(searchCrawlers, CRAWLER_TOKEN))
@@ -210,6 +234,7 @@ const dOverrides = cfg.discoveryOverrides ?? [];
 if (!Array.isArray(dOverrides)) err('discoveryOverrides must be a list.');
 for (const [i, o] of (Array.isArray(dOverrides) ? dOverrides : []).entries()) {
   const where = `discoveryOverrides[${i}] (${o?.rule ?? '?'})`;
+  if (o?.rule in RETIRED_RULES) { warn(`${where}: Ship Gate no longer runs ${o.rule} (${RETIRED_RULES[o.rule]}), so this override does nothing. Remove it.`); continue; }
   if (!(o?.rule in DISCOVERY_RULES)) { err(`${where}: rule must be one of ${Object.keys(DISCOVERY_RULES).join(', ')}.`); continue; }
   if (!(o.level in DISCOVERY_LEVELS)) { err(`${where}: level must be "error", "warn" or "off".`); continue; }
   const std = DISCOVERY_RULES[o.rule].level;
@@ -237,8 +262,6 @@ if (mode === 'post-deploy') {
   exportEnv('SHIP_GATE_SMOKE_PATHS', smokePaths.join(' '));
   exportEnv('SHIP_GATE_POLICIES', policies.join(' '));
   exportEnv('SHIP_GATE_DISCOVERY_LEVELS', JSON.stringify(discoveryLevels));
-  exportEnv('SHIP_GATE_SEARCH_CRAWLERS', searchCrawlers.join(' '));
-  exportEnv('SHIP_GATE_AI_TRAINING', aiTraining);
   if (hybrid) {
     exportEnv('SHIP_GATE_POSTHOG_API_HOST', posthog.apiHost);
     exportEnv('SHIP_GATE_POSTHOG_TEST_KEY', POSTHOG_TEST_KEY);
@@ -472,6 +495,12 @@ for (const phase of PHASES) {
   }
 }
 
+if (delegated) {
+  const wired = PHASES.some((ph) => (checks[ph] ?? []).includes(delegated.check));
+  if (!wired) err(`standard "${standard}" hands ${delegated.guards.join(', ')} to its ${delegated.check} script, but no checks phase lists "${delegated.check}". Add it to checks.postBuild, or remove "standard".`);
+  else console.log(`standard "${standard}": ${delegated.guards.join(', ')} are checked by ${delegated.check}, not by Ship Gate's guards.`);
+}
+
 if (checkLists.browser.length && !allDeps.playwright && !allDeps['@playwright/test'])
   err('checks.browser runs the site\'s own Playwright, but neither playwright nor @playwright/test is a dependency.');
 
@@ -598,6 +627,30 @@ if (mode === 'after-build') {
     if (all.length === 0) { console.log(`::error::${label}: no indexable HTML pages found under ${root}.`); process.exit(1); }
     return all;
   };
+  // Every page the sitemap lists (robots.txt's on-site sitemaps, else /sitemap-index.xml or
+  // /sitemap.xml, following an index), as paths: first-party-only visits each one.
+  function sitemapPages(dir) {
+    const readRel = (rel) => (existsSync(join(dir, rel)) ? readFileSync(join(dir, rel), 'utf8') : null);
+    const onSite = (u) => u === cfg.siteUrl || u.startsWith(cfg.siteUrl + '/');
+    const robotsMaps = parseRobots(readRel('robots.txt') ?? '').sitemaps.filter(onSite).map((u) => new URL(u).pathname);
+    const start = discovery.sitemap ? [discovery.sitemap] : robotsMaps.length ? robotsMaps
+      : ['/sitemap-index.xml', '/sitemap.xml'].filter((p) => readRel(p.slice(1)) !== null).slice(0, 1);
+    const out = new Set(), seen = new Set();
+    const walk = (p) => {
+      if (seen.has(p)) return;
+      seen.add(p);
+      const xml = readRel(p.replace(/^\//, ''));
+      if (xml === null) return;
+      const { kind, entries } = parseSitemap(xml);
+      for (const e of entries) {
+        if (!onSite(e.loc)) continue;
+        const path = new URL(e.loc).pathname;
+        if (kind === 'index') walk(path); else out.add(path);
+      }
+    };
+    start.forEach(walk);
+    return [...out];
+  }
   const lhAll = resolvePages(lighthouseUrls, 'lighthouseUrls');
   // On a pull request, "all" checks one URL per route: every top-level page, and the first
   // page under each deeper parent (/syllabus/icse/ stands for /syllabus/*/). Pages under one
@@ -662,7 +715,12 @@ if (mode === 'after-build') {
     consentEssentialCookies,
     // Cookieless PostHog may load before consent (posthog-hybrid); the consent test then
     // checks that it writes no cookie or storage until the visitor accepts.
-    trackerHosts: hybrid && posthog.cookieless !== 'off' ? TRACKER_HOSTS.filter((h) => h !== 'posthog.com') : TRACKER_HOSTS,
+    trackers: hybrid && posthog.cookieless !== 'off'
+      ? CONSENT_TRACKERS.filter((t) => !trackerMatches(t, 'https://eu.i.posthog.com/')) : CONSENT_TRACKERS,
+    allowedOrigins,
+    sitemapPages: sitemapPages(root),
+    // Thresholds the render spec reads (standards/standards.json, buildChecks).
+    buildChecks: BUILD_CHECKS,
     posthog: hybrid ? { ...posthog, hosts: posthogHosts, testKey: POSTHOG_TEST_KEY, assetsHost: POSTHOG_EU.assets } : null,
     server,
     onDemand: server === 'preview' ? { signInPath: onDemand?.signInPath ?? null, pages } : null,
@@ -676,7 +734,7 @@ if (mode === 'after-build') {
 mkdirSync(OUT, { recursive: true });
 // Ship Gate's own test tooling, pinned by its lockfile. Sites don't carry these dependencies.
 for (const f of ['package.json', 'package-lock.json']) copyFileSync(join(HERE, '..', 'tools', f), join(OUT, f));
-for (const f of ['page.spec.ts', 'edge.spec.ts', 'on-demand.spec.ts', 'helpers.ts']) copyFileSync(join(HERE, '..', 'e2e', f), join(OUT, f));
+for (const f of ['page.spec.ts', 'edge.spec.ts', 'on-demand.spec.ts', 'render.spec.ts', 'helpers.ts']) copyFileSync(join(HERE, '..', 'e2e', f), join(OUT, f));
 writeFileSync(
   join(OUT, 'playwright.config.ts'),
   `// Generated by Ship Gate — do not edit or commit.
@@ -689,7 +747,9 @@ export default defineConfig({
   workers: process.env.CI ? '100%' : undefined,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: [['list'], ['html', { open: 'never', outputFolder: ${JSON.stringify(join(OUT, 'reports', 'playwright'))} }]],
+  // The JSON report feeds reports/results.json (scripts/results.mjs).
+  reporter: [['list'], ['html', { open: 'never', outputFolder: ${JSON.stringify(join(OUT, 'reports', 'playwright'))} }],
+    ['json', { outputFile: ${JSON.stringify(join(OUT, 'reports', 'playwright.json'))} }]],
   use: { baseURL: '${ORIGIN}', trace: 'retain-on-failure' },
   webServer: {
     command: ${JSON.stringify(serveCommand)},
@@ -716,6 +776,7 @@ exportEnv('SHIP_GATE_PYTHON', py?.version ?? '');
 exportEnv('SHIP_GATE_PIP', (py?.packages ?? []).join(' '));
 exportEnv('SHIP_GATE_EXEMPT', exempt.join(' '));
 exportEnv('SHIP_GATE_POLICIES', policies.join(' '));
+exportEnv('SHIP_GATE_DELEGATED', delegated ? delegated.guards.join(' ') : '');
 if (hybrid) {
   exportEnv('PUBLIC_POSTHOG_KEY', POSTHOG_TEST_KEY);
   exportEnv('SHIP_GATE_POSTHOG_EMBED', posthog.embed);

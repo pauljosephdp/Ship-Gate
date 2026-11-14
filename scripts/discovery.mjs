@@ -1,56 +1,79 @@
 // Ship Gate discovery rules — SEO, AEO, GEO and AIO readiness, and the parsers
 // they need (robots.txt, sitemaps, JSON-LD). Shared by prepare.mjs (levels and
-// overrides), check-discovery.mjs (the build scan) and check-live.mjs
-// (what production serves after deploy).
-// No dependencies: Node built-ins only, plus the generated schema-org-types.json.
+// overrides), check-discovery.mjs (the build scan), e2e/render.spec.ts (the rules that
+// need a browser, through run.json) and check-live.mjs (what production serves after deploy).
+// Crawler tokens, required JSON-LD properties and the llms.txt rules come from
+// standards/standards.json (scripts/standards.mjs), the one rule file Ship Gate and
+// website-audit share. No dependencies: Node built-ins only, plus the generated schema-org-types.json.
 
 import { readFileSync } from 'node:fs';
 import { escapeRe, attr, metaTags } from './site-files.mjs';
+import {
+  SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, RETIRED_TOKENS, TRAINING_OPT_OUT,
+  JSON_LD_REQUIRED, LLMS_TXT, BUILD_CHECKS,
+} from './standards.mjs';
+export { SEARCH_CRAWLERS, AI_SEARCH_CRAWLERS, AI_TRAINING_TOKENS, AI_AGENT_TOKENS, RETIRED_TOKENS, LLMS_TXT, BUILD_CHECKS };
 
 // Every rule, its category and its default level. A site may raise a warning to an
 // error freely; turning a rule down needs a reason and a restore date.
-//   SEO — search engines can crawl, index and understand every page
-//   AEO — answer engines can read the page as structured facts (schema.org JSON-LD)
-//   GEO — generative engines (ChatGPT, Claude, Perplexity…) can reach, read and cite it
-//   AIO — Google AI Overviews and AI Mode can quote it (indexed and snippet-eligible)
-//   where: 'build' (the build scan), 'live' (post-deploy, against production) or 'both'.
+//   SEO  — search engines can crawl, index and understand every page
+//   AEO  — answer engines can read the page as structured facts (schema.org JSON-LD)
+//   GEO  — generative engines (ChatGPT, Claude, Perplexity…) can reach, read and cite it
+//   AIO  — Google AI Overviews and AI Mode can quote it (indexed and snippet-eligible)
+//   perf — the page lays out and loads without avoidable delay or shift
+//   where: 'build' (the build scan, the default), 'browser' (e2e/render.spec.ts, against the
+//   served build) or 'live' (post-deploy, against production).
+// Ship Gate owns what the build or the build served on localhost can prove; website-audit owns
+// what needs production, the edge, field data or Search Console (standards/standards.json).
 export const RULES = {
-  'robots-txt':         { category: 'SEO', level: 'error', where: 'both', title: 'robots.txt exists, parses and has a User-agent group' },
+  'robots-txt':         { category: 'SEO', level: 'error', title: 'robots.txt exists, parses and has a User-agent group (after deploy: answers 200 as text/plain)' },
   'robots-sitemap':     { category: 'SEO', level: 'error', title: 'robots.txt names the sitemap on siteUrl' },
-  'robots-blocks-page': { category: 'SEO', level: 'error', title: 'No indexable page is blocked for Googlebot or Bingbot' },
+  'robots-blocks-page': { category: 'SEO', level: 'error', title: 'No indexable page is blocked for Googlebot or bingbot' },
   sitemap:              { category: 'SEO', level: 'error', title: 'Sitemap exists, parses and lists only siteUrl' },
   'sitemap-coverage':   { category: 'SEO', level: 'error', title: 'Sitemap lists every indexable page and nothing else' },
   'sitemap-lastmod':    { category: 'SEO', level: 'warn',  title: 'Every sitemap URL has a plausible lastmod' },
+  'sitemap-lastmod-bulk': { category: 'SEO', level: 'warn', title: 'lastmod tracks real changes, not one bulk stamp or the build time' },
   'sitemap-xml':        { category: 'SEO', level: 'warn',  title: '/sitemap.xml is served or redirects to the sitemap' },
   'sitemap-live':       { category: 'SEO', level: 'error', where: 'live', title: 'Every sitemap in production robots.txt answers 200 with XML' },
   canonical:            { category: 'SEO', level: 'error', title: 'One canonical per page, pointing at an indexable page' },
   'html-lang':          { category: 'SEO', level: 'error', title: 'The html element sets lang' },
   viewport:             { category: 'SEO', level: 'error', title: 'Mobile viewport meta tag' },
   'internal-links':     { category: 'SEO', level: 'error', title: 'Every internal link resolves' },
+  'orphan-pages':       { category: 'SEO', level: 'warn',  title: 'Every indexable page is linked from another page' },
+  'click-depth':        { category: 'SEO', level: 'warn',  title: 'Every indexable page is at most 3 clicks from the home page' },
   'redirect-permanence':{ category: 'SEO', level: 'warn',  title: 'Static redirects are permanent (301/308)' },
   'rtl-direction':      { category: 'SEO', level: 'error', title: 'Right-to-left pages set dir="rtl"' },
   'hreflang-pairs':     { category: 'SEO', level: 'warn',  title: 'hreflang alternates exist and link back' },
+  'content-parity':     { category: 'SEO', level: 'warn',  where: 'browser', title: 'Content visible on desktop is not missing on mobile' },
   'structured-data':    { category: 'AEO', level: 'error', title: 'JSON-LD parses, uses schema.org and has the key properties' },
   'site-entity':        { category: 'AEO', level: 'error', title: 'Home page declares the Organization or Person behind the site' },
   'entity-sameas':      { category: 'AEO', level: 'warn',  title: 'The site entity links its profiles (sameAs)' },
   'faq-visible':        { category: 'AEO', level: 'error', title: 'FAQ markup matches questions visible on the page' },
+  'faq-markup-missing': { category: 'AEO', level: 'warn',  title: 'A visible FAQ carries FAQPage markup' },
   breadcrumbs:          { category: 'AEO', level: 'warn',  title: 'Nested pages carry BreadcrumbList markup' },
   'ai-search-crawlers': { category: 'GEO', level: 'error', title: 'AI search and user-fetch crawlers are not blocked' },
-  'ai-training':        { category: 'GEO', level: 'error', where: 'both', title: 'AI training follows the site\'s policy (blocked by default; discovery.aiTraining "reserve" or "allow")' },
-  'ai-uses-allowed':    { category: 'GEO', level: 'error', where: 'both', title: 'Content-Signal keeps search and AI input enabled' },
+  'ai-training':        { category: 'GEO', level: 'error', title: 'AI training follows the site\'s policy (blocked by default; discovery.aiTraining "reserve" or "allow")' },
+  'ai-training-optout-scope': { category: 'GEO', level: 'warn', title: 'A __usage_ai-training rule sits in its own group, not under User-agent: *' },
+  'ai-uses-allowed':    { category: 'GEO', level: 'error', title: 'Content-Signal keeps search and AI input enabled' },
   'ai-crawler-rules':   { category: 'GEO', level: 'warn',  title: 'robots.txt states an explicit policy for AI crawlers' },
   'content-signals':    { category: 'GEO', level: 'warn',  title: 'robots.txt declares Content-Signal preferences' },
   'content-signals-format': { category: 'GEO', level: 'error', title: 'Content-Signal lines follow contentsignals.org' },
-  'link-headers':       { category: 'GEO', level: 'warn',  where: 'both', title: 'Home page sends Link headers for agent discovery (RFC 8288)' },
-  'markdown-negotiation': { category: 'GEO', level: 'warn', where: 'live', title: 'Accept: text/markdown returns Markdown' },
+  'link-headers':       { category: 'GEO', level: 'warn',  title: 'Home page sends Link headers for agent discovery (RFC 8288), per _headers' },
   'open-graph':         { category: 'GEO', level: 'error', title: 'Open Graph title, description and image' },
   'article-dates':      { category: 'GEO', level: 'warn',  title: 'Articles carry dateModified' },
-  'rendered-content':   { category: 'GEO', level: 'warn',  title: 'Page text is in the HTML, not rendered by JavaScript' },
-  'llms-txt':           { category: 'GEO', level: 'warn',  title: '/llms.txt exists' },
+  'rendered-content':   { category: 'GEO', level: 'warn',  where: 'browser', title: 'Page text and links are in the HTML, not rendered by JavaScript (no-JS ratio)' },
+  'llms-txt':           { category: 'GEO', level: LLMS_TXT.missingLevel, title: '/llms.txt exists' },
   'llms-txt-format':    { category: 'GEO', level: 'error', title: '/llms.txt follows the llmstxt.org format' },
   'markdown-mirrors':   { category: 'GEO', level: 'warn',  title: 'Markdown and text mirrors stay out of the search index' },
   'snippet-controls':   { category: 'AIO', level: 'warn',  title: 'Indexable pages allow text snippets' },
   'image-preview':      { category: 'AIO', level: 'warn',  title: 'Indexable pages allow image previews' },
+  'img-dimensions':     { category: 'perf', level: 'error', title: 'Every local <img> sets width and height' },
+  'lazy-first-viewport':{ category: 'perf', level: 'warn',  where: 'browser', title: 'No image in the first viewport is loading="lazy"' },
+};
+// Rules Ship Gate no longer runs. website-audit owns them now (live behaviour); a
+// discoveryOverrides entry naming one warns and is ignored.
+export const RETIRED_RULES = {
+  'markdown-negotiation': 'Markdown negotiation happens at the edge, so website-audit checks it on production',
 };
 export const LEVELS = { off: 0, warn: 1, error: 2 };
 
@@ -60,21 +83,6 @@ export const RTL_LANGS = ['ar', 'arc', 'ckb', 'dv', 'fa', 'he', 'ps', 'sd', 'ug'
 // Other search engines' crawler tokens a site may add to robots-blocks-page with
 // discovery.searchCrawlers (e.g. Baiduspider, Yeti for Naver, YandexBot, DuckDuckBot).
 export const CRAWLER_TOKEN = /^[A-Za-z][A-Za-z0-9._-]{1,40}$/;
-
-// Crawlers that fetch pages to answer a user or to build an AI search index. Blocking
-// one removes the site from that product's answers and citations. Sources, Sept 2026:
-// OpenAI, Anthropic, Perplexity, Apple and Google crawler documentation.
-export const SEARCH_CRAWLERS = ['Googlebot', 'Bingbot'];
-export const AI_SEARCH_CRAWLERS = ['OAI-SearchBot', 'ChatGPT-User', 'Claude-SearchBot', 'Claude-User',
-  'PerplexityBot', 'Perplexity-User', 'Applebot', 'DuckAssistBot'];
-// Tokens that only control model training (or, for Google-Extended, Gemini training and
-// grounding). Blocking them is a legitimate choice and never affects search; reported only.
-export const AI_TRAINING_TOKENS = ['GPTBot', 'ClaudeBot', 'Google-Extended', 'Applebot-Extended', 'CCBot',
-  'meta-externalagent', 'Bytespider'];
-// Any of these in a User-agent line counts as an explicit AI crawler policy.
-export const AI_AGENT_TOKENS = [...AI_SEARCH_CRAWLERS.filter((t) => t !== 'Applebot'), ...AI_TRAINING_TOKENS, 'Amazonbot'];
-// Tokens Anthropic no longer uses: a rule for them governs nothing.
-export const RETIRED_TOKENS = { 'claude-web': 'ClaudeBot, Claude-SearchBot and Claude-User', 'anthropic-ai': 'ClaudeBot' };
 
 // ── Text ──
 const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”',
@@ -205,6 +213,26 @@ export function trainingPolicy(robots, mode = 'block') {
   return out;
 }
 
+// The IETF AI-preferences draft reads a training opt-out from its own group,
+// "User-agent: __usage_ai-training" with Disallow lines; a rule under "User-agent: *" does not
+// apply to it. Returns [{ line, text }] for each line that names the usage token inside a group
+// that applies to * and not to the token itself, so it has no effect.
+export const USAGE_TRAINING_TOKEN = TRAINING_OPT_OUT.usageGroup;
+export function usageScopeProblems(text) {
+  const out = [];
+  let agents = [], inAgents = false;
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) return;
+    const m = line.match(/^user-agent\s*:\s*(.*)$/i);
+    if (m) { if (!inAgents) agents = []; agents.push(m[1].trim().toLowerCase()); inAgents = true; return; }
+    inAgents = false;
+    if (line.toLowerCase().includes(USAGE_TRAINING_TOKEN) && agents.includes('*') && !agents.includes(USAGE_TRAINING_TOKEN))
+      out.push({ line: i + 1, text: line.slice(0, 80) });
+  });
+  return out;
+}
+
 // ── Link header (RFC 8288) ──
 // Relation types that point an agent at machine-readable descriptions (RFC 9727 §3, RFC 8631).
 export const AGENT_LINK_RELS = ['api-catalog', 'service-desc', 'service-doc', 'describedby'];
@@ -289,36 +317,38 @@ export const isEntity = (t) => t === 'Person' || SCHEMA_TYPES.organization.inclu
   || /Organization$|Corporation$|Business$|^NGO$|^OnlineStore$/.test(t);
 export const isArticle = (t) => ARTICLE.includes(t);
 
-// The properties Ship Gate needs before a node is useful to an answer engine: Google's
-// required properties where it defines them, otherwise the ones that identify the thing.
+// The properties a node needs before it is useful to an answer engine: jsonLdRequired in
+// standards/standards.json (Google's required properties where it defines them, otherwise the ones
+// that identify the thing). A subtype answers to its family's row: Article types to Article,
+// LocalBusiness types (Hotel, Dentist…) to LocalBusiness, other Organization types to Organization.
+// "a|b" means at least one of them.
+const rowFor = (t) => (JSON_LD_REQUIRED[t] ? t : isArticle(t) ? 'Article' : LOCAL_BUSINESS.includes(t) ? 'LocalBusiness'
+  : t !== 'Person' && isEntity(t) ? 'Organization' : null);
+const anyOf = (alts) => (alts.length > 1 ? `${alts.slice(0, -1).join(', ')} or ${alts.at(-1)}` : alts[0]);
 export function missingProps(node) {
-  const types = typesOf(node), miss = [];
-  const need = (...ks) => { for (const k of ks) if (!has(node[k])) miss.push(k); };
-  if (types.some(isArticle)) need('headline', 'datePublished', 'author');
-  if (types.some((t) => LOCAL_BUSINESS.includes(t))) need('name', 'address');
-  else if (types.some(isEntity)) need('name');
-  if (types.includes('WebSite')) need('name', 'url');
-  if (types.includes('Product')) { need('name'); if (!has(node.offers) && !has(node.review) && !has(node.aggregateRating)) miss.push('offers, review or aggregateRating'); }
-  if (types.includes('Event')) need('name', 'startDate', 'location');
-  if (types.includes('Recipe')) need('name', 'image');
-  if (types.includes('VideoObject')) need('name', 'thumbnailUrl', 'uploadDate');
+  const types = typesOf(node), miss = new Set();
+  for (const row of new Set(types.map(rowFor).filter(Boolean)))
+    for (const req of JSON_LD_REQUIRED[row]) {
+      const alts = req.split('|');
+      if (!alts.some((k) => has(node[k]))) miss.add(anyOf(alts));
+    }
   if (types.includes('FAQPage')) {
     const qs = [].concat(node.mainEntity ?? []);
-    if (qs.length === 0) miss.push('mainEntity');
+    if (qs.length === 0) miss.add('mainEntity');
     qs.forEach((q, i) => {
-      if (!typesOf(q).includes('Question') || !has(q.name)) miss.push(`mainEntity[${i}] Question name`);
+      if (!typesOf(q).includes('Question') || !has(q.name)) miss.add(`mainEntity[${i}] Question name`);
       const a = [].concat(q?.acceptedAnswer ?? [])[0];
-      if (!has(a?.text)) miss.push(`mainEntity[${i}] acceptedAnswer.text`);
+      if (!has(a?.text)) miss.add(`mainEntity[${i}] acceptedAnswer.text`);
     });
   }
   if (types.includes('BreadcrumbList')) {
     const items = [].concat(node.itemListElement ?? []);
-    if (items.length === 0) miss.push('itemListElement');
+    if (items.length === 0) miss.add('itemListElement');
     items.forEach((it, i) => {
-      if (!has(it?.position)) miss.push(`itemListElement[${i}].position`);
-      if (!has(it?.name) && !has(it?.item?.name)) miss.push(`itemListElement[${i}].name`);
-      if (i < items.length - 1 && !has(it?.item)) miss.push(`itemListElement[${i}].item`);
+      if (!has(it?.position)) miss.add(`itemListElement[${i}].position`);
+      if (!has(it?.name) && !has(it?.item?.name)) miss.add(`itemListElement[${i}].name`);
+      if (i < items.length - 1 && !has(it?.item)) miss.add(`itemListElement[${i}].item`);
     });
   }
-  return miss;
+  return [...miss];
 }

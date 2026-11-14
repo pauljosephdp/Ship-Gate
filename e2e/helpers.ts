@@ -17,7 +17,16 @@ export const run = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.met
   policies: string[];
   keyboard: 'warn' | 'error';
   consentEssentialCookies: string[];
-  trackerHosts: string[];
+  // Consent-sensitive trackerVendors entries from standards/standards.json (see isTracker).
+  trackers: string[];
+  // first-party-only: third-party origins the site may load, and every page its sitemap lists.
+  allowedOrigins: string[];
+  sitemapPages: string[];
+  // standards/standards.json buildChecks: the render spec's thresholds.
+  buildChecks: {
+    renderedContent: { minWordRatio: number; minLinkRatio: number };
+    contentParity: { minBlockChars: number; matchChars: number };
+  };
   // posthog-hybrid only; null otherwise.
   posthog: null | {
     embed: 'snippet' | 'npm';
@@ -29,7 +38,7 @@ export const run = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.met
   server: 'static' | 'preview';
   // server "preview" only; null otherwise. signInPath: where a gated page sends a visitor without a session.
   onDemand: null | { signInPath: string | null; pages: string[] };
-  discovery: { ignoreLinks: string[]; sitemap?: string };
+  discovery: { ignoreLinks: string[]; sitemap?: string; levels: Record<string, 'error' | 'warn' | 'off'> };
 };
 
 // A request to PostHog: its cloud hosts, or the site's own proxy path (posthog.apiHost).
@@ -91,13 +100,19 @@ export async function settle(page: Page) {
 
 // ── Probes for the merged per-page test (page.spec.ts) ──
 
-// A tracker is a request to a tracking vendor's host (trackerHosts). By hostname, never by
-// path: /_astro/hubspot-partner-badge.svg is the site's own file.
-export const isTracker = (url: string) => {
-  let host: string;
-  try { host = new URL(url).hostname.toLowerCase(); } catch { return false; }
-  return run.trackerHosts.some((h) => host === h || host.endsWith(`.${h}`));
+// A tracker is a request that matches a trackerVendors entry (run.trackers): the host, a
+// subdomain of it, or a dot-separated run of its labels; an entry with a path also needs that
+// path prefix. Never the path alone: /_astro/hubspot-partner-badge.svg is the site's own file.
+// The same rule as trackerMatches in scripts/standards.mjs (this file can't import it).
+export const trackerMatches = (entry: string, url: string) => {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  const slash = entry.indexOf('/');
+  const host = (slash < 0 ? entry : entry.slice(0, slash)).toLowerCase();
+  const path = slash < 0 ? '' : entry.slice(slash);
+  return `.${u.hostname.toLowerCase()}.`.includes(`.${host}.`) && (!path || u.pathname.startsWith(path));
 };
+export const isTracker = (url: string) => run.trackers.some((t) => trackerMatches(t, url));
 
 // Cloudflare's bot-management and load-balancing cookies are strictly necessary.
 export const ALWAYS_ESSENTIAL = ['__cf_bm', 'cf_clearance', '__cflb', '_cfuvid'];

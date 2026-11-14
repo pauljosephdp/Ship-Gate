@@ -9,13 +9,13 @@
   `orphan-pages`, `click-depth`, `lazy-first-viewport`, `content-parity`); `rendered-content` moves to the
   browser; `markdown-negotiation` retired; `link-headers`, `ai-training`, `ai-uses-allowed` build only.
 - `scripts/check-discovery.mjs`: the new build rules, the link graph, `discovery.json`.
-- `scripts/check-structure.mjs`: findings tagged with ids, `structure.json`.
 - `scripts/check-market.mjs`: hosts from the file.
 - `scripts/prepare.mjs`: trackers, sitemap pages, `first-party-only` + `allowedOrigins`, `standard`
   delegation, `posthog-secrets` guard, retired-rule overrides, Playwright JSON reporter, render spec copied.
 - `scripts/guards.sh`: delegation skips, `posthog-secrets` an error.
 - `e2e/helpers.ts`: tracker entries, levels and sitemap pages in the `run` type.
 - `e2e/render.spec.ts` (new): no-JS ratio, lazy first viewport, parity, first-party-only.
+- `scripts/check-structure.mjs`: findings tagged with ids, `reports/structure.json`.
 - `scripts/check-live.mjs`, `scripts/check-headers-live.mjs`, `scripts/post-deploy.sh`,
   `post-deploy/action.yml`: deploy health only; `scripts/check-analytics-live.mjs` deleted.
 - `scripts/results.mjs` (new) and `action.yml`: `reports/results.json` on every run.
@@ -35,7 +35,10 @@
 6. `results.json` and the full-sweep upload.
 7. README, CHANGELOG, pins; self-test, unit tests, a local run of the browser suite on the fixture.
 
-Each step is its own commit; self-test runs after each.
+Each step is its own commit. The steps share `discovery.mjs`, `prepare.mjs` and `self-test.sh`, so the
+commits group files by concern, and `self-test` is green from the post-deploy commit on. Before it, the tests
+run ahead of the code: the rule-file commit's unit test already forbids the lists `discovery.mjs` drops in the
+next commit, and the discovery commit's `self-test.sh` covers the guards and live checks of the two after it.
 
 ## Risks
 - A correct site fails: the training-token change and Organization `url` (spec, areas of concern) are the
@@ -47,4 +50,48 @@ Each step is its own commit; self-test runs after each.
 - Not taken: editing `e2e/page.spec.ts` (protected) to share its page load.
 
 ## Proof
-Filled in at the end of the work (commands and their pasted tails).
+Run in this cloud session on 2026-11-14, on branch `claude/standards-v4` (local only, not pushed).
+
+`bash scripts/self-test.sh` (new cases for every rule, the delegation, the policy, the narrowed post-deploy
+and results.json):
+```
+  ✓ posthog-proxy, ci-health and other unit tests pass
+
+Self-test: 612 passed, 0 failed.
+```
+`shellcheck -S error scripts/*.sh test/*.sh .claude/hooks/*.sh` → no output (exit 0).
+
+`bash scripts/check-readme.sh origin/main` → `README.md is up to date.`
+
+`node --test test/*.test.mjs` (includes the new `test/standards.test.mjs`):
+```
+# tests 20
+# pass 20
+# fail 0
+```
+Browser suite on `test/fixture-site` (verifier step 4: `npm ci`, `npm run build`, `prepare.mjs verify` and
+`after-build`, guards and every scan, then the generated Playwright config with `CI=1`; Chromium from the
+session's `/usr/bin/google-chrome` through `launchOptions.executablePath`, since the Playwright download is
+not available here). Conforming: guards, structure, discovery (no warnings), copy, market and dist pass, then
+```
+  18 skipped
+  22 passed (13.7s)
+```
+A copy broken four ways (a `loading="lazy"` hero, a desktop-only paragraph, 400 words and 30 links written by
+a same-origin script, a third-party pixel) with `first-party-only` and `content-parity` raised to error:
+```
+::warning::[rendered-content] /: without JavaScript the page has 78 of 537 words (0.15, needs 0.7) and 4 of 34 links (0.12, needs 0.5). …
+::warning::[lazy-first-viewport] /: desktop (1440×900): /og.png is loading="lazy" in the first viewport. …
+::warning::[lazy-first-viewport] /: mobile (Pixel 7): /og.png is loading="lazy" in the first viewport. …
+  ✘  3 [desktop] › render.spec.ts:75:3 › /: no-JS content, lazy first viewport, desktop and mobile parity
+  ✘  5 [desktop] › render.spec.ts:121:3 › /: loads only first-party resources
+  2 failed
+  6 passed (5.7s)
+```
+and `results.mjs` on that run: `content-parity` fail, `first-party-only` fail, `rendered-content` warn,
+`lazy-first-viewport` warn, each with sample `/`. `test/fixture-worker` builds, and its contract, discovery and
+structure scans pass.
+
+Not run here: the `fixture` CI jobs (they run on the PR), the reviewer subagent (this session could not start
+one; the diff was reviewed against this plan by hand), and agent evals (`CLAUDE.md`, `REVIEW.md` and
+`.claude/` are unchanged).

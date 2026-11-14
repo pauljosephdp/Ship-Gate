@@ -17,6 +17,9 @@ One rule file, one owner per check. Ship Gate and the website-audit skill (`paul
 - **Full sweep:** re-copy `templates/caller/.github/workflows/full-sweep.yml` (it uploads `ship-gate-results`).
 - **web-baseline sites (optional):** `"standard": "web-baseline"` hands `node-pin` to web-baseline, and needs `conform:check` in `checks.preBuild` or `checks.postBuild`, and its script must be the conform call alone, `node scripts/standard/conform.mjs --ci --final` (no `--report`, nothing chained after it) (web-baseline's template runs `--ci` alone, which the contract refuses).
 
+**Fixed**
+- The fixture sites pin Node 22.23.4, the floor of Astro 7.4 (`engines.node` `>=22.23.4`; Astro 7.3's was `>=22.12.0`). Dependabot's tooling bump (#48) moved the fixtures to Astro 7.4.4 while they still pinned 22.12.0, so every fixture variant failed `astro check` on `main` since 13 Nov.
+
 **Added**
 - `standards/standards.json`: crawler agents and groups, retired tokens, the AI-training opt-out, JSON-LD required properties, retired rich results, llms.txt, CWV, redirects, robots.txt and sitemap limits, meta description and title, security headers, and, merged from both codebases, `chinaBlockedHosts`, `chinaUnreliableHosts` and `trackerVendors`, plus `buildChecks` (thresholds of the checks moved in). `scripts/standards.mjs` derives every list the scripts read; `test/standards.test.mjs` checks the file and that no script keeps its own copy.
 - Discovery rules moved in from website-audit, all from the build: `sitemap-lastmod-bulk` (warn: of 10 or more URLs with a `lastmod`, 90% share one, unless it is the first commit's date or the site derives `lastmod` from git; or a `lastmod` is the build's own time), `img-dimensions` (error), `faq-markup-missing` (warn: 2 or more question-and-answer pairs in `<main>` without FAQPage markup), `orphan-pages` and `click-depth` (warn: the built link graph, more than 3 clicks).

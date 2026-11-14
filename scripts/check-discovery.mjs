@@ -255,7 +255,7 @@ for (const p of pages) {
     let url;
     try { url = new URL(src.replace(/&amp;/g, '&'), siteUrl + at); } catch { continue; }
     if (url.protocol !== 'data:' && url.origin !== siteUrl) continue;
-    if (!attr(m[0], 'width') || !attr(m[0], 'height')) noDims.push(src.startsWith('data:') ? 'data: URL' : src.slice(0, 80));
+    if (!/\swidth\s*=\s*["']?\d/i.test(m[0]) || !/\sheight\s*=\s*["']?\d/i.test(m[0])) noDims.push(src.startsWith('data:') ? 'data: URL' : src.slice(0, 80));
   }
   if (noDims.length) add('img-dimensions', at, `${noDims.length} <img> without width and height (${noDims.slice(0, 3).join(', ')}${noDims.length > 3 ? ', …' : ''}). Set both, or the page shifts as each image loads (CLS); Astro's <Image> sets them.`);
 

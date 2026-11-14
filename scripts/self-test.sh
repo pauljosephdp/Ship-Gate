@@ -696,6 +696,7 @@ disco_case "sitemap lastmods differ"              pass                          
 disco_case "sitemap lastmod is the build time (warn)" "warn:carry the build's own time" "sed -i \"s#<lastmod>2026-09-01</lastmod>#<lastmod>\$(date -u +%FT%TZ)</lastmod>#\" dist/client/sitemap.xml"
 disco_case "local img without width and height"   "<img> without width and height (/og.png)" "inject dist/client/about/index.html '</body>' '<img src=\"/og.png\" alt=\"Logo\">'"
 disco_case "local img with width and height"      pass                             "inject dist/client/about/index.html '</body>' '<img src=\"/og.png\" alt=\"Logo\" width=\"40\" height=\"40\">'"
+disco_case "data-width is not a width"           "<img> without width and height" "inject dist/client/about/index.html '</body>' '<img src=\"/og.png\" alt=\"Logo\" data-width=\"40\" data-height=\"40\">'"
 disco_case "remote img is not the build's"        pass                             "inject dist/client/about/index.html '</body>' '<img src=\"https://cdn.other.example/a.png\" alt=\"Partner\">'"
 disco_case "img in noscript is not counted"       pass                             "inject dist/client/about/index.html '</body>' '<noscript><img src=\"/og.png\" alt=\"\"></noscript>'"
 disco_case "visible FAQ heading, no markup (warn)" "warn:read as an FAQ"           "inject dist/client/about/index.html '</body>' '<h2>Frequently asked questions</h2><p>Ask us anything.</p>'"

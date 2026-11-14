@@ -109,7 +109,7 @@ A fresh-context review of the branch raised eight findings; each is a commit aft
 3. `sitemap-lastmod-bulk`: 10 or more URLs with a `lastmod`, 90% on one value; exempt when that is the first
    commit's date (in a full clone) or the site has `src/data/lastmod.json`.
 4. `faq-markup-missing`: 2 or more question-and-answer pairs in `<main>`, outside the page chrome.
-5. `market-cn`: resources only; a blocked URL in script that is not visibly loaded warns.
+5. `market-cn`: resources only. A blocked URL in a bundle that is not visibly loaded (call, `.src`, static import/export) warns; in a hand-written inline `<script>` (comments stripped) it fails unless it is in a link context or is a share/intent URL. Second review (14 Nov): static imports and loader-snippet arguments were passing; delegation now requires the conform call alone in preBuild/postBuild.
 6. CHANGELOG migration lists the AI-search widening, the training token and the JSON-LD scope.
 7. `results.json`: `guard:<id>` per guard (`reports/guards.tsv`, ids in `scripts/gate-rules.mjs`), `browser:<check>`
    per page-test check (sorted by assertion message, since `e2e/page.spec.ts` is protected), and a render test

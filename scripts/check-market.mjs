@@ -60,7 +60,6 @@ if (policies.includes('market-cn')) {
   const LINK_CONTEXT = /(?:\bopen\s*\(\s*|\bhref\s*[=:]\s*|\bsetAttribute\s*\(\s*["']href["']\s*,\s*|\blocation(?:\.href)?\s*=\s*|share[\w.]*\s*[=:(]\s*)["'`](?:https?:)?$/i;
   // Share and follow URLs are links whatever the variable is called.
   const LINK_URL = /^(?:https?:)?\/\/[^\s"'`]*(?:\/intent\/|sharer|share-offsite|\/share\b|\/shareArticle)/i;
-  const stripComments = (js) => js.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:\\"'`])\/\/[^\n]*/g, '$1');
   const attrUrls = (tag) => [...tag.matchAll(/\b(src|srcset|href|poster|data)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)].map((m) => m[3] ?? m[4] ?? m[5] ?? '');
   const cssLoads = (css) => [...css.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)|url\(\s*["']?([^"')\s]+)/gi)].map((m) => m[1] ?? m[2]).join(' ');
   // Returns { sure: text of URLs the page loads, maybe: script text whose URLs may be links }.
@@ -71,7 +70,7 @@ if (policies.includes('market-cn')) {
     let sure = [...html.matchAll(LOADING)].flatMap((m) => attrUrls(m[0])).join(' ');
     sure += ' ' + [...html.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0]).filter((t) => LINK_LOADS.test(t)).flatMap(attrUrls).join(' ');
     sure += ' ' + cssLoads([...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>|\bstyle\s*=\s*"([^"]*)"/gi)].map((m) => m[1] ?? m[2]).join('\n'));
-    const inline = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter((m) => !/application\/(ld\+)?json/i.test(m[1])).map((m) => scriptLoads(stripComments(m[2]), true));
+    const inline = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter((m) => !/application\/(ld\+)?json/i.test(m[1])).map((m) => scriptLoads(m[2], true));
     return { sure: [sure, ...inline.map((x) => x.sure)].join(' '), maybe: inline.map((x) => x.maybe).join(' ') };
   }
   function scriptLoads(js, inline = false) {

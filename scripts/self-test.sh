@@ -840,6 +840,44 @@ if [ -e "$HERE/check-analytics-live.mjs" ] || grep -qE 'chromeuxreport|CRUX_API_
   bad "post-deploy checks deploy health only" "a CrUX, Zaraz or freshness check is left" ""
 else ok "post-deploy checks deploy health only"; fi
 
+echo "Results for website-audit (results.mjs)"
+has_text() { if grep -qF -- "$3" "$HERE/../$2"; then ok "$1"; else bad "$1" "$2 lacks: $3" ""; fi; }
+# A gate run's reports, as the scans and specs write them; results.mjs turns them into results.json.
+res_dir="$(mktemp -d)"; mkdir -p "$res_dir/reports/render"
+( d="$(baseline)"; cd "$d" && cfg '' && discovered && sed -i 's#<lastmod>2026-09-01</lastmod>##' dist/client/sitemap.xml \
+  && GITHUB_ENV= GITHUB_STEP_SUMMARY= SHIP_GATE_DIR="$res_dir" node "$PREPARE" after-build >/dev/null 2>&1 \
+  && SHIP_GATE_DIR="$res_dir" node "$HERE/check-discovery.mjs" >/dev/null 2>&1; \
+  SHIP_GATE_DIR="$res_dir" node "$HERE/check-structure.mjs" >/dev/null 2>&1; rm -rf "$d" )
+printf '{"path":"/about/","findings":{"rendered-content":["without JavaScript the page has 3 of 300 words"],"lazy-first-viewport":[],"content-parity":[]}}' > "$res_dir/reports/render/about.json"
+printf '{"suites":[{"file":"page.spec.ts","specs":[{"title":"/about/: smoke, axe","file":"page.spec.ts","tests":[{"status":"unexpected"},{"status":"expected"}]}]},{"file":"edge.spec.ts","specs":[{"title":"edge","file":"edge.spec.ts","tests":[{"status":"expected"}]}]}]}' > "$res_dir/reports/playwright.json"
+out="$(cd "$res_dir" && SHIP_GATE_DIR="$res_dir" STAGE=full SHIP_GATE_COMMIT=abc1234 \
+  OUTCOMES="Contract and config=success |Structure scan=success |Discovery (SEO, AEO, GEO, AIO)=success |Smoke, axe, reflow, CSP, edge=failure |Lighthouse=skipped" \
+  node "$HERE/results.mjs" 2>&1)"; code=$?
+check "results.json written" "has:Results:" "$code" "$out"
+res_check() { # name, node expression over r (results.json) and c (id → check) that must be true
+  if node -e "const r=require('$res_dir/reports/results.json'),c=Object.fromEntries(r.checks.map(x=>[x.id,x]));process.exit(($2)?0:1)" 2>/dev/null; then ok "$1"
+  else bad "$1" "expression false: $2" "$(head -c 1500 "$res_dir/reports/results.json")"; fi
+}
+res_check "results: header fields"            "/^v\\d+\\.\\d+\\.\\d+\$/.test(r.shipGate) && r.stage==='full' && r.siteUrl==='https://example.com' && r.commit==='abc1234' && !isNaN(Date.parse(r.finishedAt))"
+res_check "results: every check has the schema" "r.checks.every(x=>typeof x.id==='string'&&typeof x.category==='string'&&['error','warn'].includes(x.level)&&['pass','fail','warn','not-run'].includes(x.status)&&Number.isInteger(x.count)&&Array.isArray(x.samples)&&x.samples.length<=10)"
+res_check "results: a build rule's warning"   "c['sitemap-lastmod'].status==='warn' && c['sitemap-lastmod'].count===1 && c['sitemap-lastmod'].category==='SEO'"
+res_check "results: a passing build rule"     "c['canonical'].status==='pass' && c['canonical'].level==='error'"
+res_check "results: a browser rule, from the render spec" "c['rendered-content'].status==='warn' && c['rendered-content'].samples[0]==='/about/'"
+res_check "results: live rules are not run in verify" "c['sitemap-live'].status==='not-run'"
+res_check "results: structure checks"         "c['structure:one-h1'].status==='pass'"
+res_check "results: a failed browser test"    "c['browser:page'].status==='fail' && c['browser:page'].samples[0]==='/about/' && c['browser:edge'].status==='pass'"
+res_check "results: step outcomes"            "c['step:browser'].status==='fail' && c['step:lighthouse'].status==='not-run' && c['step:contract'].status==='pass'"
+out="$(cd "$(mktemp -d)" && SHIP_GATE_DIR="$(pwd)/sg" OUTCOMES="Contract and config=failure" node "$HERE/results.mjs" 2>&1)"; code=$?
+check "results: written even when the contract failed" "has:Results:" "$code" "$out"
+rm -rf "$res_dir"
+has_text "action writes results.json on every run"  action.yml 'run: node "$GITHUB_ACTION_PATH/scripts/results.mjs"'
+if awk '/name: Results for website-audit/{f=1} f&&/if: always\(\)/{a=1} f&&/continue-on-error: true/{b=1} f&&/^    - /&&!/Results for website-audit/{exit} END{exit !(a&&b)}' "$HERE/../action.yml"; then ok "results step always runs and never fails the gate"
+else bad "results step always runs and never fails the gate" "needs if: always() and continue-on-error: true" ""; fi
+has_text "caller full sweep uploads ship-gate-results" templates/caller/.github/workflows/full-sweep.yml 'name: ship-gate-results'
+has_text "caller full sweep keeps results 35 days"   templates/caller/.github/workflows/full-sweep.yml 'retention-days: 35'
+if awk '/Upload results for website-audit/{f=1} f&&/if: always\(\)/{a=1} END{exit !a}' "$HERE/../templates/caller/.github/workflows/full-sweep.yml"; then ok "caller full sweep uploads results green or red"
+else bad "caller full sweep uploads results green or red" "the upload step needs if: always()" ""; fi
+
 echo "Release (release.sh)"
 # rel_case NAME EXPECT(pass|substring) CHANGELOG-TEXT — a dry run, so nothing is published
 rel_case() {

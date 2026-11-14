@@ -37,3 +37,13 @@ jobs:
         with:
           config: ${{ runner.temp }}/ship-gate.full.json
           # working-directory: site
+      # Every check's result, green or red, for website-audit: it reads the latest of these
+      # instead of re-testing what the build proves (README → Results for website-audit).
+      - name: Upload results for website-audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ship-gate-results
+          path: ${{ env.SHIP_GATE_DIR || format('{0}/ship-gate', runner.temp) }}/reports/results.json
+          retention-days: 35
+          if-no-files-found: warn

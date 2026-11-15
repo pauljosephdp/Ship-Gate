@@ -138,7 +138,10 @@ done < <(grep -rlE "from ['\"]posthog-node['\"]" src 2>/dev/null)
 # (secrets.required), so wrangler deploy and versions upload (every preview) fail when one is
 # unset, instead of shipping a Worker that silently sends nothing. A warning in v3; an error from v4.
 need="POSTHOG_API_KEY"
-policy turnstile-forms && need="$need ${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
+# The Turnstile secret only when a form uses Turnstile (the same test as guard 3b): a site under
+# turnstile-forms with no form holds no such secret, and declaring one would fail every deploy.
+policy turnstile-forms && scan '[Cc][Ff]-[Tt]urnstile|<[Tt]urnstile' src >/dev/null \
+  && need="$need ${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
 missing="$(secrets_missing "$need")"
 [ -z "$missing" ] || err posthog-secrets "posthog-hybrid: $missing. Declare the Worker's runtime secrets in the wrangler config (secrets.required listing ${need// /, } and any other secret the Worker reads) so a deploy or preview upload without them fails loudly. Note that wrangler dev then loads only the listed secrets."
 fi
@@ -161,7 +164,7 @@ done < <(grep -rlE '<form[ >]' src --include='*.astro' --include='*.tsx' --inclu
 # 3b. [turnstile-forms] Turnstile is verified server-side, so the Worker's secret is declared in
 #     secrets.required: a deploy or preview upload without it then fails instead of rejecting every
 #     submission. posthog-hybrid's check above already covers it. A warning.
-if policy turnstile-forms && ! policy posthog-hybrid && scan 'cf-turnstile|<Turnstile' src >/dev/null; then
+if policy turnstile-forms && ! policy posthog-hybrid && scan '[Cc][Ff]-[Tt]urnstile|<[Tt]urnstile' src >/dev/null; then
   need="${SHIP_GATE_TURNSTILE_SECRET:-TURNSTILE_SECRET_KEY}"
   missing="$(secrets_missing "$need")"
   [ -z "$missing" ] || echo "::warning::turnstile-forms: $missing. Declare the Turnstile secret in the wrangler config (secrets.required listing $need and any other secret the Worker reads) so a deploy or preview upload without it fails loudly."

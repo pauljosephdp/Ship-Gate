@@ -47,7 +47,7 @@ export const GUARDS = {
   'posthog-missing': { policy: 'posthog-hybrid', what: 'PostHog not initialised on every page' },
   'posthog-server': { policy: 'posthog-hybrid', what: 'posthog-node missing, or used outside server paths' },
   'posthog-csp': { policy: 'posthog-hybrid', what: 'a Content-Security-Policy that blocks PostHog' },
-  'posthog-secrets': { policy: 'posthog-hybrid', what: 'POSTHOG_API_KEY (and the Turnstile secret) missing from the wrangler config\'s secrets.required' },
+  'posthog-secrets': { policy: 'posthog-hybrid', what: 'POSTHOG_API_KEY (and, with a Turnstile form, the Turnstile secret) missing from the wrangler config\'s secrets.required' },
   'direct-tags': { policy: 'tags-via-zaraz', what: 'third-party tags loaded directly instead of through Zaraz' },
   turnstile: { policy: 'turnstile-forms', what: 'forms without Turnstile' },
   'pages-config': { policy: 'workers-builds-only', what: 'Pages config instead of Workers' },

@@ -136,7 +136,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { group: browser, dir: test/fixture-site, v1: conforming, v2: vendor-named-asset, v3: missing-alt, v4: wide-element, v5: csp-violation, v6: bad-redirect, v7: no-focus-ring, v8: tracker-cookie, v10: analytics-always-on }
+          - { group: browser, dir: test/fixture-site, v1: conforming, v2: vendor-named-asset, v3: missing-alt, v4: wide-element, v5: csp-violation, v6: bad-redirect, v7: no-focus-ring, v8: tracker-cookie, v9: back-button-hijack, v10: analytics-always-on }
           - { group: scans, dir: test/fixture-site, v1: two-h1, v2: direct-tag, v3: blocks-ai-search, v4: bad-jsonld, v5: robots-no-agents, v6: rtl-no-dir, v7: google-font, v8: allows-training, v9: posthog-hybrid-missing, v10: posthog-hybrid-csp }
           # A Cloudflare Worker site with pages rendered on request, run with "server": "preview".
           - { group: worker, dir: test/fixture-worker, v1: worker-conforming, v2: worker-remote-binding, v3: worker-no-csp, v4: worker-dead-link }

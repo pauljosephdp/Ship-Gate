@@ -12,14 +12,16 @@
 //   Findings warn by default; "keyboard": "error" in ship-gate.config.json makes them fail.
 // - reflow (WCAG 1.4.10): at each narrow width (320 CSS px is 1280px at 400% zoom) nothing pushes the
 //   page sideways. 200% zoom (1280 wide at 2x) needs its own context and is a separate test.
-// Consent, CSP, keyboard and reflow run on the desktop project only. Every check is a soft
+// - history: the page adds no session-history entry without a click, so Back leaves it (Google's back button
+//   hijacking spam policy, enforced from 15 Jun 2026).
+// Consent, CSP, keyboard, reflow and history run on the desktop project only. Every check is a soft
 // assertion, so one test reports every failing check on the page.
 // Page lists come from the site's ship-gate.config.json via run.json, never from this file.
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import {
   run, sameOriginOnly, settle, isPostHog, isTracker, ALWAYS_ESSENTIAL,
-  installCspProbe, installKeyboardProbe, measureOverflow,
+  installCspProbe, installHistoryProbe, installKeyboardProbe, measureOverflow,
 } from './helpers';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
@@ -47,6 +49,7 @@ for (const path of run.pages) {
     if (desktop) {
       await page.addInitScript(installCspProbe);
       await page.addInitScript(installKeyboardProbe);
+      await page.addInitScript(installHistoryProbe);
     }
     await sameOriginOnly(page);
 
@@ -168,6 +171,13 @@ for (const path of run.pages) {
       expect.soft(r.scroll, `${width}px: page is ${r.scroll}px wider than the viewport`).toBeLessThanOrEqual(1);
       expect.soft(r.culprits, `${width}px: elements past the right edge, outside any overflow container`).toEqual([]);
     }
+
+    // ── History: Back leaves the page ──
+    // By now the page has loaded, settled, been scrolled to the end at each width and tabbed through, with no click.
+    // Any history entry it added in that time is one a visitor must step back through to leave: back button
+    // hijacking, a Google spam policy (malicious practices) enforced from 15 Jun 2026.
+    const added = await page.evaluate(() => history.length - (window as any).__sgHistory0);
+    expect.soft(added, `history: the page added ${added} history entr${added === 1 ? 'y' : 'ies'} without a click (history.pushState or a hash change on load or scroll), so Back stays on it. Google treats this as back button hijacking (spam policy, 15 Jun 2026); add entries only on a visitor's action, or use history.replaceState`).toBe(0);
   });
 
   test(`${path}: reflows at 200% zoom (1280 @ 2x) without horizontal scroll`, async ({ browser, baseURL }, info) => {

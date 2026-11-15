@@ -757,7 +757,7 @@ checks:
 | `workers-builds-only` | No Pages config (`pages_build_output_dir`), and no workflow holds a Cloudflare API token or runs a `wrangler` write. Workers Builds is the only deployer |
 | `market-cn` | No page, stylesheet or script in the build loads from a host blocked in mainland China: `chinaBlockedHosts` in `standards/standards.json` (Google, its Fonts, Maps, reCAPTCHA and tags, YouTube, Facebook, Instagram, WhatsApp, X/Twitter, LinkedIn, Vimeo, Gravatar, Typekit, Dropbox, Medium, Slack, Notion, Figma, WordPress.org and others; v4 adds website-audit's hosts to v3's). A blocked font or script stalls the page until it times out. Only resources count: the URL attributes of loading elements (`script`, `img`, `iframe`, `source`, `video`, `audio`, `embed`, `object`, and `link` with a loading `rel` such as `stylesheet` or `preload`), CSS `@import` and `url()` (in files, `<style>` and `style=""`), and in script a URL passed to `fetch()`, `import()`, `importScripts()`, `sendBeacon()`, `new Worker()` or `EventSource`, assigned to `.src`, or named by a static `import`/`export … from`. In a hand-written inline `<script>`, any blocked URL fails unless it is a link: in `open()`, an `href` (including `setAttribute("href", …)`), `location`, a `share…` name, or a share or intent URL (`/intent/`, `sharer`, `share-offsite`, `/share`, `/shareArticle`). A blocked URL in a script comment counts too. Links (`<a href>`, `data-href`, JSON-LD `sameAs`, social meta) load nothing and pass; in a bundle, any other blocked URL warns. `chinaUnreliableHosts` (jsDelivr, unpkg) warn; non-ASCII URLs warn |
 | `rtl-logical-css` | Warns with a count of physical `left`/`right` declarations in the built CSS (`margin-left`, `padding-right`, `left:`, `text-align: left`, `float: right`, `border-left`), which don't mirror under `dir="rtl"`. Use logical properties (`margin-inline-start`, `inset-inline-start`, `text-align: start`). Never fails: some physical values are right |
-| `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. A wrangler config without `secrets.required` listing `POSTHOG_API_KEY` (and, with `turnstile-forms`, the `turnstileEnv` secret) fails (`posthog-secrets`, an error from v4; exemptible with a date). Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
+| `posthog-hybrid` | PostHog in the browser on every page **and** on the server, every feature on, EU Cloud. `posthog-node` is a dependency and stays in server paths, flushing, with `__DEPLOY_ENV__` on every event; a component in `src` calls `posthog.init(` and registers `environment: __DEPLOY_ENV__`; with `"embed": "npm"`, `posthog-js` is a dependency. Only `PUBLIC_POSTHOG_KEY` is public: a `PUBLIC_POSTHOG_*PERSONAL*`/`*SECRET*` variable, a US host, or a hard-coded `phc_`/`phx_` key fails. A wrangler config without `secrets.required` listing `POSTHOG_API_KEY` (and, with `turnstile-forms` and a Turnstile form in `src`, the `turnstileEnv` secret) fails (`posthog-secrets`, an error from v4; exemptible with a date). Then the PostHog scan, the browser checks and the post-deploy check above. Can't be combined with `posthog-server-only`. See PostHog in the browser and on the server |
 | `consent-before-tracking` | The browser consent check: no non-essential cookie and no tracker (the consent-sensitive `trackerVendors` categories) before the visitor chooses. Strictly necessary cookies go in `consentEssentialCookies` |
 | `first-party-only` | Every page the sitemap lists loads only first-party resources (Browser checks). Third-party origins the site needs go in `allowedOrigins`. With `turnstile-forms` that list must hold `https://challenges.cloudflare.com`, and with `posthog-hybrid` `posthog.apiHost` must be a same-origin proxy path |
 | `analytics-always-on` | Google Analytics and PostHog load on every page, with or without consent, and neither stores anything until the visitor accepts. Needs `posthog-hybrid` (with `posthog.cookieless` `"on_reject"` or `"always"`) and `tags-via-zaraz`. GA4 is a Zaraz tool with no consent purpose, in Google Consent Mode v2 with every signal denied by default. See Analytics on every page |
@@ -880,7 +880,8 @@ are the site owner's decisions.
   when one is unset, instead of shipping a Worker that silently sends nothing.
   Once `secrets` is set, `wrangler dev` loads only the secrets listed, so list
   all of them. Ship Gate fails when the list is missing (`posthog-secrets`; it
-  warned before v4).
+  warned before v4). The Turnstile secret is required only when a form in `src` uses
+  Turnstile (`cf-turnstile` or `<Turnstile`); a site with no form lists `POSTHOG_API_KEY` alone.
 
 CI never needs a real key: Ship Gate builds with its own CI-only key, and
 post-deploy fails if that one reaches production.
@@ -1133,7 +1134,7 @@ in the workflow.
 Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
 
 ```yaml
-- uses: pauljosephdp/Ship-Gate/ci-health@v4.0.0
+- uses: pauljosephdp/Ship-Gate/ci-health@v4.0.1
   with:
     workflow: ci.yml        # the workflow to watch
     timeout-minutes: 30     # its job timeout
@@ -1237,11 +1238,11 @@ duration bands are proposed to web-baseline, alongside adopting this release.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v4.0.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v4.0.1 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v4.0.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v4.0.1". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,

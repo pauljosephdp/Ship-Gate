@@ -230,7 +230,7 @@ expect_guard "hybrid: secrets in jsonc, quiet"    "nowarn:secrets.required"   "$
 POLICIES=posthog-hybrid \
 expect_guard "hybrid: secrets in toml, quiet"     "nowarn:secrets.required"   "$HYB && $SECRETS_TOML"
 POLICIES="posthog-hybrid turnstile-forms" \
-expect_guard "hybrid: turnstile-forms, no form: no Turnstile secret needed" pass "$HYB && $SECRETS_TOML"
+expect_guard "hybrid: turnstile-forms, no form: no Turnstile secret needed" pass "$HYB && $SECRETS_TOML && rm src/pages/contact.astro"
 POLICIES="posthog-hybrid turnstile-forms" \
 expect_guard "hybrid: turnstile secret missing"   "lacks TURNSTILE_SECRET_KEY" "$HYB && $SECRETS_TOML"
 SHIP_GATE_TURNSTILE_SECRET=TURNSTILE_SECRET POLICIES="posthog-hybrid turnstile-forms" \

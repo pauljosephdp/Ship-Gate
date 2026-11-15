@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.0.1 — 2026-11-15
+
+**Fixed**
+- **`posthog-secrets` asks for the Turnstile secret only when a form uses Turnstile.** Under `turnstile-forms` it required the Turnstile secret in `secrets.required` even on a site with no Turnstile form. Such a Worker holds no Turnstile secret, and declaring one would fail every deploy, so the site could not pass `verify` either way. Guard 3b (the `turnstile-forms` check without `posthog-hybrid`) already scanned `src` for `cf-turnstile` or `<Turnstile` first; `posthog-secrets` now uses the same test. `POSTHOG_API_KEY` is still required. Found on Playway and LowLightKing, whose forms were removed, in their web-baseline 6.15.1 upgrade PRs. New self-test case: `turnstile-forms` with no form needs no Turnstile secret.
+
 ## v4.0.0 — 2026-11-14
 
 One rule file, one owner per check. Ship Gate and the website-audit skill (`pauljosephdp/Skills`) ran about 20 of the same checks with different rules. Now anything provable from the build, or the build served on `localhost`, is Ship Gate's; anything that needs production, the edge, field data or Search Console is website-audit's; both read `standards/standards.json`, owned here. This removes checks callers relied on, so it is a major. Intent, spec and plan: `docs/intent/2026-11-14-standards-v4/`.

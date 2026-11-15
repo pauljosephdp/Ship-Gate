@@ -3,7 +3,7 @@
 ## v4.0.1 — 2026-11-15
 
 **Fixed**
-- **`posthog-secrets` asks for the Turnstile secret only when a form uses Turnstile.** Under `turnstile-forms` it required the Turnstile secret in `secrets.required` even on a site with no Turnstile form. Such a Worker holds no Turnstile secret, and declaring one would fail every deploy, so the site could not pass `verify` either way. Guard 3b (the `turnstile-forms` check without `posthog-hybrid`) already scanned `src` for `cf-turnstile` or `<Turnstile` first; `posthog-secrets` now uses the same test. `POSTHOG_API_KEY` is still required. Found on Playway and LowLightKing, whose forms were removed, in their web-baseline 6.15.1 upgrade PRs. New self-test case: `turnstile-forms` with no form needs no Turnstile secret.
+- **`posthog-secrets` asks for the Turnstile secret only when a form uses Turnstile.** Under `turnstile-forms` it required the Turnstile secret in `secrets.required` even on a site with no Turnstile form. Such a Worker holds no Turnstile secret, and declaring one would fail every deploy, so the site could not pass `verify` either way. Guard 3b (the `turnstile-forms` check without `posthog-hybrid`) already scanned `src` for `cf-turnstile` or `<Turnstile` first; `posthog-secrets` now uses the same test, and both scans ignore case, as guard 3's per-form check does. `POSTHOG_API_KEY` is still required. Found on Playway and LowLightKing, whose forms were removed, in their web-baseline 6.15.1 upgrade PRs. New self-test cases: `turnstile-forms` with no form needs no Turnstile secret, and still needs `POSTHOG_API_KEY`. Intent and plan: `docs/intent/2026-11-15-turnstile-secret-only-with-form/`.
 
 ## v4.0.0 — 2026-11-14
 

@@ -866,7 +866,7 @@ are the site owner's decisions.
 **Where each key goes** (Cloudflare dashboard, the Worker):
 - `PUBLIC_POSTHOG_KEY`: Settings → Build → *Build variables*. It is read at
   build time and baked into the pages.
-- `POSTHOG_API_KEY`, and with `turnstile-forms` the Turnstile secret: Settings
+- `POSTHOG_API_KEY`, and with a Turnstile form the Turnstile secret: Settings
   → *Variables and Secrets*, type **Secret**. A plaintext variable there is
   wiped by the next deploy (the wrangler config owns plaintext vars).
 - Both PostHog keys are the same `phc_` project key. A `phx_` personal key is

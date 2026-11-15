@@ -14,17 +14,26 @@ Accepted-by: Paul, 15 Nov 2026 (self-healing fleet plan approval and "start step
 - `retiredRichResults` leaves out ClaimReview, which Google phased out of Search results (12 Jun 2025) and removed from
   Search Console reporting on 9 Sep 2025, and the Sitelinks search box.
 
-## Outcome
+## Proposed outcome
 
 - New discovery rule `html-size` (SEO, error): a built indexable page over `buildChecks.htmlSize.maxBytes` (2,097,152
   bytes less 16 KiB of headroom for the response headers) fails, and the message names the head elements past the cut.
 - `retiredRichResults` gains ClaimReview (2025-09-09, sourced) and the Sitelinks search box ("unverified date", like
   HowTo, because its primary source was not re-read).
 
-## Who is affected
+## Affected users and systems
 
 Sites with a page over 2 MB: none of the fleet's pages comes close (web-baseline's page-weight budgets are far below).
 A conforming site passes, so this is a minor.
+
+## Constraints
+
+- Only facts re-read from the primary source on 15 Nov 2026 gate anything; an unconfirmed date is recorded as
+  unverified, never as a rule.
+
+## Open questions
+
+- The Sitelinks search box removal date (believed Nov 2024) needs Google's own post before it is filled in.
 
 ## Not in this change
 

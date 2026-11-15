@@ -43,13 +43,16 @@ const pageByPath = new Map(pages.map((p) => [p.path, p]));
 // so a page over the limit loses whatever comes after the cut; name the head elements that would be lost.
 {
   const H = BUILD_CHECKS.htmlSize;
-  for (const p of files.filter((f) => f.kind === 'page')) {
+  for (const p of pages) {
     const bytes = Buffer.byteLength(p.html, 'utf8');
     if (bytes <= H.maxBytes) continue;
     const head = Buffer.from(p.html, 'utf8').subarray(0, H.maxBytes).toString('utf8');
-    const lost = [['<title>', /<title[\s>]/i], ['the canonical', /<link[^>]+rel=["']?canonical/i], ['meta robots', /<meta[^>]+name=["']?(robots|googlebot)/i], ['JSON-LD', /application\/ld\+json/i]]
-      .filter(([, re]) => re.test(p.html) && !re.test(head)).map(([n]) => n);
-    add('html-size', p.path, `is ${(bytes / 1048576).toFixed(2)} MB; Googlebot reads only the first ${(H.maxBytes / 1048576).toFixed(0)} MB${lost.length ? `, so it never sees ${lost.join(', ')}` : ''}.`);
+    // An element is lost when the page has more of it than the part Googlebot reads (a second JSON-LD block past the cut
+    // counts), or when one is cut through (its closing > is past the cut).
+    const count = (txt, re) => (txt.match(new RegExp(re.source, 'gi')) || []).length;
+    const lost = [['<title>', /<title[^>]*>/], ['the canonical', /<link[^>]+rel=["']?canonical[^>]*>/], ['meta robots', /<meta[^>]+name=["']?(?:robots|googlebot)[^>]*>/], ['JSON-LD', /<script[^>]+application\/ld\+json[^>]*>[\s\S]*?<\/script>/]]
+      .filter(([, re]) => count(p.html, re) > count(head, re)).map(([n]) => n);
+    add('html-size', p.path, `is ${(bytes / 1048576).toFixed(2)} MB; Googlebot reads only the first ${(H.maxBytes / 1048576).toFixed(2)} MB (2 MB less headroom for the response headers)${lost.length ? `, so it never sees ${lost.join(', ')}` : ''}.`);
   }
 }
 if (pages.length === 0) {

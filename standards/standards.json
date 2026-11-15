@@ -86,7 +86,8 @@
     {"type": "HowTo", "retired": "unverified date", "source": null},
     {"type": "Course info", "retired": "2025-09-09"}, {"type": "Estimated salary", "retired": "2025-09-09"},
     {"type": "Learning video", "retired": "2025-09-09"}, {"type": "Special announcement", "retired": "2025-09-09"},
-    {"type": "Vehicle listing", "retired": "2025-09-09"}, {"type": "Practice problem", "retired": "2026-01-06"}
+    {"type": "Vehicle listing", "retired": "2025-09-09"}, {"type": "Practice problem", "retired": "2026-01-06"},
+    {"type": "ClaimReview", "retired": "2025-09-09", "source": "https://developers.google.com/search/blog/2025/06/simplifying-search-results"}, {"type": "Sitelinks search box", "retired": "unverified date", "source": null}
   ],
   "llmsTxt": {"requireH1": true, "requireSummary": true, "requireLinks": true, "requireSections": false, "missingLevel": "warn", "note": "llmstxt.org allows zero or more H2 sections. No AI vendor documents reading llms.txt; Google says AI features need no special files.", "source": "https://llmstxt.org"},
   "redirects": {"permanent": [301, 308], "temporary": [302, 303, 307], "source": "https://developers.google.com/search/docs/crawling-indexing/301-redirects"},
@@ -129,6 +130,7 @@
     }
   },
   "buildChecks": {
+    "htmlSize": {"maxBytes": 2080768, "from": "Google Search Central, Inside Googlebot (31 Mar 2026; updated 29 Oct 2026): Googlebot fetches up to 2 MB per URL, HTTP response headers included, and drops the rest. 2,097,152 bytes less 16 KiB of headroom for the response headers. Ship-Gate fails a built page over it and names the head elements past the cut; website-audit reads the result (T-12).", "source": "https://developers.google.com/search/blog/2026/03/crawler-blog-post"},
     "_doc": "Thresholds for the build-provable checks Ship-Gate took over from website-audit on 2026-11-14 (one owner per check). Each names the script its value came from; website-audit reads Ship-Gate's results for these instead of re-testing them.",
     "sitemapBulkLastmod": {"minUrls": 10, "shareRatio": 0.9, "buildTimeWindowSeconds": 120, "from": "website-audit scripts/verify_site.py (bulk_stamped: one lastmod across the sampled URLs that carry one); Ship-Gate reads the whole sitemap, so 10 or more URLs with a lastmod, 90% of them on one value. Not flagged when that value is the repository's first commit date or the site derives lastmod from git (src/data/lastmod.json, web-baseline's gen-lastmod). The build-time window is Ship-Gate's"},
     "renderedContent": {"minWordRatio": 0.7, "minLinkRatio": 0.5, "from": "website-audit scripts/capture_site.py (no_js_baseline, PASS at word_ratio >= 0.7 and link_ratio >= 0.5)"},

@@ -67,6 +67,7 @@ export const RULES = {
   'markdown-mirrors':   { category: 'GEO', level: 'warn',  title: 'Markdown and text mirrors stay out of the search index' },
   'snippet-controls':   { category: 'AIO', level: 'warn',  title: 'Indexable pages allow text snippets' },
   'image-preview':      { category: 'AIO', level: 'warn',  title: 'Indexable pages allow image previews' },
+  'html-size':          { category: 'SEO', level: 'error', title: "Every HTML page fits Googlebot's 2 MB fetch" },
   'img-dimensions':     { category: 'perf', level: 'error', title: 'Every local <img> sets width and height' },
   'lazy-first-viewport':{ category: 'perf', level: 'warn',  where: 'browser', title: 'No image in the first viewport is loading="lazy"' },
 };

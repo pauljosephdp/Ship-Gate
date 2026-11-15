@@ -38,6 +38,23 @@ const files = htmlFiles(root).map((p) => ({ ...p, html: readFileSync(p.file, 'ut
   .map((p) => ({ ...p, kind: pageKind(p.rel, p.html) }));
 const pages = files.filter((p) => p.kind === 'page');
 const pageByPath = new Map(pages.map((p) => [p.path, p]));
+
+// html-size: Googlebot fetches the first 2 MB of an HTML URL and silently drops the rest (standards buildChecks.htmlSize),
+// so a page over the limit loses whatever comes after the cut; name the head elements that would be lost.
+{
+  const H = BUILD_CHECKS.htmlSize;
+  for (const p of pages) {
+    const bytes = Buffer.byteLength(p.html, 'utf8');
+    if (bytes <= H.maxBytes) continue;
+    const head = Buffer.from(p.html, 'utf8').subarray(0, H.maxBytes).toString('utf8');
+    // An element is lost when the page has more of it than the part Googlebot reads (a second JSON-LD block past the cut
+    // counts), or when one is cut through (its closing > is past the cut).
+    const count = (txt, re) => (txt.match(new RegExp(re.source, 'gi')) || []).length;
+    const lost = [['<title>', /<title[^>]*>/], ['the canonical', /<link[^>]+rel=["']?canonical[^>]*>/], ['meta robots', /<meta[^>]+name=["']?(?:robots|googlebot)[^>]*>/], ['JSON-LD', /<script[^>]+application\/ld\+json[^>]*>[\s\S]*?<\/script>/]]
+      .filter(([, re]) => count(p.html, re) > count(head, re)).map(([n]) => n);
+    add('html-size', p.path, `is ${(bytes / 1048576).toFixed(2)} MB; Googlebot reads only the first ${(H.maxBytes / 1048576).toFixed(2)} MB (2 MB less headroom for the response headers)${lost.length ? `, so it never sees ${lost.join(', ')}` : ''}.`);
+  }
+}
 if (pages.length === 0) {
   console.log(`::error::No indexable HTML pages found in ${root}. Zero pages scanned is a failure, not a pass.`);
   process.exit(1);

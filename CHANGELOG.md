@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.1.0 — 2026-11-15
+
+**Added**
+- **`html-size` (SEO, error): a page Googlebot would cut fails.** Googlebot fetches up to 2 MB of an HTML URL, HTTP response headers included, and drops the rest ([Inside Googlebot](https://developers.google.com/search/blog/2026/03/crawler-blog-post), updated 29 Oct 2026). Every built indexable page over `buildChecks.htmlSize.maxBytes` (2,097,152 bytes less 16 KiB for the headers) fails, and the message names the `<title>`, canonical, meta robots or JSON-LD that fall past the cut. A conforming site is far below it. New self-test cases: over the limit fails, a title past the cut is named, just under passes.
+- **`retiredRichResults`:** ClaimReview (removed from Search Console reporting on 9 Sep 2025, [Google](https://developers.google.com/search/blog/2025/06/simplifying-search-results)) and the Sitelinks search box (date unverified, like HowTo).
+
+Intent, spec and plan: `docs/intent/2026-11-15-html-size-retired-rich-results/` (Skills ai-readiness gaps 5 and 7).
+
 ## v4.0.1 — 2026-11-15
 
 **Fixed**

@@ -509,6 +509,7 @@ The four terms overlap, so each rule sits under the one it matters most to:
 | GEO | `markdown-mirrors` | warn | a `.md` or `.txt` file linked from `llms.txt` has no `X-Robots-Tag: noindex` (or canonical `Link`) header in `_headers` |
 | AIO | `snippet-controls` | warn | an indexable page sets `nosnippet` or `max-snippet:0` |
 | AIO | `image-preview` | warn | an indexable page sets `max-image-preview:none` |
+| SEO | `html-size` | error | an indexable page is over `buildChecks.htmlSize.maxBytes` (Googlebot reads the first 2 MB of a URL, response headers included, and drops the rest); names the title, canonical, meta robots or JSON-LD past the cut |
 | perf | `img-dimensions` | error | a local `<img>` (on `siteUrl`, or a `data:` URL) has no `width` or no `height`, so the page shifts as it loads. Remote images and `<noscript>` fallbacks are not checked |
 | perf | `lazy-first-viewport` | warn | *browser*: an image in the first viewport is `loading="lazy"` (Browser checks) |
 
@@ -1134,7 +1135,7 @@ in the workflow.
 Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
 
 ```yaml
-- uses: pauljosephdp/Ship-Gate/ci-health@v4.0.1
+- uses: pauljosephdp/Ship-Gate/ci-health@v4.1.0
   with:
     workflow: ci.yml        # the workflow to watch
     timeout-minutes: 30     # its job timeout
@@ -1238,11 +1239,11 @@ duration bands are proposed to web-baseline, alongside adopting this release.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v4.0.1 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v4.1.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v4.0.1". Do not change deploy configuration
+> titled "chore: adopt ship gate v4.1.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,

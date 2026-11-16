@@ -53,6 +53,13 @@ else
   grep -qF "| $fails | ❌ failed |" "$SHIP_GATE_DIR/summary.md" \
     || { echo "::error::Variant $variant must fail \"$fails\"."; exit 1; }
 fi
+# A variant whose fault one check owns must fail that check, not only its step.
+if [ "$variant" = back-button-hijack ]; then
+  node -e 'const c = require(process.argv[1]).checks.find((x) => x.id === "browser:history");
+    if (!c || c.status !== "fail") { console.log(`browser:history is ${c ? c.status : "missing"}, not fail`); process.exit(1); }' \
+    "$SHIP_GATE_DIR/reports/results.json" \
+    || { echo "::error::Variant $variant must fail browser:history in reports/results.json."; exit 1; }
+fi
 # A stage that skipped Lighthouse or the browser must show it: "not run", never "passed".
 if [ "$stage" != full ]; then
   grep -qF "| Lighthouse | ➖ not run |" "$SHIP_GATE_DIR/summary.md" \

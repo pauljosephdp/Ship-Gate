@@ -5,7 +5,9 @@
 - `e2e/page.spec.ts` — the probe on desktop; the `history:` soft assertion at the end of the page test.
 - `scripts/results.mjs` — `browser:history` (SEO, error).
 - `test/break-fixture.sh`, `test/expect-gate.sh`, `.github/workflows/self-test.yml` — variant `back-button-hijack`
-  (browser group, slot v9), expected to fail "Smoke, axe, reflow, CSP, edge".
+  (browser group, slot v9), expected to fail "Smoke, axe, reflow, CSP, edge" and `browser:history` in results.json.
+- `scripts/self-test.sh` — a `history:` error files under `browser:history`.
+- Review fixes (15 Nov): the baseline kept per tab in sessionStorage with a per-document fallback, never NaN.
 - `README.md`, `CHANGELOG.md`, caller templates — the History check, `browser:history`, v4.2.0 pins.
 
 ## Order of work
@@ -16,7 +18,11 @@ A site with a script that pushes state on load goes red on its next Ship Gate bu
 on every site before the pin moves, so it shows there first.
 
 ## Proof
-- Browser suite on the fixture (verifier step 4): `conforming` passes (14/14); `back-button-hijack` fails only
-  `/: history: the page added 2 history entries…`, 13 others pass.
-- `bash scripts/self-test.sh`, `shellcheck -S error …`, `bash scripts/check-readme.sh origin/main`.
-- The fixture jobs on the ready PR: browser group v9 fails as expected.
+- Browser suite on the fixture (verifier step 4): `conforming` passes (14/14); `back-button-hijack` (two pushState on
+  load) fails only `/: history: the page added 2 history entries…`, the rest pass.
+- A redirect after load (review, 15 Nov), run locally: the desktop page test fails on `history: … 1 history entry` in
+  3 of 3 runs; the zoom test and sometimes mobile smoke also fail ("Execution context was destroyed") because the page
+  navigates mid-test. A page calling `sessionStorage.clear()` falls back to its own start.
+- `bash scripts/self-test.sh` (a `history:` error files under `browser:history`), `shellcheck -S error …`,
+  `bash scripts/check-readme.sh origin/main`.
+- The fixture jobs on the ready PR: browser group v9 fails, and `expect-gate.sh` finds `browser:history` = fail.

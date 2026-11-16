@@ -121,11 +121,12 @@ export const ALWAYS_ESSENTIAL = ['__cf_bm', 'cf_clearance', '__cflb', '_cfuvid']
 // sessionStorage, so it survives a navigation the page makes itself. Entries added on load or scroll
 // (history.pushState, a hash change, a redirect after load) show as growth: back button hijacking.
 export function installHistoryProbe() {
+  // This document's start, always: the fallback when storage is blocked or the page clears it.
+  (window as any).__sgH0 = history.length;
   try {
     if (sessionStorage.getItem('__sgH0') === null) sessionStorage.setItem('__sgH0', String(history.length));
   } catch {
-    // Storage blocked: fall back to this document's start, which still catches pushState and hash changes.
-    (window as any).__sgH0 = history.length;
+    // Storage blocked: the document's start still catches pushState and hash changes.
   }
 }
 

@@ -367,7 +367,9 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   starting length is kept per tab), and so do same-origin iframes. Add entries
   only on a visitor's action, or use `history.replaceState`. No exemption.
   `verify` blocks third-party requests, so this sees first-party code only;
-  website-audit's T-11 checks the live site with its third-party code.
+  website-audit's T-11 checks the live site with its third-party code. A page
+  that redirects itself mid-test can also fail other checks ("Execution context
+  was destroyed"); the `history:` line names the cause.
 - **CSP:** a page that sends a Content-Security-Policy (enforced or Report-Only)
   must load with zero violations.
 - **Consent** (`consent-before-tracking` policy, desktop): before any

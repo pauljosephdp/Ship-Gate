@@ -363,8 +363,11 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   load or scroll). Google treats such entries as back button hijacking, a spam
   policy under malicious practices enforced from 15 Jun 2026
   ([Google](https://developers.google.com/search/blog/2026/04/back-button-hijacking)),
-  often from third-party ad or widget code. Add entries only on a visitor's
-  action, or use `history.replaceState`. No exemption.
+  often from third-party ad or widget code. A redirect after load counts (the
+  starting length is kept per tab), and so do same-origin iframes. Add entries
+  only on a visitor's action, or use `history.replaceState`. No exemption.
+  `verify` blocks third-party requests, so this sees first-party code only;
+  website-audit's T-11 checks the live site with its third-party code.
 - **CSP:** a page that sends a Content-Security-Policy (enforced or Report-Only)
   must load with zero violations.
 - **Consent** (`consent-before-tracking` policy, desktop): before any

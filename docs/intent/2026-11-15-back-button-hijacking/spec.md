@@ -6,8 +6,8 @@
 2. The failure message starts with `history:`, names the count, and says how to fix it (`replaceState`, or an entry
    only on a visitor's action).
 3. `reports/results.json` carries `browser:history` (category SEO, level error).
-4. A fixture variant that pushes two entries on load and re-pushes on `popstate` fails the gate on the browser stage,
-   and the conforming fixture passes.
+4. A fixture variant that redirects after load (the form a per-document baseline misses) fails the gate on the browser
+   stage, and the conforming fixture passes. A self-test case files a `history:` failure under `browser:history`.
 
 ## Design
 An init script (`installHistoryProbe`, `e2e/helpers.ts`) records `history.length` before any page script runs; the
@@ -16,8 +16,9 @@ sorts the `history:` message to its own record. Minor version: a new error check
 
 ## Areas of concern
 A site whose own script calls `pushState` on load fails; that is the policy, and the message names the fix. The probe
-cannot see entries a page adds only after a timer longer than the test; the post-deploy and website-audit live check
-(T-11) covers third-party code that waits.
+cannot see entries a page adds only after a timer longer than the test, and `verify` blocks third-party requests, so
+third-party code never runs here: website-audit's live check (T-11, `capture_site.py`) covers it. Post-deploy does not.
+The baseline is kept per tab in sessionStorage (`__sgH0`), so a redirect after load counts (review, 15 Nov).
 
 ## Out of scope
 Detecting `popstate` traps that need an existing entry; website-audit T-11 (Skills).

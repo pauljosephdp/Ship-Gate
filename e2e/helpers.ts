@@ -117,10 +117,16 @@ export const isTracker = (url: string) => run.trackers.some((t) => trackerMatche
 // Cloudflare's bot-management and load-balancing cookies are strictly necessary.
 export const ALWAYS_ESSENTIAL = ['__cf_bm', 'cf_clearance', '__cflb', '_cfuvid'];
 
-// Init script: the session history length the page starts with, read before any page script runs, so a
-// script that adds entries on load (history.pushState, a hash change) shows as growth (back button hijacking).
+// Init script: the session history length the tab starts with, read before any page script runs and kept in
+// sessionStorage, so it survives a navigation the page makes itself. Entries added on load or scroll
+// (history.pushState, a hash change, a redirect after load) show as growth: back button hijacking.
 export function installHistoryProbe() {
-  (window as any).__sgHistory0 = history.length;
+  try {
+    if (sessionStorage.getItem('__sgH0') === null) sessionStorage.setItem('__sgH0', String(history.length));
+  } catch {
+    // Storage blocked: fall back to this document's start, which still catches pushState and hash changes.
+    (window as any).__sgH0 = history.length;
+  }
 }
 
 // Init script: records Content-Security-Policy violations from the first byte.

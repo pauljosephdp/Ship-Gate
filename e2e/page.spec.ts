@@ -28,7 +28,7 @@ const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 const consentOn = run.policies.includes('consent-before-tracking') && !run.exempt.includes('consent');
 
 for (const path of run.pages) {
-  test(`${path}: smoke, axe, consent, CSP, keyboard and reflow`, async ({ page, context }, info) => {
+  test(`${path}: smoke, axe, consent, CSP, keyboard, reflow and history`, async ({ page, context }, info) => {
     const desktop = info.project.name === 'desktop';
     test.setTimeout(240_000); // one Tab per control: a long page takes a while
     const errors: string[] = [];
@@ -176,8 +176,12 @@ for (const path of run.pages) {
     // By now the page has loaded, settled, been scrolled to the end at each width and tabbed through, with no click.
     // Any history entry it added in that time is one a visitor must step back through to leave: back button
     // hijacking, a Google spam policy (malicious practices) enforced from 15 Jun 2026.
-    const added = await page.evaluate(() => history.length - (window as any).__sgHistory0);
-    expect.soft(added, `history: the page added ${added} history entr${added === 1 ? 'y' : 'ies'} without a click (history.pushState or a hash change on load or scroll), so Back stays on it. Google treats this as back button hijacking (spam policy, 15 Jun 2026); add entries only on a visitor's action, or use history.replaceState`).toBe(0);
+    const added = await page.evaluate(() => {
+      let start: number;
+      try { start = Number(sessionStorage.getItem('__sgH0') ?? (window as any).__sgH0); } catch { start = (window as any).__sgH0; }
+      return history.length - start;
+    });
+    expect.soft(added, `history: the page added ${added} history entr${added === 1 ? 'y' : 'ies'} without a click (history.pushState, a hash change or a redirect after load or on scroll; same-origin iframes count too), so Back stays on it. Google treats this as back button hijacking (spam policy, 15 Jun 2026); add entries only on a visitor's action, or use history.replaceState`).toBe(0);
   });
 
   test(`${path}: reflows at 200% zoom (1280 @ 2x) without horizontal scroll`, async ({ browser, baseURL }, info) => {

@@ -36,7 +36,7 @@ case "$variant" in
   vendor-named-asset) stage=browser fails="" ;;
   analytics-always-on) stage=browser fails="" ;;
   posthog-hybrid-missing|posthog-hybrid-csp) stage=scans fails="PostHog on every page" ;;
-  missing-alt|wide-element|csp-violation|bad-redirect|no-focus-ring|tracker-cookie) stage=browser fails="Smoke, axe, reflow, CSP, edge" ;;
+  missing-alt|wide-element|csp-violation|bad-redirect|no-focus-ring|tracker-cookie|back-button-hijack) stage=browser fails="Smoke, axe, reflow, CSP, edge" ;;
   two-h1) stage=scans fails="Structure scan" ;;
   direct-tag) stage=scans fails="Stack guards" ;;
   blocks-ai-search|bad-jsonld|robots-no-agents|rtl-no-dir|allows-training) stage=scans fails="Discovery (SEO, AEO, GEO, AIO)" ;;
@@ -52,6 +52,13 @@ else
   [ "$outcome" = failure ] || { echo "::error::Variant $variant must fail the gate, but it passed."; exit 1; }
   grep -qF "| $fails | ❌ failed |" "$SHIP_GATE_DIR/summary.md" \
     || { echo "::error::Variant $variant must fail \"$fails\"."; exit 1; }
+fi
+# A variant whose fault one check owns must fail that check, not only its step.
+if [ "$variant" = back-button-hijack ]; then
+  node -e 'const c = require(process.argv[1]).checks.find((x) => x.id === "browser:history");
+    if (!c || c.status !== "fail") { console.log(`browser:history is ${c ? c.status : "missing"}, not fail`); process.exit(1); }' \
+    "$SHIP_GATE_DIR/reports/results.json" \
+    || { echo "::error::Variant $variant must fail browser:history in reports/results.json."; exit 1; }
 fi
 # A stage that skipped Lighthouse or the browser must show it: "not run", never "passed".
 if [ "$stage" != full ]; then

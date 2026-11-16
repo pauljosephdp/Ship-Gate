@@ -83,6 +83,10 @@ case "$1" in
   bad-jsonld) add '<script type="application/ld+json" set:html="{not json" />' ;;
   rtl-no-dir) sed -i 's# dir={dir}##' src/layouts/Base.astro ;;
   google-font) add '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">' ;;
+  # Two history entries on load and one more on every Back: the back button never leaves the page. Deterministic, so
+  # only the history check fails (expect-gate.sh requires browser:history to read fail). A redirect after load is
+  # caught too (the baseline is kept per tab); it races the page test, so it is proven locally, not here.
+  back-button-hijack) printf 'history.pushState(null, "", location.href);\nhistory.pushState(null, "", location.href);\naddEventListener("popstate", () => history.pushState(null, "", location.href));\n' > public/hijack.js; add '<script is:inline src="/hijack.js"></script>' ;;
   no-focus-ring) add '<p><a href="/contact/" style="outline:none">Write to the fixture</a></p>' ;;
   tracker-cookie) printf '/\n  Set-Cookie: _ga=GA1.1.123.456; Path=/\n' >> public/_headers ;;
   vendor-named-asset) echo '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>' > public/hubspot-partner-badge.svg; add '<img src="/hubspot-partner-badge.svg" alt="HubSpot partner" width="8" height="8">' ;;

@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.2.0 — 2026-11-15
+
+**Added**
+- **`browser:history` (SEO, error): back button hijacking fails.** Google made it a spam policy (malicious practices) enforced from 15 Jun 2026 ([Google](https://developers.google.com/search/blog/2026/04/back-button-hijacking)). The page test now records the session-history length before any page script runs and fails a page that added an entry by the end of the test (load, scrolling at each reflow width, tabbing) with no click: `history.pushState` or a hash change on load or scroll, or a redirect after load (the starting length is kept per tab), often from third-party ad or widget code. `verify` blocks third-party requests, so it sees first-party code; website-audit T-11 checks the live site. The message names the count and the fix (add entries only on a visitor's action, or use `history.replaceState`). Desktop only, on the existing page load; no exemption. New fixture variant `back-button-hijack` (browser group: two pushState on load) must fail `browser:history` in `reports/results.json`; the conforming fixture passes; a self-test case files a `history:` failure under `browser:history`.
+
+Intent, spec and plan: `docs/intent/2026-11-15-back-button-hijacking/` (Skills ai-readiness gap 6).
+
 ## v4.1.0 — 2026-11-15
 
 **Added**

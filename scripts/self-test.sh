@@ -897,12 +897,12 @@ res_dir="$(mktemp -d)"; mkdir -p "$res_dir/reports/render"
   && SHIP_GATE_DIR="$res_dir" node "$HERE/check-discovery.mjs" >/dev/null 2>&1; \
   SHIP_GATE_DIR="$res_dir" node "$HERE/check-structure.mjs" >/dev/null 2>&1; rm -rf "$d" )
 printf '{"path":"/about/","findings":{"rendered-content":["without JavaScript the page has 3 of 300 words"],"lazy-first-viewport":[],"content-parity":[]}}' > "$res_dir/reports/render/about.json"
-# Playwright's JSON report: /about/ fails axe and the 320px reflow, / warns on keyboard; the render test for
+# Playwright's JSON report: /about/ fails axe, the 320px reflow and history, / warns on keyboard; the render test for
 # /contact/ threw before writing its file; the edge spec passed.
 cat > "$res_dir/reports/playwright.json" <<'JSON'
 {"suites":[{"file":"page.spec.ts","specs":[
-  {"title":"/about/: smoke, axe, consent, CSP, keyboard and reflow","file":"page.spec.ts","tests":[{"status":"unexpected","results":[{"errors":[{"message":"Error: axe (WCAG 2.2 AA)\n\nexpect(received)"},{"message":"Error: 320px: page is 40px wider than the viewport"}]}]}]},
-  {"title":"/: smoke, axe, consent, CSP, keyboard and reflow","file":"page.spec.ts","tests":[{"status":"expected","results":[{"errors":[],"annotations":[{"type":"warning","description":"/: <a> shows no visible change when focused."}]}]}]}]},
+  {"title":"/about/: smoke, axe, consent, CSP, keyboard, reflow and history","file":"page.spec.ts","tests":[{"status":"unexpected","results":[{"errors":[{"message":"Error: axe (WCAG 2.2 AA)\n\nexpect(received)"},{"message":"Error: 320px: page is 40px wider than the viewport"},{"message":"Error: history: the page added 1 history entry without a click"}]}]}]},
+  {"title":"/: smoke, axe, consent, CSP, keyboard, reflow and history","file":"page.spec.ts","tests":[{"status":"expected","results":[{"errors":[],"annotations":[{"type":"warning","description":"/: <a> shows no visible change when focused."}]}]}]}]},
  {"file":"render.spec.ts","specs":[{"title":"/contact/: no-JS content, lazy first viewport, desktop and mobile parity","file":"render.spec.ts","tests":[{"status":"unexpected","results":[{"errors":[{"message":"Error: expect(received).toBe(expected)"}]}]}]}]},
  {"file":"edge.spec.ts","specs":[{"title":"security headers on the home page","file":"edge.spec.ts","tests":[{"status":"expected","results":[{"errors":[]}]}]}]}]}
 JSON
@@ -923,6 +923,7 @@ res_check "results: a browser rule, from the render spec" "c['rendered-content']
 res_check "results: live rules are not run in verify" "c['sitemap-live'].status==='not-run'"
 res_check "results: structure checks"         "c['structure:one-h1'].status==='pass'"
 res_check "results: each page check on its own" "c['browser:axe'].status==='fail' && c['browser:axe'].samples[0]==='/about/' && c['browser:reflow'].status==='fail' && c['browser:smoke'].status==='pass' && c['browser:csp'].status==='pass' && c['browser:edge'].status==='pass'"
+res_check "results: a history failure files under browser:history" "c['browser:history'].status==='fail' && c['browser:history'].category==='SEO' && c['browser:history'].level==='error' && c['browser:history'].samples[0]==='/about/' && c['browser:smoke'].status==='pass'"
 res_check "results: keyboard warnings"         "c['browser:keyboard'].status==='warn' && c['browser:keyboard'].samples[0]==='/'"
 res_check "results: a policy's check not in use" "c['browser:consent'].status==='not-run' && c['browser:posthog'].status==='not-run'"
 res_check "results: a render test that threw fails its rules" "['rendered-content','lazy-first-viewport','content-parity'].every(k=>c[k].status==='fail' && c[k].samples.includes('/contact/'))"

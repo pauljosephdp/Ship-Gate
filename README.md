@@ -64,7 +64,7 @@ Sites on `analytics-always-on` also follow `templates/caller/analytics/` and
    policy) or the PostHog scan (`posthog-hybrid` policy), the market scan (`market-cn` and `rtl-logical-css` policies), site
    checks after the build
 5. Against the served build: site browser checks, then the Playwright suite
-   (smoke + axe on desktop 1440 and Pixel 7, keyboard, reflow, CSP, consent,
+   (smoke + axe on desktop 1440 and Pixel 7, keyboard, reflow, history, CSP, consent,
    edge files, the no-JS ratio, lazy images in the first viewport, desktop and
    mobile parity, and `first-party-only`)
 6. Lighthouse CI (mobile)
@@ -80,7 +80,7 @@ and "mobile" are browser viewports (1440×900 and an emulated Pixel 7), not mach
 The Playwright suite uses every core of the runner (two workers on GitHub's
 2-vCPU runners). Each page is loaded once on desktop for one test that runs
 smoke, axe, consent, CSP and keyboard, then resizes to each `reflowWidths`
-width for the reflow check; 200% zoom gets its own test, since it needs a
+width for the reflow check and ends with the history check; 200% zoom gets its own test, since it needs a
 2× device scale. Every check is a soft assertion, so the test lists every
 failing check and width for the page.
 
@@ -357,6 +357,21 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   motion) and is measured after scrolling and letting animations finish. The
   narrow widths resize the already-loaded desktop page, so CSS breakpoints apply
   but script that reads the width only at load sees 1440.
+- **History** (desktop, v4.2.0): Back leaves the page. After the page has loaded,
+  scrolled at each width and been tabbed through, with no click, its session
+  history holds no entry it added itself (`history.pushState` or a hash change on
+  load or scroll). Google treats such entries as back button hijacking, a spam
+  policy under malicious practices enforced from 15 Jun 2026
+  ([Google](https://developers.google.com/search/blog/2026/04/back-button-hijacking)),
+  often from third-party ad or widget code. A redirect after load counts (the
+  starting length is kept per tab), and so do same-origin iframes. Add entries
+  only on a visitor's action, or use `history.replaceState`. No exemption.
+  `verify` blocks third-party requests, so this sees first-party code only;
+  website-audit's T-11 checks the live site with its third-party code. A page
+  that redirects itself mid-test can also fail other checks ("Execution context
+  was destroyed"), and when the redirect lands mid-scroll the `history:` line
+  may not appear: "Execution context was destroyed" on load usually means a
+  redirect after load.
 - **CSP:** a page that sends a Content-Security-Policy (enforced or Report-Only)
   must load with zero violations.
 - **Consent** (`consent-before-tracking` policy, desktop): before any
@@ -739,7 +754,7 @@ A failed run also carries it in the usual reports artifact.
 | `shipGate` | The Ship Gate version that ran (the newest `CHANGELOG.md` heading of the pinned tag) |
 | `stage` | `full`, `browser` or `scans` (the action's `stage` input) |
 | `siteUrl`, `commit`, `finishedAt` | The site, the commit checked, and when the run finished (ISO 8601, UTC) |
-| `checks[].id` | A discovery rule id (`canonical`, `img-dimensions`, …), `first-party-only`, `guard:<id>` (each guard `guards.sh` can raise: `guard:env-file`, `guard:node-pin`, `guard:direct-tags`, …), `structure:<check>` (`one-h1`, `heading-order`, `noopener`, `title`, `meta-description`, `title-unique`, `meta-description-unique`, `template-token`, `edge-files`, `llms-links`), `browser:<check>` for the page test's checks (`smoke`, `axe`, `consent`, `csp`, `keyboard`, `reflow`, `posthog`, `turnstile`; a failed assertion is sorted by its message) and the `edge` and `on-demand` specs, `lighthouse:<audit>` (a failed Lighthouse assertion), or `step:<name>` (each row of the summary table: `step:contract`, `step:guards`, `step:build`, `step:browser`, `step:lighthouse`, …) |
+| `checks[].id` | A discovery rule id (`canonical`, `img-dimensions`, …), `first-party-only`, `guard:<id>` (each guard `guards.sh` can raise: `guard:env-file`, `guard:node-pin`, `guard:direct-tags`, …), `structure:<check>` (`one-h1`, `heading-order`, `noopener`, `title`, `meta-description`, `title-unique`, `meta-description-unique`, `template-token`, `edge-files`, `llms-links`), `browser:<check>` for the page test's checks (`smoke`, `axe`, `consent`, `csp`, `keyboard`, `reflow`, `history`, `posthog`, `turnstile`; a failed assertion is sorted by its message) and the `edge` and `on-demand` specs, `lighthouse:<audit>` (a failed Lighthouse assertion), or `step:<name>` (each row of the summary table: `step:contract`, `step:guards`, `step:build`, `step:browser`, `step:lighthouse`, …) |
 | `checks[].category` | `SEO`, `AEO`, `GEO`, `AIO`, `perf`, `structure`, `a11y`, `security`, `policy`, `build` or `site` |
 | `checks[].level` | `error` (fails the gate) or `warn`; a rule a site turned off reports its default level with status `not-run` |
 | `checks[].status` | `pass`, `fail`, `warn`, or `not-run` (an earlier failure, the stage, a live-only rule, a rule turned off, a policy the site doesn't use, or a guard its standard checks). A render test that failed before recording its page (the page didn't load) reads `fail` for every rule it owns, never `pass` |
@@ -1135,7 +1150,7 @@ in the workflow.
 Any repo can call it. The job needs `permissions: { actions: read, issues: write }`:
 
 ```yaml
-- uses: pauljosephdp/Ship-Gate/ci-health@v4.1.0
+- uses: pauljosephdp/Ship-Gate/ci-health@v4.2.0
   with:
     workflow: ci.yml        # the workflow to watch
     timeout-minutes: 30     # its job timeout
@@ -1239,11 +1254,11 @@ duration bands are proposed to web-baseline, alongside adopting this release.
 
 Claude Code prompt for steps 1–9:
 
-> Adopt Ship Gate v4.1.0 in this repo following pauljosephdp/Ship-Gate README
+> Adopt Ship Gate v4.2.0 in this repo following pauljosephdp/Ship-Gate README
 > "Adopting it in a site repo", steps 1–9. Carry every existing CI check into
 > `checks` rather than dropping it. Run `npm run check` and `npm run build`
 > in the session, then the discovery scan, and fix or list every failure. Open a PR
-> titled "chore: adopt ship gate v4.1.0". Do not change deploy configuration
+> titled "chore: adopt ship gate v4.2.0". Do not change deploy configuration
 > or Cloudflare settings.
 
 Run the discovery scan in a Claude Code cloud session after `npm run build`, from the site directory,

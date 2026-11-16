@@ -127,15 +127,15 @@ for (const id of ['one-h1', 'heading-order', 'noopener', 'title', 'meta-descript
 }
 
 // The page test (page.spec.ts) checks several things per page: each failed assertion is sorted to its
-// check by its message, so smoke, axe, consent, CSP, keyboard and reflow each get a record.
+// check by its message, so smoke, axe, consent, CSP, keyboard, reflow and history each get a record.
 const pageTests = tests.filter((t) => t.file === 'page.spec.ts');
 const checkOf = (title, msg) => (/^axe/.test(msg) ? 'axe' : /^consent/.test(msg) ? 'consent'
-  : /Content-Security-Policy/.test(msg) ? 'csp' : /^keyboard/.test(msg) ? 'keyboard'
+  : /Content-Security-Policy/.test(msg) ? 'csp' : /^keyboard/.test(msg) ? 'keyboard' : /^history/.test(msg) ? 'history'
   : /reflows at 200%/.test(title) || /^\d+px: |wider than the viewport|past the right edge/.test(msg) ? 'reflow'
   : /PostHog/.test(title) ? 'posthog' : /Turnstile/.test(title) ? 'turnstile' : 'smoke');
 const PAGE_CHECKS = {
   smoke: ['structure', 'error', true], axe: ['a11y', 'error', true], keyboard: ['a11y', run?.keyboard === 'error' ? 'error' : 'warn', true],
-  reflow: ['a11y', 'error', true], csp: ['security', 'error', true],
+  reflow: ['a11y', 'error', true], csp: ['security', 'error', true], history: ['SEO', 'error', true],
   consent: ['policy', 'error', policies.includes('consent-before-tracking') && !(run?.exempt ?? []).includes('consent')],
   posthog: ['policy', 'error', !!run?.posthog], turnstile: ['policy', 'error', policies.includes('turnstile-forms') && (run?.formPages ?? []).length > 0],
 };

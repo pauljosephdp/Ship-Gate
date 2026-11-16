@@ -369,7 +369,9 @@ On every page in `e2ePages` (default: `pages`; `"all"` for every indexable page)
   `verify` blocks third-party requests, so this sees first-party code only;
   website-audit's T-11 checks the live site with its third-party code. A page
   that redirects itself mid-test can also fail other checks ("Execution context
-  was destroyed"); the `history:` line names the cause.
+  was destroyed"), and when the redirect lands mid-scroll the `history:` line
+  may not appear: "Execution context was destroyed" on load usually means a
+  redirect after load.
 - **CSP:** a page that sends a Content-Security-Policy (enforced or Report-Only)
   must load with zero violations.
 - **Consent** (`consent-before-tracking` policy, desktop): before any
